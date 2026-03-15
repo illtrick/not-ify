@@ -1,6 +1,7 @@
 services:
-  notify:
+  not-ify:
     build: .
+    hostname: not-ify
     ports:
       - "3000:3000"
     volumes:

@@ -74,14 +74,14 @@ async function lfmFetch(params, method = 'GET') {
     const body = new URLSearchParams(allParams).toString();
     res = await fetch(LFM_BASE, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'Notify/0.1.0' },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'Not-ify/1.0.0' },
       body,
       signal: AbortSignal.timeout(10000),
     });
   } else {
     const qs = new URLSearchParams(allParams).toString();
     res = await fetch(`${LFM_BASE}?${qs}`, {
-      headers: { 'User-Agent': 'Notify/0.1.0' },
+      headers: { 'User-Agent': 'Not-ify/1.0.0' },
       signal: AbortSignal.timeout(10000),
     });
   }
@@ -124,7 +124,7 @@ async function getSession(token) {
 
   const qs = new URLSearchParams(params).toString();
   const res = await fetch(`${LFM_BASE}?${qs}`, {
-    headers: { 'User-Agent': 'Notify/0.1.0' },
+    headers: { 'User-Agent': 'Not-ify/1.0.0' },
     signal: AbortSignal.timeout(10000),
   });
   const data = await res.json();

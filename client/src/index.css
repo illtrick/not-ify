@@ -10,6 +10,14 @@ body {
   color: #f5f5f5;
   min-height: 100vh;
   overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* Prevent text selection on interactive elements on mobile */
+button, [role="button"] {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 #root {

@@ -1,5 +1,5 @@
 const MB_BASE = 'https://musicbrainz.org/ws/2';
-const USER_AGENT = 'Notify/0.1.0 (personal-use)';
+const USER_AGENT = 'Not-ify/1.0.0 (personal-use)';
 
 // In-memory cache: key -> { data, expires }
 const cache = new Map();

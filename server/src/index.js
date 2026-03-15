@@ -21,7 +21,7 @@ app.use(express.static(path.join(__dirname, '../../client/dist')));
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', service: 'notify-server' });
+  res.json({ status: 'ok', service: 'not-ify-server' });
 });
 
 // Test RD token
@@ -46,7 +46,7 @@ async function fetchAndCacheCover(coverUrl, cachePath, missPath, res) {
   try {
     const coverRes = await fetch(coverUrl, {
       signal: AbortSignal.timeout(8000),
-      headers: { 'User-Agent': 'Notify/0.1.0 (personal-use)' },
+      headers: { 'User-Agent': 'Not-ify/1.0.0 (personal-use)' },
     });
     if (!coverRes.ok) {
       fs.writeFileSync(missPath, '');
@@ -198,7 +198,7 @@ app.get('/api/cover/rg/:rgid', async (req, res) => {
     try {
       const coverRes = await fetch(`https://coverartarchive.org/release-group/${rgid}/front-250`, {
         signal: AbortSignal.timeout(8000),
-        headers: { 'User-Agent': 'Notify/0.1.0 (personal-use)' },
+        headers: { 'User-Agent': 'Not-ify/1.0.0 (personal-use)' },
       });
       if (coverRes.ok) {
         const buf = Buffer.from(await coverRes.arrayBuffer());
@@ -223,7 +223,7 @@ app.get('/api/cover/rg/:rgid', async (req, res) => {
       try {
         const coverRes = await fetch(`https://coverartarchive.org/release/${mbid}/front-250`, {
           signal: AbortSignal.timeout(8000),
-          headers: { 'User-Agent': 'Notify/0.1.0 (personal-use)' },
+          headers: { 'User-Agent': 'Not-ify/1.0.0 (personal-use)' },
         });
         if (coverRes.ok) {
           const buf = Buffer.from(await coverRes.arrayBuffer());
@@ -305,5 +305,5 @@ app.get('*', (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Notify server running on port ${PORT}`);
+  console.log(`Not-ify server running on port ${PORT}`);
 });

@@ -125,6 +125,11 @@ const Icon = {
       <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.488.488 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
     </svg>
   ),
+  menu: (size = 16, color = 'currentColor') => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" style={{ display: 'block' }}>
+      <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
+    </svg>
+  ),
 };
 
 // ---------------------------------------------------------------------------
@@ -627,6 +632,16 @@ function App() {
   // Track download status (per-title tracking for status indicators)
   // Map of normalized "artist::title" → 'queued' | 'active' | 'done'
   const [dlTrackStatus, setDlTrackStatus] = useState(new Map());
+
+  // Mobile responsive
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const handler = (e) => { setIsMobile(e.matches); if (!e.matches) setSidebarOpen(false); };
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
 
   // Ref mirror of lastfmStatus so onTimeUpdate closure always sees latest
   const lastfmStatusRef = useRef(lastfmStatus);
@@ -1499,7 +1514,7 @@ function App() {
 
         {/* Loading skeletons */}
         {searching && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 20 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${isMobile ? 140 : 180}px, 1fr))`, gap: 20 }}>
             {Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} />)}
           </div>
         )}
@@ -1565,7 +1580,7 @@ function App() {
               {mbAlbums.length > 0 && (
                 <div style={{ marginBottom: 32 }}>
                   <SectionHeader>Albums</SectionHeader>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 20 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${isMobile ? 140 : 180}px, 1fr))`, gap: 20 }}>
                     {mbAlbums.map(album => (
                       <AlbumCard
                         key={album.id}
@@ -1753,7 +1768,7 @@ function App() {
             {restAlbums.length > 0 && (
               <div>
                 <SectionHeader>Albums</SectionHeader>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 20 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${isMobile ? 140 : 180}px, 1fr))`, gap: 20 }}>
                   {restAlbums.map(album => (
                     <AlbumCard
                       key={album.id}
@@ -1775,7 +1790,7 @@ function App() {
             {otherResults.length > 0 && (
               <div style={{ marginTop: 32 }}>
                 <SectionHeader>Other Results</SectionHeader>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 20 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${isMobile ? 140 : 180}px, 1fr))`, gap: 20 }}>
                   {otherResults.map(album => (
                     <AlbumCard
                       key={album.id}
@@ -1824,7 +1839,7 @@ function App() {
           <div style={{
             position: 'sticky', top: 0, zIndex: 10,
             background: stickyBg, backdropFilter: 'blur(12px)',
-            padding: '10px 28px', margin: '-28px -28px 0',
+            padding: isMobile ? '10px 12px' : '10px 28px', margin: isMobile ? '-12px -12px 0' : '-28px -28px 0',
             display: 'flex', alignItems: 'center', gap: 12,
             borderBottom: `1px solid rgba(255,255,255,0.06)`,
           }}>
@@ -1850,19 +1865,19 @@ function App() {
         )}
 
         {/* Gradient header */}
-        <div ref={albumHeaderRef} style={{ margin: '-28px -28px 0', padding: '20px 28px 32px', background: gradBg }}>
+        <div ref={albumHeaderRef} style={{ margin: isMobile ? '-12px -12px 0' : '-28px -28px 0', padding: isMobile ? '12px 12px 20px' : '20px 28px 32px', background: gradBg }}>
           <button
             onClick={() => setView(prevViewRef.current === 'album' ? 'search' : (prevViewRef.current || 'search'))}
-            style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.7)', fontSize: 14, cursor: 'pointer', padding: '0 0 20px', display: 'flex', alignItems: 'center', gap: 4 }}
+            style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.7)', fontSize: 14, cursor: 'pointer', padding: '0 0 16px', display: 'flex', alignItems: 'center', gap: 4 }}
           >
             {Icon.back(16, 'rgba(255,255,255,0.7)')} Back
           </button>
 
-          <div style={{ display: 'flex', gap: 24, alignItems: 'flex-end' }}>
-            <AlbumArt src={coverArt} size={200} radius={6} style={{ boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }} artist={artist} album={album} />
+          <div style={{ display: 'flex', gap: isMobile ? 14 : 24, alignItems: 'flex-end' }}>
+            <AlbumArt src={coverArt} size={isMobile ? 120 : 200} radius={6} style={{ boxShadow: '0 8px 32px rgba(0,0,0,0.5)', flexShrink: 0 }} artist={artist} album={album} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>Album</div>
-              <h1 style={{ fontSize: 32, fontWeight: 800, color: COLORS.textPrimary, margin: '0 0 8px', lineHeight: 1.15 }}>{album}</h1>
+              <h1 style={{ fontSize: isMobile ? 20 : 32, fontWeight: 800, color: COLORS.textPrimary, margin: '0 0 8px', lineHeight: 1.15 }}>{album}</h1>
               <div style={{ fontSize: 15, color: 'rgba(255,255,255,0.7)', marginBottom: 8 }}>
                 <span
                   style={{ cursor: 'pointer', transition: 'color 0.15s' }}
@@ -2068,22 +2083,22 @@ function App() {
     return (
       <div>
         {/* Artist header */}
-        <div style={{ margin: '-28px -28px 0', padding: '40px 28px 32px', background: `linear-gradient(to bottom, ${COLORS.surface} 0%, ${COLORS.bg} 100%)`, display: 'flex', alignItems: 'flex-end', gap: 24 }}>
+        <div style={{ margin: isMobile ? '-12px -12px 0' : '-28px -28px 0', padding: isMobile ? '12px 12px 20px' : '40px 28px 32px', background: `linear-gradient(to bottom, ${COLORS.surface} 0%, ${COLORS.bg} 100%)`, display: 'flex', alignItems: 'flex-end', gap: isMobile ? 14 : 24 }}>
           <button
             onClick={() => setView(prevViewRef.current === 'artist' ? 'search' : (prevViewRef.current || 'search'))}
-            style={{ position: 'absolute', top: 20, left: 28, background: 'none', border: 'none', color: 'rgba(255,255,255,0.7)', fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+            style={{ position: 'absolute', top: isMobile ? 8 : 20, left: isMobile ? 12 : 28, background: 'none', border: 'none', color: 'rgba(255,255,255,0.7)', fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
           >
             {Icon.back(16, 'rgba(255,255,255,0.7)')} Back
           </button>
           <img
             src={imageUrl}
             alt={name}
-            style={{ width: 200, height: 200, borderRadius: '50%', objectFit: 'cover', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}
+            style={{ width: isMobile ? 100 : 200, height: isMobile ? 100 : 200, borderRadius: '50%', objectFit: 'cover', boxShadow: '0 8px 32px rgba(0,0,0,0.5)', flexShrink: 0 }}
             onError={e => { e.target.style.display = 'none'; }}
           />
-          <div>
+          <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 12, color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>{typeLabel}</div>
-            <h1 style={{ fontSize: 48, fontWeight: 800, color: COLORS.textPrimary, margin: 0, lineHeight: 1.1 }}>{name}</h1>
+            <h1 style={{ fontSize: isMobile ? 24 : 48, fontWeight: 800, color: COLORS.textPrimary, margin: 0, lineHeight: 1.1 }}>{name}</h1>
           </div>
         </div>
 
@@ -2091,7 +2106,7 @@ function App() {
         {artistReleases.length > 0 && (
           <div style={{ marginTop: 32 }}>
             <h2 style={{ fontSize: 22, fontWeight: 700, color: COLORS.textPrimary, marginBottom: 16 }}>Discography</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 20 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${isMobile ? 140 : 180}px, 1fr))`, gap: 20 }}>
               {artistReleases.map(rel => {
                 const album = {
                   id: `mb:${rel.rgid || rel.mbid}`,
@@ -2221,7 +2236,7 @@ function App() {
             ) : lastfmAuthStep === 1 ? (
               <div>
                 <div style={{ fontSize: 13, color: COLORS.textSecondary, marginBottom: 12 }}>
-                  Step 2: Authorize Notify on Last.fm, then click the button below.
+                  Step 2: Authorize Not-ify on Last.fm, then click the button below.
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <a href={lastfmAuthUrl} target="_blank" rel="noopener noreferrer" style={{
@@ -2521,14 +2536,14 @@ function App() {
 
     return (
       <footer style={{
-        height: 80, minHeight: 80, background: COLORS.surface,
+        height: isMobile ? 64 : 80, minHeight: isMobile ? 64 : 80, background: COLORS.surface,
         borderTop: `1px solid ${COLORS.border}`,
-        display: 'flex', alignItems: 'center', padding: '0 16px', gap: 12,
+        display: 'flex', alignItems: 'center', padding: isMobile ? '0 8px' : '0 16px', gap: isMobile ? 8 : 12,
       }} role="region" aria-label="Music player">
 
         {/* Album art + info */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: 220, minWidth: 0, flexShrink: 0 }}>
-          <AlbumArt src={currentCoverArt} size={52} radius={4} artist={currentAlbumInfo?.artist} album={currentAlbumInfo?.album} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 12, width: isMobile ? undefined : 220, minWidth: 0, flexShrink: isMobile ? 1 : 0, flex: isMobile ? 1 : undefined, overflow: 'hidden' }}>
+          <AlbumArt src={currentCoverArt} size={isMobile ? 40 : 52} radius={4} artist={currentAlbumInfo?.artist} album={currentAlbumInfo?.album} />
           <div
             style={{ minWidth: 0, cursor: canGoToAlbum ? 'pointer' : 'default' }}
             onClick={canGoToAlbum ? goToCurrentAlbum : undefined}
@@ -2553,24 +2568,24 @@ function App() {
         </div>
 
         {/* Controls + seek */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ flex: isMobile ? undefined : 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: isMobile ? 0 : 6, flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 4 : 12 }}>
             <button onClick={playPrev} disabled={!has} aria-label="Previous"
-              style={{ width: 36, height: 36, borderRadius: '50%', border: 'none', background: 'transparent', cursor: has ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {Icon.skipPrev(18, has ? COLORS.textPrimary : COLORS.border)}
+              style={{ width: isMobile ? 32 : 36, height: isMobile ? 32 : 36, borderRadius: '50%', border: 'none', background: 'transparent', cursor: has ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {Icon.skipPrev(isMobile ? 16 : 18, has ? COLORS.textPrimary : COLORS.border)}
             </button>
             <button onClick={togglePlay} disabled={!has} aria-label={isPlaying ? 'Pause' : 'Play'}
-              style={{ width: 44, height: 44, borderRadius: '50%', border: 'none', background: has ? COLORS.accent : COLORS.hover, cursor: has ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              {isPlaying ? Icon.pause(18, has ? '#fff' : COLORS.textSecondary) : Icon.play(18, has ? '#fff' : COLORS.textSecondary)}
+              style={{ width: isMobile ? 36 : 44, height: isMobile ? 36 : 44, borderRadius: '50%', border: 'none', background: has ? COLORS.accent : COLORS.hover, cursor: has ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              {isPlaying ? Icon.pause(isMobile ? 16 : 18, has ? '#fff' : COLORS.textSecondary) : Icon.play(isMobile ? 16 : 18, has ? '#fff' : COLORS.textSecondary)}
             </button>
             <button onClick={playNext} disabled={!has} aria-label="Next"
-              style={{ width: 36, height: 36, borderRadius: '50%', border: 'none', background: 'transparent', cursor: has ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {Icon.skipNext(18, has ? COLORS.textPrimary : COLORS.border)}
+              style={{ width: isMobile ? 32 : 36, height: isMobile ? 32 : 36, borderRadius: '50%', border: 'none', background: 'transparent', cursor: has ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {Icon.skipNext(isMobile ? 16 : 18, has ? COLORS.textPrimary : COLORS.border)}
             </button>
           </div>
 
-          {/* Seek */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', maxWidth: 480 }}>
+          {/* Seek — hidden on mobile */}
+          {!isMobile && <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', maxWidth: 480 }}>
             <span style={{ fontSize: 11, color: COLORS.textSecondary, flexShrink: 0 }}>{formatTime(progress)}</span>
             <div
               style={{ flex: 1, height: 12, cursor: has ? 'pointer' : 'default', position: 'relative', display: 'flex', alignItems: 'center' }}
@@ -2590,11 +2605,11 @@ function App() {
               {has && <div className="seek-thumb" style={{ position: 'absolute', left: `calc(${pct}% - 6px)`, width: 12, height: 12, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 4px rgba(0,0,0,0.4)', opacity: 0, transition: 'opacity 0.15s', pointerEvents: 'none' }} />}
             </div>
             <span style={{ fontSize: 11, color: COLORS.textSecondary, flexShrink: 0 }}>{formatTime(duration)}</span>
-          </div>
+          </div>}
         </div>
 
-        {/* Volume + Queue toggle */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        {/* Volume + Queue toggle — hidden on mobile */}
+        {!isMobile && <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
           <button
             onClick={() => setVolume(v => v === 0 ? 0.7 : 0)}
             style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
@@ -2635,7 +2650,7 @@ function App() {
               }}>{queue.length}</span>
             )}
           </button>
-        </div>
+        </div>}
       </footer>
     );
   }
@@ -2647,14 +2662,38 @@ function App() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: COLORS.bg, color: COLORS.textPrimary, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', overflow: 'hidden' }}>
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+
+      {/* Mobile header bar */}
+      {isMobile && (
+        <div style={{ height: 48, minHeight: 48, background: COLORS.surface, borderBottom: `1px solid ${COLORS.border}`, display: 'flex', alignItems: 'center', padding: '0 12px', gap: 12 }}>
+          <button onClick={() => setSidebarOpen(v => !v)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center' }}>
+            {sidebarOpen ? Icon.close(20, COLORS.textPrimary) : Icon.menu(20, COLORS.textPrimary)}
+          </button>
+          <div style={{ fontSize: 18, fontWeight: 800, color: COLORS.accent, letterSpacing: '-0.5px' }}>Not-ify</div>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
+
+        {/* Sidebar overlay backdrop on mobile */}
+        {isMobile && sidebarOpen && (
+          <div onClick={() => setSidebarOpen(false)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 20 }} />
+        )}
 
         {/* Sidebar */}
-        <aside style={{ width: 280, minWidth: 280, background: COLORS.surface, borderRight: `1px solid ${COLORS.border}`, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <aside style={{
+          width: 280, minWidth: 280, background: COLORS.surface,
+          borderRight: `1px solid ${COLORS.border}`, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          ...(isMobile ? {
+            position: 'absolute', top: 0, bottom: 0, left: 0, zIndex: 25,
+            transform: sidebarOpen ? 'translateX(0)' : 'translateX(-100%)',
+            transition: 'transform 0.2s ease',
+          } : {}),
+        }}>
           {/* Top nav */}
           <div style={{ padding: '16px 12px 8px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <div style={{ fontSize: 22, fontWeight: 800, color: COLORS.accent, letterSpacing: '-0.5px' }}>Notify</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: COLORS.accent, letterSpacing: '-0.5px' }}>Not-ify</div>
               <button onClick={() => setShowSettings(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, borderRadius: 4, display: 'flex', alignItems: 'center', opacity: 0.6 }}
                 onMouseEnter={e => e.currentTarget.style.opacity = '1'} onMouseLeave={e => e.currentTarget.style.opacity = '0.6'}
                 title="Settings">
@@ -2669,7 +2708,7 @@ function App() {
                 color: view === 'search' ? COLORS.textPrimary : COLORS.textSecondary,
                 fontWeight: view === 'search' ? 600 : 400,
               }}
-              onClick={() => setView('search')}
+              onClick={() => { setView('search'); setSidebarOpen(false); }}
               role="button" tabIndex={0}
             >
               <span style={{ marginRight: 10 }}>{Icon.search(16, 'currentColor')}</span>
@@ -2753,7 +2792,7 @@ function App() {
                 return (
                   <div
                     key={`${artist}::${album}`}
-                    onClick={() => openAlbumFromLibrary(artist, album, tracks, coverArt, mbid)}
+                    onClick={() => { openAlbumFromLibrary(artist, album, tracks, coverArt, mbid); setSidebarOpen(false); }}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 10, padding: '6px 6px',
                       borderRadius: 6, cursor: 'pointer',
@@ -2805,7 +2844,7 @@ function App() {
 
         {/* Main content */}
         <main style={{ flex: 1, position: 'relative', overflow: 'hidden', display: 'flex' }}>
-          <div ref={mainContentRef} style={{ flex: 1, overflowY: 'auto', padding: 28 }}>
+          <div ref={mainContentRef} style={{ flex: 1, overflowY: 'auto', padding: isMobile ? 12 : 28 }}>
             {view === 'search' && renderSearch()}
             {view === 'album' && renderAlbum()}
             {view === 'artist' && renderArtist()}
