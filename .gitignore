@@ -1,0 +1,7 @@
+node_modules/
+client/dist/
+music/
+config/settings.json
+config/lastfm-queue.json
+config/covers/
+*.log
