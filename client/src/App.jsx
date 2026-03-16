@@ -144,6 +144,26 @@ function formatTime(s) {
 
 function buildTrackPath(id) { return `/api/stream/${id}`; }
 
+// Context menu props: right-click on desktop + long-press on mobile
+function contextMenuProps(callback, ms = 500) {
+  let timer = null;
+  let moved = false;
+  return {
+    onContextMenu: (e) => callback(e),
+    onTouchStart: (e) => {
+      moved = false;
+      const touch = e.touches[0];
+      timer = setTimeout(() => {
+        if (!moved) {
+          callback({ preventDefault: () => {}, stopPropagation: () => {}, clientX: touch.clientX, clientY: touch.clientY });
+        }
+      }, ms);
+    },
+    onTouchMove: () => { moved = true; if (timer) { clearTimeout(timer); timer = null; } },
+    onTouchEnd: () => { if (timer) { clearTimeout(timer); timer = null; } },
+  };
+}
+
 function debounce(fn, ms) {
   let timer;
   return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
@@ -583,6 +603,7 @@ function App() {
   const [playlistIdx, setPlaylistIdx] = useState(0);
   const [currentCoverArt, setCurrentCoverArt] = useState(null);
   const audioRef = useRef(null);
+  const recentlyPlayedAddedRef = useRef(false); // gate: only add to recently played once per track
 
   // Hover state
   const [hoveredTrack, setHoveredTrack] = useState(null);
@@ -808,12 +829,37 @@ function App() {
   }
 
   // Build library as flat album list for card grid
+  // Merges VA/compilation albums: if an album name appears under 3+ different artists
+  // with shared coverArt, merge them into one "Various Artists" entry
   function libraryAlbums() {
     const grouped = groupLibrary(library);
+    // First pass: collect all entries keyed by album name
+    const byAlbumName = {};
+    for (const [artist, albumMap] of Object.entries(grouped)) {
+      for (const [albumName, data] of Object.entries(albumMap)) {
+        if (!byAlbumName[albumName]) byAlbumName[albumName] = [];
+        byAlbumName[albumName].push({ artist, ...data });
+      }
+    }
+    // Second pass: detect VA albums and merge
     const albums = [];
+    const mergedAlbumNames = new Set();
+    for (const [albumName, entries] of Object.entries(byAlbumName)) {
+      if (entries.length >= 3) {
+        // 3+ different artists with the same album name — treat as VA
+        const allTracks = entries.flatMap(e => e.tracks);
+        const coverArt = entries.find(e => e.coverArt)?.coverArt || null;
+        const mbid = entries.find(e => e.mbid)?.mbid || null;
+        albums.push({ artist: 'Various Artists', album: albumName, tracks: allTracks, coverArt, mbid, trackCount: allTracks.length });
+        mergedAlbumNames.add(albumName);
+      }
+    }
+    // Add non-merged albums normally
     for (const [artist, albumMap] of Object.entries(grouped)) {
       for (const [albumName, { tracks, coverArt, mbid }] of Object.entries(albumMap)) {
-        albums.push({ artist, album: albumName, tracks, coverArt, mbid, trackCount: tracks.length });
+        if (!mergedAlbumNames.has(albumName)) {
+          albums.push({ artist, album: albumName, tracks, coverArt, mbid, trackCount: tracks.length });
+        }
       }
     }
     return albums;
@@ -832,16 +878,21 @@ function App() {
 
   // Track download status for a given artist + track title
   // Returns: 'library' | 'active' | 'queued' | null
-  function getTrackDlStatus(artist, trackTitle) {
-    // Check if this specific track is in the library
-    const norm = (artist + '::' + trackTitle).toLowerCase();
-    // Check library: match any track with this artist + title
-    const inLib = library.some(t =>
-      t.artist?.toLowerCase() === artist?.toLowerCase() &&
-      t.title?.toLowerCase() === trackTitle?.toLowerCase()
-    );
+  // For VA albums, trackArtist is the per-track artist (e.g., "Apparat") while
+  // artist may be album-level ("Various Artists")
+  function getTrackDlStatus(artist, trackTitle, trackArtist) {
+    // Check if this specific track is in the library — match either album or track artist
+    const titleLower = trackTitle?.toLowerCase();
+    const artistLower = artist?.toLowerCase();
+    const trackArtistLower = trackArtist?.toLowerCase();
+    const inLib = library.some(t => {
+      if (t.title?.toLowerCase() !== titleLower) return false;
+      const tArtist = t.artist?.toLowerCase();
+      return tArtist === artistLower || (trackArtistLower && tArtist === trackArtistLower);
+    });
     if (inLib) return 'library';
-    // Check active downloads
+    // Check active downloads — try both artist keys
+    const norm = (artist + '::' + trackTitle).toLowerCase();
     const dlStatus = dlTrackStatus.get(norm);
     if (dlStatus) return dlStatus; // 'active' or 'queued'
     return null;
@@ -863,7 +914,19 @@ function App() {
       const f = libraryFilter.toLowerCase();
       albums = albums.filter(a => a.album.toLowerCase().includes(f) || a.artist.toLowerCase().includes(f));
     }
-    if (librarySortBy === 'alpha') {
+    if (librarySortBy === 'recents') {
+      // Sort by most recently played (from recentlyPlayed state)
+      const recencyMap = new Map();
+      recentlyPlayed.forEach(r => {
+        const key = (r.artist + '::' + r.album).toLowerCase();
+        if (!recencyMap.has(key)) recencyMap.set(key, r.playedAt || 0);
+      });
+      albums.sort((a, b) => {
+        const aTime = recencyMap.get((a.artist + '::' + a.album).toLowerCase()) || 0;
+        const bTime = recencyMap.get((b.artist + '::' + b.album).toLowerCase()) || 0;
+        return bTime - aTime;
+      });
+    } else if (librarySortBy === 'alpha') {
       albums.sort((a, b) => a.album.localeCompare(b.album));
     } else if (librarySortBy === 'artist') {
       albums.sort((a, b) => a.artist.localeCompare(b.artist) || a.album.localeCompare(b.album));
@@ -952,17 +1015,11 @@ function App() {
       audioRef.current.src = track.path || buildTrackPath(track.id);
       audioRef.current.play().catch(() => {});
     }
-    // Record recently played album
+    // Reset recently-played gate — will be added after 2s of playback in onTimeUpdate
+    recentlyPlayedAddedRef.current = false;
+
     const artist = track.artist || albumInfo?.artist || '';
     const album = track.album || albumInfo?.album || '';
-    if (artist && album) {
-      addToRecentlyPlayed({
-        artist, album,
-        coverArt: track.coverArt || albumInfo?.coverArt || null,
-        mbid: albumInfo?.mbid || null,
-        rgid: albumInfo?.rgid || null,
-      });
-    }
 
     // Last.fm: now playing + reset scrobble state
     scrobbleRef.current = { artist, track: track.title, album, startTime: Math.floor(Date.now() / 1000), duration: 0, scrobbled: false };
@@ -2054,19 +2111,22 @@ function App() {
                   onClick={() => playTrack(track, pl, idx, { artist, album, coverArt })}
                   onMouseEnter={() => setHoveredTrack(track.id)}
                   onMouseLeave={() => setHoveredTrack(null)}
-                  onContextMenu={e => showContextMenu(e, [
+                  {...contextMenuProps(e => showContextMenu(e, [
                     { label: 'Play', action: () => playTrack(track, pl, idx, { artist, album, coverArt }) },
                     { label: 'Play Next', action: () => { setQueue(prev => [track, ...prev]); } },
                     { label: 'Add to Queue', action: () => addToQueue(track) },
                     { divider: true },
                     { label: 'Remove Track', danger: true, action: () => removeTrackFromLibrary(track.id) },
-                  ])}
+                  ]))}
                 >
                   <span style={{ width: isMobile ? 24 : 32, textAlign: 'right', marginRight: isMobile ? 10 : 16, fontSize: 13, color: isActive ? COLORS.accent : isHovered ? COLORS.accent : COLORS.textSecondary, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
                     {isActive ? Icon.music(14, COLORS.accent) : isHovered ? Icon.play(12, COLORS.accent) : idx + 1}
                   </span>
                   <span style={{ flex: 1, fontSize: 14, color: isActive ? COLORS.accent : COLORS.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {track.title}
+                    {artist === 'Various Artists' && track.artist && (
+                      <span style={{ fontSize: 12, color: COLORS.textSecondary, marginLeft: 6 }}>{track.artist}</span>
+                    )}
                   </span>
                   {/* Add to queue button (hover — desktop only) */}
                   {!isMobile && <button
@@ -2121,6 +2181,11 @@ function App() {
                     const remaining = mbTracks.slice(i);
                     playAllFromYouTube(remaining, artist, album, coverArt);
                   }}
+                  {...contextMenuProps(e => showContextMenu(e, [
+                    { label: 'Play', action: () => { const remaining = mbTracks.slice(i); playAllFromYouTube(remaining, artist, album, coverArt); } },
+                    { label: 'Play Next', action: () => { setQueue(prev => [{ id: `yt-pending-${t.position}`, title: t.title, artist: t.artist || artist, trackArtist: t.artist, album, coverArt, isYtPreview: true, ytPending: true }, ...prev]); } },
+                    { label: 'Add to Queue', action: () => { setQueue(prev => [...prev, { id: `yt-pending-${t.position}`, title: t.title, artist: t.artist || artist, trackArtist: t.artist, album, coverArt, isYtPreview: true, ytPending: true }]); } },
+                  ]))}
                 >
                   <span style={{ width: isMobile ? 24 : 32, textAlign: 'right', marginRight: isMobile ? 10 : 16, flexShrink: 0, fontSize: 13, color: isActive ? COLORS.accent : isPending ? COLORS.accent : isHovered ? COLORS.accent : COLORS.textSecondary, cursor: ytSearching ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
                     {isPending ? <span className="spin-slow">{Icon.music(14, COLORS.accent)}</span> : isActive ? Icon.music(14, COLORS.accent) : isHovered ? Icon.play(12, COLORS.accent) : t.position}
@@ -2145,7 +2210,7 @@ function App() {
                       )}
                     </span>
                   </span>
-                  <TrackStatusIcon status={getTrackDlStatus(artist, t.title)} />
+                  <TrackStatusIcon status={getTrackDlStatus(artist, t.title, t.artist)} />
                   {!isMobile && t.lengthMs && (
                     <span style={{ width: 50, textAlign: 'right', flexShrink: 0, fontSize: 13, color: COLORS.textSecondary, opacity: 0.5 }}>{formatTime(t.lengthMs / 1000)}</span>
                   )}
@@ -2847,6 +2912,30 @@ function App() {
     const albums = sidebarAlbums();
     return (
       <div style={{ padding: 12 }}>
+        {/* Recently Played — horizontal scroll */}
+        {recentlyPlayed.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Recently Played</div>
+            <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 4, WebkitOverflowScrolling: 'touch' }}>
+              {recentlyPlayed.slice(0, 8).map((r, i) => (
+                <div key={`mrp-${i}`} style={{ flexShrink: 0, width: 100, cursor: 'pointer' }}
+                  onClick={() => {
+                    const libMatch = libraryAlbums().find(la =>
+                      la.artist.toLowerCase() === r.artist.toLowerCase() &&
+                      la.album.toLowerCase() === r.album.toLowerCase()
+                    );
+                    if (libMatch) openAlbumFromLibrary(libMatch.artist, libMatch.album, libMatch.tracks, libMatch.coverArt, libMatch.mbid);
+                    else handleSearch(null, `${r.artist} ${r.album}`);
+                  }}>
+                  <AlbumArt src={r.coverArt} size={100} radius={6} artist={r.artist} album={r.album} />
+                  <div style={{ fontSize: 11, fontWeight: 600, color: COLORS.textPrimary, marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.album}</div>
+                  <div style={{ fontSize: 10, color: COLORS.textSecondary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.artist}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -2894,10 +2983,10 @@ function App() {
             <div key={`${artist}::${album}`}
               onClick={() => { openAlbumFromLibrary(artist, album, tracks, coverArt, mbid); }}
               style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 8px', borderRadius: 8, cursor: 'pointer', minHeight: 56 }}
-              onContextMenu={e => showContextMenu(e, [
+              {...contextMenuProps(e => showContextMenu(e, [
                 { label: 'Play', action: () => playTrack(tracks[0], tracks, 0, { artist, album, coverArt }) },
                 { label: 'Add to Queue', action: () => tracks.forEach(t => addToQueue(t)) },
-              ])}
+              ]))}
             >
               <AlbumArt src={coverArt} size={52} radius={4} artist={artist} album={album} />
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -2996,6 +3085,41 @@ function App() {
               </div>
             </div>
 
+            {/* Recently Played section — sticky between Search and Library */}
+            {recentlyPlayed.length > 0 && (
+              <div style={{ borderTop: `1px solid ${COLORS.border}`, marginTop: 4, padding: '8px 6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 6px 6px' }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 }}>Recently Played</span>
+                </div>
+                <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+                  {recentlyPlayed.slice(0, 8).map((r, i) => {
+                    const isPlaying_ = currentAlbumInfo?.artist === r.artist && currentAlbumInfo?.album === r.album;
+                    return (
+                      <div key={`rp-${i}`}
+                        onClick={() => {
+                          const libMatch = libraryAlbums().find(la =>
+                            la.artist.toLowerCase() === r.artist.toLowerCase() &&
+                            la.album.toLowerCase() === r.album.toLowerCase()
+                          );
+                          if (libMatch) openAlbumFromLibrary(libMatch.artist, libMatch.album, libMatch.tracks, libMatch.coverArt, libMatch.mbid);
+                          else handleSearch(null, `${r.artist} ${r.album}`);
+                        }}
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 6px', borderRadius: 4, cursor: 'pointer' }}
+                        onMouseEnter={e => e.currentTarget.style.background = COLORS.hover}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                      >
+                        <AlbumArt src={r.coverArt} size={36} radius={3} artist={r.artist} album={r.album} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: isPlaying_ ? COLORS.accent : COLORS.textPrimary }}>{r.album}</div>
+                          <div style={{ fontSize: 11, color: COLORS.textSecondary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.artist}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Library section */}
             <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', borderTop: `1px solid ${COLORS.border}`, marginTop: 4 }}>
               <div style={{ padding: '12px 12px 0' }}>
@@ -3040,7 +3164,7 @@ function App() {
                       style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 6px', borderRadius: 6, cursor: 'pointer', background: isActive ? COLORS.hover : 'transparent' }}
                       onMouseEnter={e => e.currentTarget.style.background = COLORS.hover}
                       onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
-                      onContextMenu={e => showContextMenu(e, [
+                      {...contextMenuProps(e => showContextMenu(e, [
                         { label: 'Play', action: () => playTrack(tracks[0], tracks, 0, { artist, album, coverArt }) },
                         { label: 'Add to Queue', action: () => tracks.forEach(t => addToQueue(t)) },
                         { label: 'Go to Artist', action: async () => {
@@ -3049,7 +3173,7 @@ function App() {
                             if (a?.mbid) openArtistPage(a.mbid, a.name, a.type); } catch {} }},
                         { divider: true },
                         { label: 'Remove from Library', danger: true, action: () => removeAlbumFromLibrary(artist, album) },
-                      ])}>
+                      ]))}>
                       <AlbumArt src={coverArt} size={48} radius={4} artist={artist} album={album} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: isPlaying_ ? COLORS.accent : COLORS.textPrimary }}>{album}</div>
@@ -3098,6 +3222,17 @@ function App() {
           const ct = audioRef.current.currentTime;
           const dur = audioRef.current.duration || 0;
           setProgress(ct); setDuration(dur);
+          // Add to recently played after 2 seconds of playback
+          if (!recentlyPlayedAddedRef.current && ct >= 2 && currentAlbumInfo) {
+            recentlyPlayedAddedRef.current = true;
+            addToRecentlyPlayed({
+              artist: currentAlbumInfo.artist || currentTrack?.artist || '',
+              album: currentAlbumInfo.album || currentTrack?.album || '',
+              coverArt: currentAlbumInfo.coverArt || currentTrack?.coverArt || null,
+              mbid: currentAlbumInfo.mbid || null,
+              rgid: currentAlbumInfo.rgid || null,
+            });
+          }
           // Last.fm scrobble check
           const sr = scrobbleRef.current;
           if (sr.duration === 0 && dur > 0) sr.duration = dur;
