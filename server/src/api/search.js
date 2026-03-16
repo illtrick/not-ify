@@ -493,10 +493,22 @@ router.get('/search', async (req, res) => {
     const seenMbids = new Set(albums.map(a => a.mbid).filter(Boolean));
 
     // Add MB-only albums (no torrent source) that aren't already in torrent results
+    // Filter by relevance to prevent irrelevant MB results from cluttering search
+    // (e.g. "Flaming Lips" appearing for "Molly Lewis On The Lips" because "lips" matches)
+    const STOP_WORDS = new Set(['the','and','or','of','in','on','at','to','for','a','an','is','it','my','me','no','by','so','do','up','as','if','we','he','vol','ep']);
+    const qRelevanceWords = q.toLowerCase().split(/\s+/).filter(w => w.length > 2 && !STOP_WORDS.has(w));
     const mbOnlyAlbums = allMbReleases
       .filter(rel => {
         if (rel.rgid && seenRgids.has(rel.rgid)) return false;
         if (rel.mbid && seenMbids.has(rel.mbid)) return false;
+        // Relevance check: enough significant query words must appear in the MB result
+        // This prevents "Flaming Lips" for "Molly Lewis" and "Yom" for "Ronin Gryn"
+        if (qRelevanceWords.length >= 2) {
+          const relText = `${rel.artist} ${rel.album}`.toLowerCase();
+          const matchCount = qRelevanceWords.filter(w => relText.includes(w)).length;
+          // Require at least 40% of significant query words to match
+          if (matchCount < Math.max(1, Math.ceil(qRelevanceWords.length * 0.4))) return false;
+        }
         return true;
       })
       .slice(0, 15)

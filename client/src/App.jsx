@@ -1990,25 +1990,6 @@ function App() {
                 <div style={{ fontSize: 12, color: COLORS.textSecondary, opacity: 0.6, marginTop: 4 }}>No sources available</div>
               )}
 
-              {/* Download via YouTube button — for albums with MB tracks but no torrent sources */}
-              {fromSearch && sources.length === 0 && mbTracks.length > 0 && !isInLibrary(artist, album) && (
-                <button
-                  onClick={() => downloadAlbumViaYouTube(selectedAlbum, mbTracks)}
-                  disabled={!!downloading}
-                  style={{
-                    padding: '8px 20px', borderRadius: 20,
-                    background: downloading ? COLORS.hover : 'transparent',
-                    border: `1px solid ${COLORS.textSecondary}`,
-                    color: downloading ? COLORS.textSecondary : COLORS.textPrimary,
-                    fontSize: 13, fontWeight: 600, cursor: downloading ? 'not-allowed' : 'pointer',
-                    display: 'flex', alignItems: 'center', gap: 6, marginTop: 8,
-                  }}
-                >
-                  {Icon.plus(14, downloading ? COLORS.textSecondary : COLORS.textPrimary)}
-                  Download via YouTube
-                </button>
-              )}
-
               {/* Play/Pause button — inline with album info */}
               {(isLib ? pl.length > 0 : mbTracks.length > 0) && (() => {
                 const isThisAlbumPlaying = isPlaying && currentAlbumInfo?.artist === artist && currentAlbumInfo?.album === album;
