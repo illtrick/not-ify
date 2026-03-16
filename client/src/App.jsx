@@ -919,10 +919,16 @@ function App() {
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
       const data = await res.json();
-      setSearchAlbums(data.albums || []);
+      // Merge torrent-matched albums and MB-only albums into one unified list
+      // Torrent albums come first (they have download sources), MB albums fill in below
+      // This ensures MB-only albums (like "Dark" soundtrack) appear as first-class results
+      // with proper Top Result card, not buried below YouTube videos
+      const torrentAlbums = data.albums || [];
+      const mbOnly = (data.mbAlbums || []).map(a => ({ ...a, sources: a.sources || [] }));
+      setSearchAlbums([...torrentAlbums, ...mbOnly]);
       setSearchArtistResults(data.artists || []);
       setStreamingResults((data.streamingResults || []).filter(r => r.duration));
-      setMbAlbums(data.mbAlbums || []);
+      setMbAlbums([]); // No longer needed separately — merged into searchAlbums
       setOtherResults(data.otherResults || []);
     } catch (err) {
       console.error('Search failed:', err);
@@ -1490,23 +1496,28 @@ function App() {
       la.artist.toLowerCase() === album.artist.toLowerCase() &&
       la.album.toLowerCase() === album.album.toLowerCase()
     );
-    if (libMatch) {
-      // Open as library album with playable tracks, but keep search sources
-      const pl = libMatch.tracks.map(t => ({ ...t, path: buildTrackPath(t.id), coverArt: libMatch.coverArt }));
-      setSelectedAlbum({
-        artist: libMatch.artist, album: libMatch.album, year: album.year,
-        tracks: pl, coverArt: libMatch.coverArt || album.coverArt,
-        mbid: album.mbid || libMatch.mbid, sources: album.sources || [],
-        trackCount: libMatch.trackCount, fromSearch: false, inLibrary: true,
-      });
-    } else {
-      setSelectedAlbum({
-        artist: album.artist, album: album.album, year: album.year,
-        coverArt: album.coverArt, mbid: album.mbid, rgid: album.rgid,
-        trackCount: album.trackCount, sources: album.sources || [],
-        tracks: [], fromSearch: true,
-      });
-    }
+    const inLib = !!libMatch;
+    const libTracks = libMatch
+      ? libMatch.tracks.map(t => ({ ...t, path: buildTrackPath(t.id), coverArt: libMatch.coverArt }))
+      : [];
+
+    // Always use fromSearch: true when we have MB metadata (mbid/rgid) so the
+    // full MB tracklist gets fetched — even if some tracks are already in the
+    // library.  The album detail view shows the complete MB tracklist with
+    // per-track download indicators, which is far more useful than showing only
+    // the subset of tracks that have been downloaded.
+    const hasMbMeta = !!(album.mbid || album.rgid || libMatch?.mbid);
+
+    setSelectedAlbum({
+      artist: album.artist, album: album.album, year: album.year,
+      coverArt: (libMatch?.coverArt) || album.coverArt,
+      mbid: album.mbid || libMatch?.mbid, rgid: album.rgid,
+      trackCount: album.trackCount || libMatch?.trackCount,
+      sources: album.sources || [],
+      tracks: libTracks,
+      fromSearch: hasMbMeta,          // triggers MB track fetch
+      inLibrary: inLib,
+    });
     prevViewRef.current = view;
     setView('album');
   }
@@ -1598,7 +1609,7 @@ function App() {
           </div>
         )}
 
-        {/* No torrent results — show streaming results in same layout or empty state */}
+        {/* No album results at all — show streaming results or empty state */}
         {!searching && searchDone && searchAlbums.length === 0 && (
           streamingResults.length > 0 ? (
             <div>
@@ -1655,25 +1666,6 @@ function App() {
                   ))}
                 </div>
               </div>
-
-              {/* Albums grid (from MusicBrainz) */}
-              {mbAlbums.length > 0 && (
-                <div style={{ marginBottom: 32 }}>
-                  <SectionHeader>Albums</SectionHeader>
-                  <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${isMobile ? 140 : 180}px, 1fr))`, gap: 20 }}>
-                    {mbAlbums.map(album => (
-                      <AlbumCard
-                        key={album.id}
-                        album={album}
-                        isDownloading={!!downloading}
-                        inLibrary={isInLibrary(album.artist, album.album)}
-                        onPlay={() => openAlbumFromSearch({ ...album, sources: [] })}
-                        onClick={() => openAlbumFromSearch({ ...album, sources: [] })}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
 
               {/* More songs list */}
               {streamingResults.length > 8 && (
@@ -1821,6 +1813,7 @@ function App() {
                     onPlay={() => {
                       const best = topResult.sources?.[0];
                       if (best) startDownload(best, topResult, true);
+                      else openAlbumFromSearch(topResult); // MB-only: open detail for YT playback
                     }}
                     onClick={() => openAlbumFromSearch(topResult)}
                   />
@@ -1859,6 +1852,7 @@ function App() {
                       onPlay={() => {
                         const best = album.sources?.[0];
                         if (best) startDownload(best, album, true);
+                        else openAlbumFromSearch(album);
                       }}
                       onClick={() => openAlbumFromSearch(album)}
                     />
@@ -1881,6 +1875,7 @@ function App() {
                       onPlay={() => {
                         const best = album.sources?.[0];
                         if (best) startDownload(best, album, true);
+                        else openAlbumFromSearch(album);
                       }}
                       onClick={() => openAlbumFromSearch(album)}
                     />
@@ -1976,7 +1971,7 @@ function App() {
                   }}
                   onMouseEnter={e => e.target.style.color = COLORS.textPrimary}
                   onMouseLeave={e => e.target.style.color = 'rgba(255,255,255,0.7)'}
-                >{artist}</span>{year ? ` · ${year}` : ''}{(trackCount || mbTracks.length) ? ` · ${trackCount || mbTracks.length} tracks` : ''}
+                >{artist}</span>{year ? ` · ${year}` : ''}{(mbTracks.length || trackCount || pl.length) ? ` · ${mbTracks.length || trackCount || pl.length} tracks` : ''}
               </div>
 
               {(selectedAlbum.inLibrary || isInLibrary(artist, album)) && (
