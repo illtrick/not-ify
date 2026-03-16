@@ -358,15 +358,22 @@ router.get('/search', async (req, res) => {
     const torrents = torrentResult.results;
 
     // Determine the primary artist for relevance filtering
-    const primaryArtist = mbArtists[0]?.name || q;
+    // Skip special-purpose MB artists that poison results
+    const SKIP_ARTISTS = new Set(['[unknown]', 'unknown', 'various artists', 'soundtrack', '[no artist]']);
+    const validArtists = mbArtists.filter(a => !SKIP_ARTISTS.has(a.name.toLowerCase()));
+    const primaryArtist = validArtists[0]?.name || q;
 
     // If we have a strong artist match (score >= 90), browse their discography
     // This gives us canonical album data that generic release-group search misses
     // (e.g. searching "tool" as release-group returns albums titled "Tool" by random artists)
+    // Skip artist browse for soundtrack/ost queries — the artist match is coincidental
+    // (e.g. "dark soundtrack" matches "Dark Tranquillity" but user wants the Netflix Dark OST)
+    const isSoundtrackQuery = /\b(soundtrack|ost|score)\b/i.test(q);
     let allMbReleases = mbReleases;
-    if (mbArtists[0]?.score >= 90 && mbArtists[0]?.mbid) {
+    const browseCandidate = validArtists[0];
+    if (browseCandidate?.score >= 90 && browseCandidate?.mbid && !isSoundtrackQuery) {
       try {
-        const artistReleases = await browseArtistReleases(mbArtists[0].mbid, mbArtists[0].name);
+        const artistReleases = await browseArtistReleases(browseCandidate.mbid, browseCandidate.name);
         // Merge: artist browse results first, then generic search results (dedup by rgid)
         const seenRgids = new Set(artistReleases.map(r => r.rgid));
         allMbReleases = [...artistReleases, ...mbReleases.filter(r => !seenRgids.has(r.rgid))];
@@ -492,7 +499,7 @@ router.get('/search', async (req, res) => {
         if (rel.mbid && seenMbids.has(rel.mbid)) return false;
         return true;
       })
-      .slice(0, 12)
+      .slice(0, 15)
       .map(rel => ({
         id: `mb:${rel.rgid || rel.mbid}`,
         artist: rel.artist,
@@ -548,7 +555,7 @@ router.get('/search', async (req, res) => {
       query: q,
       albums,
       otherResults,
-      artists: mbArtists,
+      artists: validArtists,
       streamingResults,
       mbAlbums: mbOnlyAlbums,
     });

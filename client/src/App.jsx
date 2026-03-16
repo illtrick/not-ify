@@ -1543,21 +1543,41 @@ function App() {
         {/* Search bar */}
         <form onSubmit={handleSearch} style={{ marginBottom: isMobile ? 20 : 32 }}>
           <div style={{ display: 'flex', gap: 10 }}>
-            <input
-              type="text"
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder="Search for artists, albums..."
-              style={{
-                flex: 1, padding: isMobile ? '12px 14px' : '14px 18px', borderRadius: 8,
-                border: `1px solid ${COLORS.border}`, background: COLORS.hover,
-                color: COLORS.textPrimary, fontSize: 16, outline: 'none',
-                boxSizing: 'border-box',
-              }}
-              onFocus={e => e.target.style.borderColor = COLORS.accent}
-              onBlur={e => e.target.style.borderColor = COLORS.border}
-              aria-label="Search"
-            />
+            <div style={{ flex: 1, position: 'relative' }}>
+              <input
+                type="text"
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                placeholder="Search for artists, albums..."
+                style={{
+                  width: '100%', padding: isMobile ? '12px 14px' : '14px 18px',
+                  paddingRight: query ? 40 : undefined,
+                  borderRadius: 8,
+                  border: `1px solid ${COLORS.border}`, background: COLORS.hover,
+                  color: COLORS.textPrimary, fontSize: 16, outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+                onFocus={e => e.target.style.borderColor = COLORS.accent}
+                onBlur={e => e.target.style.borderColor = COLORS.border}
+                aria-label="Search"
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => { setQuery(''); }}
+                  aria-label="Clear search"
+                  style={{
+                    position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+                    background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '50%',
+                    width: 24, height: 24, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    padding: 0,
+                  }}
+                >
+                  {Icon.close(14, COLORS.textSecondary)}
+                </button>
+              )}
+            </div>
             <button
               type="submit"
               style={{
@@ -2111,7 +2131,26 @@ function App() {
                   <span style={{ width: isMobile ? 24 : 32, textAlign: 'right', marginRight: isMobile ? 10 : 16, flexShrink: 0, fontSize: 13, color: isActive ? COLORS.accent : isPending ? COLORS.accent : isHovered ? COLORS.accent : COLORS.textSecondary, cursor: ytSearching ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
                     {isPending ? <span className="spin-slow">{Icon.music(14, COLORS.accent)}</span> : isActive ? Icon.music(14, COLORS.accent) : isHovered ? Icon.play(12, COLORS.accent) : t.position}
                   </span>
-                  <span style={{ flex: 1, fontSize: 14, color: isActive ? COLORS.accent : isPending ? COLORS.accent : COLORS.textPrimary }}>{t.title}</span>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 14, color: isActive ? COLORS.accent : isPending ? COLORS.accent : COLORS.textPrimary }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
+                      {t.title}
+                      {t.artist && (
+                        <span
+                          style={{ fontSize: 12, color: COLORS.textSecondary, marginLeft: 6, cursor: 'pointer' }}
+                          onClick={e => {
+                            e.stopPropagation();
+                            if (t.artistMbid) {
+                              openArtistPage(t.artistMbid, t.artist);
+                            } else {
+                              handleSearch(null, t.artist);
+                            }
+                          }}
+                          onMouseEnter={e => e.target.style.color = COLORS.textPrimary}
+                          onMouseLeave={e => e.target.style.color = COLORS.textSecondary}
+                        >{t.artist}</span>
+                      )}
+                    </span>
+                  </span>
                   <TrackStatusIcon status={getTrackDlStatus(artist, t.title)} />
                   {!isMobile && t.lengthMs && (
                     <span style={{ width: 50, textAlign: 'right', flexShrink: 0, fontSize: 13, color: COLORS.textSecondary, opacity: 0.5 }}>{formatTime(t.lengthMs / 1000)}</span>
