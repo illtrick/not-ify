@@ -1097,8 +1097,20 @@ function App() {
     }));
     setQueue(queueTracks);
 
-    // Auto-acquire the album in background
-    if (!isInLibrary(albumArtist, albumName)) {
+    // Auto-acquire the FULL album in background (not just the tracks from click position)
+    // Use mbTracks (full tracklist from state) rather than `tracks` (which may be a subset)
+    const fullTrackList = mbTracks.length > tracks.length ? mbTracks : tracks;
+    // Filter out tracks already in the library (check per-track artist for VA albums)
+    const missingTracks = fullTrackList.filter(t => {
+      const trackArtist = t.artist || albumArtist;
+      return !library.some(lt =>
+        lt.title?.toLowerCase() === t.title?.toLowerCase() &&
+        (lt.artist?.toLowerCase() === trackArtist.toLowerCase() ||
+         lt.artist?.toLowerCase() === albumArtist.toLowerCase()) &&
+        lt.album?.toLowerCase() === albumName.toLowerCase()
+      );
+    });
+    if (missingTracks.length > 0) {
       autoAcquireAlbum({
         artist: albumArtist,
         album: albumName,
@@ -1107,7 +1119,7 @@ function App() {
         mbid: selectedAlbum?.mbid,
         rgid: selectedAlbum?.rgid,
         year: selectedAlbum?.year,
-        mbTracks: tracks,
+        mbTracks: missingTracks,
       });
     }
   }
@@ -1150,18 +1162,20 @@ function App() {
     setBgDownloadStatus({ type: 'yt', message: `Saving ${albumInfo.album}...`, count: tracks.length, done: false });
 
     // Resolve YT URLs for all tracks and batch-queue downloads
+    // For VA/compilation albums, use per-track artist for better YT search accuracy
     (async () => {
       const ytTracks = [];
       for (const t of tracks) {
         try {
-          const q = `${albumInfo.artist} ${t.title} audio`;
+          const trackArtist = t.artist || albumInfo.artist;
+          const q = `${trackArtist} ${t.title} audio`;
           const res = await fetch(`/api/yt/search?q=${encodeURIComponent(q)}`);
           const results = await res.json();
           if (results.length) {
             ytTracks.push({
               url: `https://www.youtube.com/watch?v=${results[0].id}`,
               title: t.title,
-              artist: albumInfo.artist,
+              artist: trackArtist,
               album: albumInfo.album,
               coverArt: albumInfo.coverArt || null,
             });
