@@ -20,6 +20,13 @@ button, [role="button"] {
   user-select: none;
 }
 
+/* Long-press context menu targets — suppress native text selection & callout */
+.ctx-target {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
 #root {
   height: 100vh;
 }

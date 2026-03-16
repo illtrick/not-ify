@@ -22,6 +22,27 @@ const router = express.Router();
 const MUSIC_DIR = '/app/music';
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.flac', '.ogg', '.m4a', '.aac', '.wav', '.opus']);
 
+// ---------------------------------------------------------------------------
+// Recently Played — server-side canonical store + SSE broadcast
+// ---------------------------------------------------------------------------
+const RP_PATH = path.join(MUSIC_DIR, '../config/recently-played.json');
+const MAX_RP = 50;
+const sseClients = new Set();
+
+function loadRecentlyPlayed() {
+  try { return JSON.parse(fs.readFileSync(RP_PATH, 'utf8')); } catch { return []; }
+}
+function saveRecentlyPlayed(list) {
+  fs.mkdirSync(path.dirname(RP_PATH), { recursive: true });
+  fs.writeFileSync(RP_PATH, JSON.stringify(list, null, 2));
+}
+function broadcastRecentlyPlayed(list) {
+  const msg = `data: ${JSON.stringify(list)}\n\n`;
+  for (const client of sseClients) {
+    try { client.write(msg); } catch { sseClients.delete(client); }
+  }
+}
+
 const MIME_TYPES = {
   '.mp3': 'audio/mpeg',
   '.flac': 'audio/flac',
@@ -261,6 +282,55 @@ router.delete('/library/track/:id', (req, res) => {
 
   console.log(`[library] Removed track: ${filePath}`);
   res.json({ removed: 1, id: req.params.id });
+});
+
+// ---------------------------------------------------------------------------
+// Recently Played endpoints
+// ---------------------------------------------------------------------------
+
+// SSE stream — keeps connection open, pushes updates to all connected clients
+router.get('/recently-played/stream', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+  });
+  // Send current list immediately so client has data on connect
+  res.write(`data: ${JSON.stringify(loadRecentlyPlayed())}\n\n`);
+  sseClients.add(res);
+  console.log(`[recently-played] SSE client connected (${sseClients.size} total)`);
+  req.on('close', () => {
+    sseClients.delete(res);
+    console.log(`[recently-played] SSE client disconnected (${sseClients.size} remaining)`);
+  });
+});
+
+// Simple GET fallback (used for initial migration check)
+router.get('/recently-played', (req, res) => {
+  res.json(loadRecentlyPlayed());
+});
+
+// POST — report a single play event
+router.post('/recently-played', express.json(), (req, res) => {
+  const { artist, album, coverArt, mbid, rgid } = req.body;
+  if (!artist || !album) return res.status(400).json({ error: 'Missing artist or album' });
+  const list = loadRecentlyPlayed();
+  const key = (artist + '::' + album).toLowerCase();
+  const filtered = list.filter(r => (r.artist + '::' + r.album).toLowerCase() !== key);
+  const next = [{ artist, album, coverArt: coverArt || null, mbid: mbid || null, rgid: rgid || null, playedAt: Date.now() }, ...filtered].slice(0, MAX_RP);
+  saveRecentlyPlayed(next);
+  broadcastRecentlyPlayed(next);
+  res.json(next);
+});
+
+// PUT — bulk replace (one-time migration from localStorage)
+router.put('/recently-played', express.json(), (req, res) => {
+  const list = req.body;
+  if (!Array.isArray(list)) return res.status(400).json({ error: 'Expected array' });
+  const cleaned = list.filter(r => r.artist && r.album).slice(0, MAX_RP);
+  saveRecentlyPlayed(cleaned);
+  broadcastRecentlyPlayed(cleaned);
+  res.json(cleaned);
 });
 
 module.exports = router;

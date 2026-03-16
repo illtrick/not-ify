@@ -149,12 +149,15 @@ function contextMenuProps(callback, ms = 500) {
   let timer = null;
   let moved = false;
   return {
+    className: 'ctx-target',
     onContextMenu: (e) => callback(e),
     onTouchStart: (e) => {
       moved = false;
       const touch = e.touches[0];
       timer = setTimeout(() => {
         if (!moved) {
+          // Clear any text selection the browser started during the long-press
+          window.getSelection()?.removeAllRanges();
           callback({ preventDefault: () => {}, stopPropagation: () => {}, clientX: touch.clientX, clientY: touch.clientY });
         }
       }, ms);
@@ -171,9 +174,9 @@ function debounce(fn, ms) {
 
 const SESSION_KEY = 'notify-session';
 const SEARCH_HISTORY_KEY = 'notify-search-history';
-const RECENTLY_PLAYED_KEY = 'notify-recently-played';
+const RECENTLY_PLAYED_KEY = 'notify-recently-played'; // used only for one-time migration
 const MAX_SEARCH_HISTORY = 8;
-const MAX_RECENTLY_PLAYED = 12;
+const MAX_RECENTLY_PLAYED = 50;
 
 function trackRowStyle(isActive, isHovered, mobile) {
   return {
@@ -651,9 +654,7 @@ function App() {
   const [searchHistory, setSearchHistory] = useState(() => {
     try { return JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY)) || []; } catch { return []; }
   });
-  const [recentlyPlayed, setRecentlyPlayed] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(RECENTLY_PLAYED_KEY)) || []; } catch { return []; }
-  });
+  const [recentlyPlayed, setRecentlyPlayed] = useState([]);
 
   // Track download status (per-title tracking for status indicators)
   // Map of normalized "artist::title" → 'queued' | 'active' | 'done'
@@ -749,6 +750,80 @@ function App() {
     };
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
+  }, []);
+
+  // Recently Played — SSE sync across devices
+  useEffect(() => {
+    const abort = new AbortController();
+    let reconnectTimer;
+
+    function connectSSE() {
+      fetch('/api/recently-played/stream', { signal: abort.signal })
+        .then(res => {
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          function read() {
+            reader.read().then(({ done, value }) => {
+              if (done) { scheduleReconnect(); return; }
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split('\n');
+              buffer = lines.pop();
+              for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                  try {
+                    const list = JSON.parse(line.slice(6));
+                    setRecentlyPlayed(prev => {
+                      if (prev.length === list.length && prev[0]?.playedAt === list[0]?.playedAt) return prev;
+                      return list;
+                    });
+                  } catch {}
+                }
+              }
+              read();
+            }).catch(() => scheduleReconnect());
+          }
+          read();
+        })
+        .catch(() => { if (!abort.signal.aborted) scheduleReconnect(); });
+    }
+
+    function scheduleReconnect() {
+      if (abort.signal.aborted) return;
+      reconnectTimer = setTimeout(connectSSE, 3000);
+    }
+
+    // Initial load: check server, migrate localStorage if needed, then connect SSE
+    fetch('/api/recently-played')
+      .then(r => r.ok ? r.json() : [])
+      .then(serverList => {
+        if (serverList.length === 0) {
+          // One-time migration from localStorage
+          try {
+            const local = JSON.parse(localStorage.getItem(RECENTLY_PLAYED_KEY)) || [];
+            if (local.length > 0) {
+              return fetch('/api/recently-played', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(local),
+              }).then(r => r.ok ? r.json() : local)
+                .then(list => {
+                  setRecentlyPlayed(list);
+                  try { localStorage.removeItem(RECENTLY_PLAYED_KEY); } catch {}
+                });
+            }
+          } catch {}
+        }
+        setRecentlyPlayed(serverList);
+        try { localStorage.removeItem(RECENTLY_PLAYED_KEY); } catch {}
+      })
+      .catch(() => {
+        // Offline fallback: use localStorage if migration hasn't happened yet
+        try { setRecentlyPlayed(JSON.parse(localStorage.getItem(RECENTLY_PLAYED_KEY)) || []); } catch {}
+      })
+      .finally(() => connectSSE());
+
+    return () => { abort.abort(); clearTimeout(reconnectTimer); };
   }, []);
 
   // Fetch MB track listing when opening a search album with an mbid or rgid
@@ -956,13 +1031,21 @@ function App() {
 
   function addToRecentlyPlayed(item) {
     // item: { artist, album, coverArt, mbid, rgid }
+    // Optimistic local update for instant UI feedback
     setRecentlyPlayed(prev => {
       const key = (item.artist + '::' + item.album).toLowerCase();
       const filtered = prev.filter(r => (r.artist + '::' + r.album).toLowerCase() !== key);
-      const next = [{ ...item, playedAt: Date.now() }, ...filtered].slice(0, MAX_RECENTLY_PLAYED);
-      try { localStorage.setItem(RECENTLY_PLAYED_KEY, JSON.stringify(next)); } catch {}
-      return next;
+      return [{ ...item, playedAt: Date.now() }, ...filtered].slice(0, MAX_RECENTLY_PLAYED);
     });
+    // Persist to server — server broadcasts to all SSE clients (cross-device sync)
+    fetch('/api/recently-played', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item),
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(list => { if (list) setRecentlyPlayed(list); })
+      .catch(() => {}); // silent — SSE reconnect will sync eventually
   }
 
   async function handleSearch(e, overrideQuery) {
@@ -1620,9 +1703,28 @@ function App() {
 
   // Search view
   function renderSearch() {
-    // Pick top result: first album with mbid + cover art
-    const topResult = searchAlbums.find(a => a.mbid && a.coverArt) || searchAlbums[0] || null;
-    const restAlbums = searchAlbums.filter(a => a !== topResult);
+    // Determine if the query is primarily an artist name
+    const topArtist = searchArtistResults[0];
+    const qLower = query.trim().toLowerCase();
+    const isArtistQuery = topArtist && topArtist.score >= 95 &&
+      topArtist.name.toLowerCase() === qLower;
+
+    // Pick top result: prefer artist's album when query matches an artist
+    let topResult = null;
+    if (isArtistQuery && searchAlbums.length > 0) {
+      // Find the newest album by the matched artist
+      topResult = searchAlbums
+        .filter(a => a.artist.toLowerCase() === topArtist.name.toLowerCase() && a.coverArt)
+        .sort((a, b) => (b.year || 0) - (a.year || 0))[0]
+        || searchAlbums.find(a => a.mbid && a.coverArt) || searchAlbums[0] || null;
+    } else {
+      topResult = searchAlbums.find(a => a.mbid && a.coverArt) || searchAlbums[0] || null;
+    }
+
+    // Sort remaining albums: newest first
+    const restAlbums = searchAlbums
+      .filter(a => a !== topResult)
+      .sort((a, b) => (b.year || 0) - (a.year || 0));
 
     return (
       <div>
@@ -2986,6 +3088,12 @@ function App() {
               {...contextMenuProps(e => showContextMenu(e, [
                 { label: 'Play', action: () => playTrack(tracks[0], tracks, 0, { artist, album, coverArt }) },
                 { label: 'Add to Queue', action: () => tracks.forEach(t => addToQueue(t)) },
+                { label: 'Go to Artist', action: async () => {
+                  try { const res = await fetch(`/api/search?q=${encodeURIComponent(artist)}`); const data = await res.json();
+                    const a = data.artists?.find(x => x.name.toLowerCase() === artist.toLowerCase()) || data.artists?.[0];
+                    if (a?.mbid) openArtistPage(a.mbid, a.name, a.type); } catch {} }},
+                { divider: true },
+                { label: 'Remove from Library', danger: true, action: () => removeAlbumFromLibrary(artist, album) },
               ]))}
             >
               <AlbumArt src={coverArt} size={52} radius={4} artist={artist} album={album} />
