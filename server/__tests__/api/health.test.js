@@ -1,0 +1,76 @@
+'use strict';
+
+// Suite B7 — Health and status routes
+
+jest.mock('../../src/services/search', () => ({ searchMusic: jest.fn() }));
+jest.mock('../../src/services/musicbrainz', () => ({
+  searchReleases: jest.fn().mockResolvedValue([]),
+  searchArtists: jest.fn().mockResolvedValue([]),
+  browseArtistReleases: jest.fn().mockResolvedValue([]),
+  getReleaseTracks: jest.fn().mockResolvedValue([]),
+  getReleaseGroupTracks: jest.fn().mockResolvedValue({ releaseMbid: null, tracks: [] }),
+}));
+jest.mock('../../src/services/youtube', () => ({
+  searchYouTube: jest.fn().mockResolvedValue([]),
+  searchSoundCloud: jest.fn().mockResolvedValue([]),
+  getStreamUrl: jest.fn(),
+}));
+jest.mock('../../src/services/llm', () => ({
+  getCachedParse: jest.fn().mockReturnValue(null),
+  parseTorrentNamesAsync: jest.fn(),
+  checkHealth: jest.fn().mockResolvedValue(true),
+}));
+jest.mock('../../src/services/realdebrid');
+jest.mock('../../src/services/lastfm', () => ({}));
+
+const request = require('supertest');
+const app = require('../../src/index');
+const llm = require('../../src/services/llm');
+const rd = require('../../src/services/realdebrid');
+
+describe('GET /api/health', () => {
+  test('returns 200 with ok status', async () => {
+    const res = await request(app).get('/api/health');
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ok');
+    expect(res.body.service).toBe('not-ify-server');
+  });
+});
+
+describe('GET /api/llm/health', () => {
+  test('returns ok when Ollama available', async () => {
+    llm.checkHealth.mockResolvedValue(true);
+    const res = await request(app).get('/api/llm/health');
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ok');
+  });
+
+  test('returns unavailable when Ollama down', async () => {
+    llm.checkHealth.mockResolvedValue(false);
+    const res = await request(app).get('/api/llm/health');
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('unavailable');
+  });
+});
+
+describe('GET /api/test/rd-status', () => {
+  test('returns user info when token valid', async () => {
+    rd.getUserInfo = jest.fn().mockResolvedValue({
+      username: 'testuser',
+      email: 'test@example.com',
+      type: 'premium',
+      premium: 365,
+    });
+    const res = await request(app).get('/api/test/rd-status');
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ok');
+    expect(res.body.user.username).toBe('testuser');
+  });
+
+  test('returns 500 when RD token missing or invalid', async () => {
+    rd.getUserInfo = jest.fn().mockRejectedValue(new Error('No API token configured'));
+    const res = await request(app).get('/api/test/rd-status');
+    expect(res.status).toBe(500);
+    expect(res.body.message).toMatch(/token/i);
+  });
+});

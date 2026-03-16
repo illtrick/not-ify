@@ -155,9 +155,9 @@ const RECENTLY_PLAYED_KEY = 'notify-recently-played';
 const MAX_SEARCH_HISTORY = 8;
 const MAX_RECENTLY_PLAYED = 12;
 
-function trackRowStyle(isActive, isHovered) {
+function trackRowStyle(isActive, isHovered, mobile) {
   return {
-    display: 'flex', alignItems: 'center', padding: '10px 16px', borderRadius: 4,
+    display: 'flex', alignItems: 'center', padding: mobile ? '10px 8px' : '10px 16px', borderRadius: 4,
     cursor: 'pointer', gap: 0, minHeight: 44,
     background: isActive ? 'rgba(255,255,255,0.08)' : isHovered ? 'rgba(255,255,255,0.04)' : 'transparent',
     transition: 'background 0.15s ease',
@@ -225,26 +225,27 @@ function SkeletonCard() {
 // ---------------------------------------------------------------------------
 // TopResultCard — large featured card for best search match
 // ---------------------------------------------------------------------------
-function TopResultCard({ album, onClick, onPlay, isDownloading, inLibrary }) {
+function TopResultCard({ album, onClick, onPlay, isDownloading, inLibrary, compact }) {
   const [hovered, setHovered] = useState(false);
+  const artSize = compact ? 80 : 120;
   return (
     <div
       style={{
         background: hovered ? '#222' : COLORS.card,
-        borderRadius: 8, padding: 20, cursor: 'pointer',
-        display: 'flex', flexDirection: 'column', gap: 16,
-        minHeight: 280, position: 'relative',
+        borderRadius: 8, padding: compact ? 14 : 20, cursor: 'pointer',
+        display: 'flex', flexDirection: 'column', gap: compact ? 12 : 16,
+        minHeight: compact ? 200 : 280, position: 'relative',
         transition: 'background 0.15s ease',
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onClick={onClick}
     >
-      <div style={{ width: 120, height: 120, borderRadius: 4, overflow: 'hidden', flexShrink: 0 }}>
-        <AlbumArt src={album.coverArt} size={120} radius={4} style={{ width: 120, height: 120 }} artist={album.artist} album={album.album} />
+      <div style={{ width: artSize, height: artSize, borderRadius: 4, overflow: 'hidden', flexShrink: 0 }}>
+        <AlbumArt src={album.coverArt} size={artSize} radius={4} style={{ width: artSize, height: artSize }} artist={album.artist} album={album.album} />
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 28, fontWeight: 700, color: COLORS.textPrimary, marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div style={{ fontSize: compact ? 20 : 28, fontWeight: 700, color: COLORS.textPrimary, marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {album.album || album.artist}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: COLORS.textSecondary }}>
@@ -332,22 +333,23 @@ function SectionHeader({ children }) {
 // ---------------------------------------------------------------------------
 // StreamingTopResult — large featured card for best streaming match (mirrors TopResultCard)
 // ---------------------------------------------------------------------------
-function StreamingTopResult({ result, onPlay, onDownload, isDownloading }) {
+function StreamingTopResult({ result, onPlay, onDownload, isDownloading, compact }) {
   const [hovered, setHovered] = useState(false);
+  const artSize = compact ? 80 : 120;
   return (
     <div
       style={{
         background: hovered ? '#222' : COLORS.card,
-        borderRadius: 8, padding: 20, cursor: 'pointer',
-        display: 'flex', flexDirection: 'column', gap: 16,
-        minHeight: 280, position: 'relative',
+        borderRadius: 8, padding: compact ? 14 : 20, cursor: 'pointer',
+        display: 'flex', flexDirection: 'column', gap: compact ? 12 : 16,
+        minHeight: compact ? 200 : 280, position: 'relative',
         transition: 'background 0.15s ease',
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onClick={onPlay}
     >
-      <div style={{ width: 120, height: 120, borderRadius: 4, overflow: 'hidden', flexShrink: 0, position: 'relative' }}>
+      <div style={{ width: artSize, height: artSize, borderRadius: 4, overflow: 'hidden', flexShrink: 0, position: 'relative' }}>
         {result.thumbnail ? (
           <img src={result.thumbnail} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; }} />
         ) : (
@@ -355,7 +357,7 @@ function StreamingTopResult({ result, onPlay, onDownload, isDownloading }) {
         )}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 28, fontWeight: 700, color: COLORS.textPrimary, marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div style={{ fontSize: compact ? 20 : 28, fontWeight: 700, color: COLORS.textPrimary, marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {result.artist || result.title}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: COLORS.textSecondary }}>
@@ -528,6 +530,9 @@ function AlbumCard({ album, onPlay, onClick, isDownloading, inLibrary }) {
       <div className="card-title" style={{ fontSize: 14, fontWeight: 600, color: COLORS.textPrimary, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
         {album.album || album.artist}
         {inLibrary && <span style={{ width: 8, height: 8, borderRadius: '50%', background: COLORS.success, flexShrink: 0 }} />}
+        {album.availableVia === 'youtube' && !inLibrary && (
+          <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: 'rgba(255,255,255,0.1)', color: COLORS.textSecondary, flexShrink: 0, letterSpacing: 0.5 }}>YT</span>
+        )}
       </div>
       <div style={{ fontSize: 12, color: COLORS.textSecondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {album.artist}{subLabel ? ` · ${subLabel}` : ''}
@@ -635,10 +640,10 @@ function App() {
 
   // Mobile responsive
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [mobileTab, setMobileTab] = useState('search'); // 'search' | 'library'
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 767px)');
-    const handler = (e) => { setIsMobile(e.matches); if (!e.matches) setSidebarOpen(false); };
+    const handler = (e) => setIsMobile(e.matches);
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
   }, []);
@@ -1417,6 +1422,60 @@ function App() {
     }
   }
 
+  // Download entire album via YouTube (using MB tracklist)
+  async function downloadAlbumViaYouTube(albumInfo, tracks) {
+    if (!tracks || tracks.length === 0) return;
+    setDownloading(`yt-album-${albumInfo.rgid || albumInfo.mbid || 'unknown'}`);
+    setDownloadStatus({
+      step: 0, message: `Searching YouTube for ${tracks.length} tracks...`, percent: null, logs: [],
+      artist: albumInfo.artist || '',
+      albumName: albumInfo.album || '',
+      coverArt: albumInfo.coverArt || null,
+    });
+
+    try {
+      const res = await fetch('/api/download/yt/album', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          artist: albumInfo.artist,
+          album: albumInfo.album,
+          tracks: tracks.map(t => ({ title: t.title, position: t.position, lengthMs: t.lengthMs })),
+          rgid: albumInfo.rgid || null,
+          mbid: albumInfo.mbid || null,
+          coverArt: albumInfo.coverArt || null,
+        }),
+      });
+      const data = await res.json();
+      setDownloadStatus(prev => ({
+        ...prev,
+        message: `Queued ${data.queued} tracks${data.errors > 0 ? ` (${data.errors} failed)` : ''}`,
+        percent: 100,
+      }));
+      // Poll queue status periodically
+      const pollId = setInterval(async () => {
+        try {
+          const qRes = await fetch('/api/download/yt/queue');
+          const qData = await qRes.json();
+          if (qData.active) {
+            setDownloadStatus(prev => ({
+              ...prev,
+              message: `Downloading: ${qData.active.title} (${Math.round(qData.active.progress)}%)`,
+              percent: qData.active.progress,
+            }));
+          } else if (qData.queued.length === 0) {
+            clearInterval(pollId);
+            setDownloadStatus(prev => ({ ...prev, message: 'Album download complete!', percent: 100 }));
+            setTimeout(() => { setDownloading(null); refreshLibrary(); }, 2000);
+          }
+        } catch { clearInterval(pollId); }
+      }, 2000);
+    } catch (err) {
+      setDownloadStatus(prev => ({ ...prev, message: `Error: ${err.message}`, error: true }));
+      setDownloading(null);
+    }
+  }
+
   // Cancel yt-dlp download
   async function handleYtCancel() {
     try { await fetch('/api/download/yt', { method: 'DELETE' }); } catch {}
@@ -1482,7 +1541,7 @@ function App() {
     return (
       <div>
         {/* Search bar */}
-        <form onSubmit={handleSearch} style={{ marginBottom: 32 }}>
+        <form onSubmit={handleSearch} style={{ marginBottom: isMobile ? 20 : 32 }}>
           <div style={{ display: 'flex', gap: 10 }}>
             <input
               type="text"
@@ -1490,7 +1549,7 @@ function App() {
               onChange={e => setQuery(e.target.value)}
               placeholder="Search for artists, albums..."
               style={{
-                flex: 1, padding: '14px 18px', borderRadius: 8,
+                flex: 1, padding: isMobile ? '12px 14px' : '14px 18px', borderRadius: 8,
                 border: `1px solid ${COLORS.border}`, background: COLORS.hover,
                 color: COLORS.textPrimary, fontSize: 16, outline: 'none',
                 boxSizing: 'border-box',
@@ -1502,7 +1561,7 @@ function App() {
             <button
               type="submit"
               style={{
-                padding: '14px 24px', borderRadius: 8, border: 'none',
+                padding: isMobile ? '12px 16px' : '14px 24px', borderRadius: 8, border: 'none',
                 background: COLORS.accent, color: '#fff', fontSize: 15,
                 fontWeight: 600, cursor: 'pointer',
               }}
@@ -1524,7 +1583,7 @@ function App() {
           streamingResults.length > 0 ? (
             <div>
               {/* Top row: Top Result + Artists/Songs — same layout as torrent results */}
-              <div style={{ display: 'grid', gridTemplateColumns: searchArtistResults.length > 0 ? '1fr 1fr' : '1fr', gap: 24, marginBottom: 32 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : (searchArtistResults.length > 0 ? '1fr 1fr' : '1fr'), gap: isMobile ? 16 : 24, marginBottom: isMobile ? 20 : 32 }}>
                 {/* Top Result */}
                 <div>
                   <SectionHeader>Top Result</SectionHeader>
@@ -1536,6 +1595,7 @@ function App() {
                         onPlay={() => playStreamingResult(top)}
                         onDownload={() => startYtDownload(top)}
                         isDownloading={!!downloading}
+                        compact={isMobile}
                       />
                     );
                   })()}
@@ -1728,7 +1788,7 @@ function App() {
         {!searching && searchAlbums.length > 0 && (
           <div>
             {/* Top row: Top Result + Artists */}
-            <div style={{ display: 'grid', gridTemplateColumns: searchArtistResults.length > 0 ? '1fr 1fr' : '1fr', gap: 24, marginBottom: 32 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : (searchArtistResults.length > 0 ? '1fr 1fr' : '1fr'), gap: isMobile ? 16 : 24, marginBottom: isMobile ? 20 : 32 }}>
               {/* Top Result */}
               {topResult && (
                 <div>
@@ -1737,6 +1797,7 @@ function App() {
                     album={topResult}
                     isDownloading={!!downloading}
                     inLibrary={isInLibrary(topResult.artist, topResult.album)}
+                    compact={isMobile}
                     onPlay={() => {
                       const best = topResult.sources?.[0];
                       if (best) startDownload(best, topResult, true);
@@ -1909,6 +1970,25 @@ function App() {
                 <div style={{ fontSize: 12, color: COLORS.textSecondary, opacity: 0.6, marginTop: 4 }}>No sources available</div>
               )}
 
+              {/* Download via YouTube button — for albums with MB tracks but no torrent sources */}
+              {fromSearch && sources.length === 0 && mbTracks.length > 0 && !isInLibrary(artist, album) && (
+                <button
+                  onClick={() => downloadAlbumViaYouTube(selectedAlbum, mbTracks)}
+                  disabled={!!downloading}
+                  style={{
+                    padding: '8px 20px', borderRadius: 20,
+                    background: downloading ? COLORS.hover : 'transparent',
+                    border: `1px solid ${COLORS.textSecondary}`,
+                    color: downloading ? COLORS.textSecondary : COLORS.textPrimary,
+                    fontSize: 13, fontWeight: 600, cursor: downloading ? 'not-allowed' : 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 6, marginTop: 8,
+                  }}
+                >
+                  {Icon.plus(14, downloading ? COLORS.textSecondary : COLORS.textPrimary)}
+                  Download via YouTube
+                </button>
+              )}
+
               {/* Play/Pause button — inline with album info */}
               {(isLib ? pl.length > 0 : mbTracks.length > 0) && (() => {
                 const isThisAlbumPlaying = isPlaying && currentAlbumInfo?.artist === artist && currentAlbumInfo?.album === album;
@@ -1944,10 +2024,10 @@ function App() {
         {/* Track list (library) */}
         {isLib && (
           <div role="list" style={{ marginTop: 24 }}>
-            <div style={{ display: 'flex', padding: '6px 12px', borderBottom: `1px solid ${COLORS.border}`, marginBottom: 4 }}>
-              <span style={{ width: 32, fontSize: 12, color: COLORS.textSecondary, textAlign: 'right', marginRight: 16 }}>#</span>
+            <div style={{ display: 'flex', padding: isMobile ? '6px 8px' : '6px 12px', borderBottom: `1px solid ${COLORS.border}`, marginBottom: 4 }}>
+              <span style={{ width: isMobile ? 24 : 32, fontSize: 12, color: COLORS.textSecondary, textAlign: 'right', marginRight: isMobile ? 10 : 16 }}>#</span>
               <span style={{ flex: 1, fontSize: 12, color: COLORS.textSecondary }}>Title</span>
-              <span style={{ width: 56, fontSize: 12, color: COLORS.textSecondary, textAlign: 'right' }}>Format</span>
+              {!isMobile && <span style={{ width: 56, fontSize: 12, color: COLORS.textSecondary, textAlign: 'right' }}>Format</span>}
             </div>
             {pl.map((track, idx) => {
               const isActive = currentTrack?.id === track.id;
@@ -1956,7 +2036,7 @@ function App() {
                 <div
                   key={track.id}
                   role="listitem"
-                  style={trackRowStyle(isActive, isHovered)}
+                  style={trackRowStyle(isActive, isHovered, isMobile)}
                   onClick={() => playTrack(track, pl, idx, { artist, album, coverArt })}
                   onMouseEnter={() => setHoveredTrack(track.id)}
                   onMouseLeave={() => setHoveredTrack(null)}
@@ -1968,14 +2048,14 @@ function App() {
                     { label: 'Remove Track', danger: true, action: () => removeTrackFromLibrary(track.id) },
                   ])}
                 >
-                  <span style={{ width: 32, textAlign: 'right', marginRight: 16, fontSize: 13, color: isActive ? COLORS.accent : isHovered ? COLORS.accent : COLORS.textSecondary, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                  <span style={{ width: isMobile ? 24 : 32, textAlign: 'right', marginRight: isMobile ? 10 : 16, fontSize: 13, color: isActive ? COLORS.accent : isHovered ? COLORS.accent : COLORS.textSecondary, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
                     {isActive ? Icon.music(14, COLORS.accent) : isHovered ? Icon.play(12, COLORS.accent) : idx + 1}
                   </span>
                   <span style={{ flex: 1, fontSize: 14, color: isActive ? COLORS.accent : COLORS.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {track.title}
                   </span>
-                  {/* Add to queue button (hover) */}
-                  <button
+                  {/* Add to queue button (hover — desktop only) */}
+                  {!isMobile && <button
                     onClick={e => { e.stopPropagation(); addToQueue(track); }}
                     title="Add to queue"
                     style={{
@@ -1984,15 +2064,20 @@ function App() {
                       transition: 'opacity 0.15s', flexShrink: 0,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                     }}
-                  >{Icon.plus(14, COLORS.textSecondary)}</button>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                  >{Icon.plus(14, COLORS.textSecondary)}</button>}
+                  {!isMobile && <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
                     <span style={{ fontSize: 11, color: COLORS.textSecondary, textAlign: 'right', width: 36 }}>
                       {track.format?.toUpperCase()}
                     </span>
                     <span style={{ opacity: 0.45, display: 'flex', alignItems: 'center' }} title={['flac', 'wav'].includes(track.format?.toLowerCase()) ? 'Lossless' : 'Downloaded'}>
                       {Icon.checkCircle(13, ['flac', 'wav'].includes(track.format?.toLowerCase()) ? COLORS.success : COLORS.textSecondary)}
                     </span>
-                  </span>
+                  </span>}
+                  {isMobile && (
+                    <span style={{ opacity: 0.45, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                      {Icon.checkCircle(13, ['flac', 'wav'].includes(track.format?.toLowerCase()) ? COLORS.success : COLORS.textSecondary)}
+                    </span>
+                  )}
                 </div>
               );
             })}
@@ -2002,10 +2087,10 @@ function App() {
         {/* MusicBrainz track listing preview (search view) — now playable via YouTube */}
         {fromSearch && mbTracks.length > 0 && (
           <div style={{ marginTop: 24 }}>
-            <div style={{ display: 'flex', padding: '6px 12px', borderBottom: `1px solid ${COLORS.border}`, marginBottom: 4 }}>
-              <span style={{ width: 32, fontSize: 12, color: COLORS.textSecondary, textAlign: 'right', marginRight: 16 }}>#</span>
+            <div style={{ display: 'flex', padding: isMobile ? '6px 8px' : '6px 12px', borderBottom: `1px solid ${COLORS.border}`, marginBottom: 4 }}>
+              <span style={{ width: isMobile ? 24 : 32, fontSize: 12, color: COLORS.textSecondary, textAlign: 'right', marginRight: isMobile ? 10 : 16 }}>#</span>
               <span style={{ flex: 1, fontSize: 12, color: COLORS.textSecondary }}>Title</span>
-              <span style={{ width: 50, fontSize: 12, color: COLORS.textSecondary, textAlign: 'right' }}>Duration</span>
+              {!isMobile && <span style={{ width: 50, fontSize: 12, color: COLORS.textSecondary, textAlign: 'right' }}>Duration</span>}
             </div>
             {mbTracks.map((t, i) => {
               const isHovered = hoveredMbTrack === i;
@@ -2014,7 +2099,7 @@ function App() {
               return (
                 <div
                   key={i}
-                  style={{ ...trackRowStyle(isActive, isHovered), opacity: (ytSearching && !isPending && !isActive) ? 0.5 : 1 }}
+                  style={{ ...trackRowStyle(isActive, isHovered, isMobile), opacity: (ytSearching && !isPending && !isActive) ? 0.5 : 1 }}
                   onMouseEnter={() => setHoveredMbTrack(i)}
                   onMouseLeave={() => setHoveredMbTrack(null)}
                   onClick={() => {
@@ -2023,12 +2108,12 @@ function App() {
                     playAllFromYouTube(remaining, artist, album, coverArt);
                   }}
                 >
-                  <span style={{ width: 32, textAlign: 'right', marginRight: 16, flexShrink: 0, fontSize: 13, color: isActive ? COLORS.accent : isPending ? COLORS.accent : isHovered ? COLORS.accent : COLORS.textSecondary, cursor: ytSearching ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                  <span style={{ width: isMobile ? 24 : 32, textAlign: 'right', marginRight: isMobile ? 10 : 16, flexShrink: 0, fontSize: 13, color: isActive ? COLORS.accent : isPending ? COLORS.accent : isHovered ? COLORS.accent : COLORS.textSecondary, cursor: ytSearching ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
                     {isPending ? <span className="spin-slow">{Icon.music(14, COLORS.accent)}</span> : isActive ? Icon.music(14, COLORS.accent) : isHovered ? Icon.play(12, COLORS.accent) : t.position}
                   </span>
                   <span style={{ flex: 1, fontSize: 14, color: isActive ? COLORS.accent : isPending ? COLORS.accent : COLORS.textPrimary }}>{t.title}</span>
                   <TrackStatusIcon status={getTrackDlStatus(artist, t.title)} />
-                  {t.lengthMs && (
+                  {!isMobile && t.lengthMs && (
                     <span style={{ width: 50, textAlign: 'right', flexShrink: 0, fontSize: 13, color: COLORS.textSecondary, opacity: 0.5 }}>{formatTime(t.lengthMs / 1000)}</span>
                   )}
                 </div>
@@ -2315,7 +2400,45 @@ function App() {
 
   function renderContextMenu() {
     if (!contextMenu) return null;
-    // Adjust position to stay within viewport
+
+    if (isMobile) {
+      // Bottom sheet on mobile
+      return (
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.5)' }}
+          onClick={() => setContextMenu(null)}
+        >
+          <div
+            style={{
+              position: 'absolute', bottom: 0, left: 0, right: 0,
+              background: '#282828', borderRadius: '14px 14px 0 0',
+              paddingTop: 8, paddingBottom: `calc(8px + env(safe-area-inset-bottom))`,
+              boxShadow: '0 -4px 24px rgba(0,0,0,0.5)',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ width: 36, height: 4, borderRadius: 2, background: COLORS.border, margin: '0 auto 8px' }} />
+            {contextMenu.items.map((item, i) => item.divider ? (
+              <div key={i} style={{ height: 1, background: COLORS.border, margin: '4px 0' }} />
+            ) : (
+              <div
+                key={i}
+                onClick={() => { setContextMenu(null); item.action(); }}
+                style={{
+                  padding: '12px 16px', fontSize: 15, cursor: 'pointer',
+                  color: item.danger ? '#e74c3c' : COLORS.textPrimary,
+                  minHeight: 48, display: 'flex', alignItems: 'center',
+                }}
+              >
+                {item.label}
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // Desktop: positioned dropdown
     const menuW = 200, menuH = contextMenu.items.length * 36 + 8;
     const x = Math.min(contextMenu.x, window.innerWidth - menuW - 8);
     const y = Math.min(contextMenu.y, window.innerHeight - menuH - 8);
@@ -2450,13 +2573,20 @@ function App() {
 
     return (
       <div style={{
-        width: showQueue ? 320 : 0, minWidth: showQueue ? 320 : 0,
-        background: COLORS.surface,
-        borderLeft: showQueue ? `1px solid ${COLORS.border}` : 'none',
-        overflowY: 'auto', overflowX: 'hidden',
-        transition: 'width 0.2s ease, min-width 0.2s ease',
-        display: 'flex', flexDirection: 'column',
-        flexShrink: 0,
+        ...(isMobile ? {
+          position: 'fixed', inset: 0, zIndex: 50,
+          background: COLORS.surface,
+          display: showQueue ? 'flex' : 'none', flexDirection: 'column',
+          overflowY: 'auto',
+        } : {
+          width: showQueue ? 320 : 0, minWidth: showQueue ? 320 : 0,
+          background: COLORS.surface,
+          borderLeft: showQueue ? `1px solid ${COLORS.border}` : 'none',
+          overflowY: 'auto', overflowX: 'hidden',
+          transition: 'width 0.2s ease, min-width 0.2s ease',
+          display: 'flex', flexDirection: 'column',
+          flexShrink: 0,
+        }),
       }}>
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 16px 12px', borderBottom: `1px solid ${COLORS.border}` }}>
@@ -2539,7 +2669,19 @@ function App() {
         height: isMobile ? 64 : 80, minHeight: isMobile ? 64 : 80, background: COLORS.surface,
         borderTop: `1px solid ${COLORS.border}`,
         display: 'flex', alignItems: 'center', padding: isMobile ? '0 8px' : '0 16px', gap: isMobile ? 8 : 12,
+        position: 'relative',
       }} role="region" aria-label="Music player">
+
+        {/* Mobile seek bar — slim progress at top of footer */}
+        {isMobile && has && (
+          <div style={{ position: 'absolute', top: -2, left: 0, right: 0, height: 16, cursor: 'pointer', zIndex: 1 }}
+            onClick={(e) => { const rect = e.currentTarget.getBoundingClientRect(); const pctClick = (e.clientX - rect.left) / rect.width;
+              if (audioRef.current && duration) audioRef.current.currentTime = pctClick * duration; }}>
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: COLORS.border }}>
+              <div style={{ height: '100%', width: `${pct}%`, background: COLORS.accent, transition: 'width 0.1s linear' }} />
+            </div>
+          </div>
+        )}
 
         {/* Album art + info */}
         <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 12, width: isMobile ? undefined : 220, minWidth: 0, flexShrink: isMobile ? 1 : 0, flex: isMobile ? 1 : undefined, overflow: 'hidden' }}>
@@ -2608,7 +2750,17 @@ function App() {
           </div>}
         </div>
 
-        {/* Volume + Queue toggle — hidden on mobile */}
+        {/* Mobile queue button */}
+        {isMobile && (
+          <button onClick={() => setShowQueue(v => !v)} style={{ position: 'relative', background: 'none', border: 'none', cursor: 'pointer', padding: 6, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+            {Icon.queue(18, showQueue ? COLORS.accent : COLORS.textSecondary)}
+            {queue.length > 0 && (
+              <span style={{ position: 'absolute', top: 0, right: 0, width: 12, height: 12, borderRadius: '50%', background: COLORS.accent, color: '#fff', fontSize: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>{queue.length}</span>
+            )}
+          </button>
+        )}
+
+        {/* Volume + Queue toggle — desktop only */}
         {!isMobile && <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
           <button
             onClick={() => setVolume(v => v === 0 ? 0.7 : 0)}
@@ -2656,202 +2808,245 @@ function App() {
   }
 
   // -------------------------------------------------------------------------
+  // Mobile library view (replaces sidebar on mobile)
+  // -------------------------------------------------------------------------
+  function renderMobileLibrary() {
+    const albums = sidebarAlbums();
+    return (
+      <div style={{ padding: 12 }}>
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 20, fontWeight: 700, color: COLORS.textPrimary }}>Your Library</span>
+            {albums.length > 0 && (
+              <span style={{ fontSize: 12, color: COLORS.textSecondary, background: COLORS.hover, borderRadius: 10, padding: '2px 8px' }}>{albums.length}</span>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <button onClick={() => setShowLibraryFilter(v => !v)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 6, borderRadius: 4, display: 'flex', alignItems: 'center' }}>
+              {Icon.search(16, showLibraryFilter ? COLORS.accent : COLORS.textSecondary)}
+            </button>
+            <button onClick={() => setShowSettings(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 6, borderRadius: 4, display: 'flex', alignItems: 'center' }}>
+              {Icon.gear(16, COLORS.textSecondary)}
+            </button>
+          </div>
+        </div>
+
+        {/* Filter */}
+        {showLibraryFilter && (
+          <input type="text" placeholder="Filter albums..." value={libraryFilter} onChange={e => setLibraryFilter(e.target.value)} autoFocus
+            style={{ width: '100%', padding: '8px 12px', marginBottom: 10, background: COLORS.hover, border: `1px solid ${COLORS.border}`, borderRadius: 6, color: COLORS.textPrimary, fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
+        )}
+
+        {/* Sort controls */}
+        <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+          {[{ key: 'recents', label: 'Recents' }, { key: 'alpha', label: 'A-Z' }, { key: 'artist', label: 'Artist' }].map(s => (
+            <button key={s.key} onClick={() => setLibrarySortBy(s.key)}
+              style={{ padding: '5px 12px', borderRadius: 16, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                background: librarySortBy === s.key ? COLORS.textPrimary : COLORS.hover,
+                color: librarySortBy === s.key ? COLORS.bg : COLORS.textSecondary }} >
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Album list */}
+        {albums.length === 0 ? (
+          <div style={{ textAlign: 'center', color: COLORS.textSecondary, fontSize: 14, padding: '32px 12px' }}>
+            {libraryFilter ? 'No matches' : 'No music yet. Search and add some!'}
+          </div>
+        ) : albums.map(({ artist, album, tracks, coverArt, mbid }) => {
+          const isPlaying_ = currentAlbumInfo?.artist === artist && currentAlbumInfo?.album === album;
+          return (
+            <div key={`${artist}::${album}`}
+              onClick={() => { openAlbumFromLibrary(artist, album, tracks, coverArt, mbid); }}
+              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 8px', borderRadius: 8, cursor: 'pointer', minHeight: 56 }}
+              onContextMenu={e => showContextMenu(e, [
+                { label: 'Play', action: () => playTrack(tracks[0], tracks, 0, { artist, album, coverArt }) },
+                { label: 'Add to Queue', action: () => tracks.forEach(t => addToQueue(t)) },
+              ])}
+            >
+              <AlbumArt src={coverArt} size={52} radius={4} artist={artist} album={album} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: isPlaying_ ? COLORS.accent : COLORS.textPrimary }}>{album}</div>
+                <div style={{ fontSize: 13, color: COLORS.textSecondary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>{artist}</div>
+              </div>
+              {isPlaying_ && <span style={{ flexShrink: 0 }}>{Icon.volumeHigh(16, COLORS.accent)}</span>}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Bottom tab bar (mobile only)
+  // -------------------------------------------------------------------------
+  function renderBottomTabBar() {
+    if (!isMobile) return null;
+    const tabs = [
+      { key: 'search', label: 'Search', icon: Icon.search },
+      { key: 'library', label: 'Library', icon: Icon.libraryIcon },
+    ];
+    return (
+      <nav style={{
+        height: 56, minHeight: 56, background: COLORS.surface,
+        borderTop: `1px solid ${COLORS.border}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-around',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}>
+        {tabs.map(t => {
+          const active = mobileTab === t.key && !['album', 'artist'].includes(view);
+          const isInSubView = (t.key === 'search' && mobileTab === 'search' && ['album', 'artist'].includes(view))
+            || (t.key === 'library' && mobileTab === 'library' && ['album', 'artist'].includes(view));
+          const highlighted = active || isInSubView;
+          return (
+            <button key={t.key}
+              onClick={() => {
+                setMobileTab(t.key);
+                if (t.key === 'search') setView('search');
+                if (t.key === 'library') setView('search'); // triggers mobileShowLibrary via mobileTab
+              }}
+              style={{
+                flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+                background: 'none', border: 'none', cursor: 'pointer', padding: '8px 0',
+                color: highlighted ? COLORS.accent : COLORS.textSecondary,
+              }}>
+              {t.icon(22, highlighted ? COLORS.accent : COLORS.textSecondary)}
+              <span style={{ fontSize: 10, fontWeight: 600 }}>{t.label}</span>
+            </button>
+          );
+        })}
+      </nav>
+    );
+  }
+
+  // -------------------------------------------------------------------------
   // Main render
   // -------------------------------------------------------------------------
   const albumCount = libraryAlbums().length;
 
+  // Determine what the mobile main content shows
+  const mobileShowLibrary = isMobile && mobileTab === 'library' && !['album', 'artist'].includes(view);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: COLORS.bg, color: COLORS.textPrimary, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', overflow: 'hidden' }}>
 
-      {/* Mobile header bar */}
-      {isMobile && (
-        <div style={{ height: 48, minHeight: 48, background: COLORS.surface, borderBottom: `1px solid ${COLORS.border}`, display: 'flex', alignItems: 'center', padding: '0 12px', gap: 12 }}>
-          <button onClick={() => setSidebarOpen(v => !v)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center' }}>
-            {sidebarOpen ? Icon.close(20, COLORS.textPrimary) : Icon.menu(20, COLORS.textPrimary)}
-          </button>
-          <div style={{ fontSize: 18, fontWeight: 800, color: COLORS.accent, letterSpacing: '-0.5px' }}>Not-ify</div>
-        </div>
-      )}
-
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
 
-        {/* Sidebar overlay backdrop on mobile */}
-        {isMobile && sidebarOpen && (
-          <div onClick={() => setSidebarOpen(false)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 20 }} />
-        )}
-
-        {/* Sidebar */}
-        <aside style={{
-          width: 280, minWidth: 280, background: COLORS.surface,
-          borderRight: `1px solid ${COLORS.border}`, display: 'flex', flexDirection: 'column', overflow: 'hidden',
-          ...(isMobile ? {
-            position: 'absolute', top: 0, bottom: 0, left: 0, zIndex: 25,
-            transform: sidebarOpen ? 'translateX(0)' : 'translateX(-100%)',
-            transition: 'transform 0.2s ease',
-          } : {}),
-        }}>
-          {/* Top nav */}
-          <div style={{ padding: '16px 12px 8px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <div style={{ fontSize: 22, fontWeight: 800, color: COLORS.accent, letterSpacing: '-0.5px' }}>Not-ify</div>
-              <button onClick={() => setShowSettings(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, borderRadius: 4, display: 'flex', alignItems: 'center', opacity: 0.6 }}
-                onMouseEnter={e => e.currentTarget.style.opacity = '1'} onMouseLeave={e => e.currentTarget.style.opacity = '0.6'}
-                title="Settings">
-                {Icon.gear(18, COLORS.textSecondary)}
-              </button>
-            </div>
-            <div
-              style={{
-                display: 'flex', alignItems: 'center', padding: '10px 12px',
-                borderRadius: 6, cursor: 'pointer', fontSize: 14,
-                background: view === 'search' ? COLORS.hover : 'transparent',
-                color: view === 'search' ? COLORS.textPrimary : COLORS.textSecondary,
-                fontWeight: view === 'search' ? 600 : 400,
-              }}
-              onClick={() => { setView('search'); setSidebarOpen(false); }}
-              role="button" tabIndex={0}
-            >
-              <span style={{ marginRight: 10 }}>{Icon.search(16, 'currentColor')}</span>
-              <span>Search</span>
-            </div>
-          </div>
-
-          {/* Library section */}
-          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', borderTop: `1px solid ${COLORS.border}`, marginTop: 4 }}>
-            {/* Library header */}
-            <div style={{ padding: '12px 12px 0' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ color: COLORS.textSecondary }}>{Icon.libraryIcon(18, COLORS.textSecondary)}</span>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.textPrimary }}>Your Library</span>
-                  {albumCount > 0 && (
-                    <span style={{ fontSize: 11, color: COLORS.textSecondary, background: COLORS.bg, borderRadius: 10, padding: '1px 6px' }}>
-                      {albumCount}
-                    </span>
-                  )}
-                </div>
-                <button
-                  onClick={() => setShowLibraryFilter(v => !v)}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, borderRadius: 4, display: 'flex', alignItems: 'center' }}
-                  title="Filter library"
-                >
-                  {Icon.search(14, showLibraryFilter ? COLORS.accent : COLORS.textSecondary)}
+        {/* Sidebar — desktop only */}
+        {!isMobile && (
+          <aside style={{ width: 280, minWidth: 280, background: COLORS.surface, borderRight: `1px solid ${COLORS.border}`, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {/* Top nav */}
+            <div style={{ padding: '16px 12px 8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <div style={{ fontSize: 22, fontWeight: 800, color: COLORS.accent, letterSpacing: '-0.5px' }}>Not-ify</div>
+                <button onClick={() => setShowSettings(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, borderRadius: 4, display: 'flex', alignItems: 'center', opacity: 0.6 }}
+                  onMouseEnter={e => e.currentTarget.style.opacity = '1'} onMouseLeave={e => e.currentTarget.style.opacity = '0.6'}
+                  title="Settings">
+                  {Icon.gear(18, COLORS.textSecondary)}
                 </button>
               </div>
-
-              {/* Filter input */}
-              {showLibraryFilter && (
-                <input
-                  type="text"
-                  placeholder="Filter albums..."
-                  value={libraryFilter}
-                  onChange={e => setLibraryFilter(e.target.value)}
-                  autoFocus
-                  style={{
-                    width: '100%', padding: '6px 10px', marginBottom: 8,
-                    background: COLORS.hover, border: `1px solid ${COLORS.border}`,
-                    borderRadius: 4, color: COLORS.textPrimary, fontSize: 12,
-                    outline: 'none', boxSizing: 'border-box',
-                  }}
-                />
-              )}
-
-              {/* Sort controls */}
-              <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
-                {[
-                  { key: 'recents', label: 'Recents' },
-                  { key: 'alpha', label: 'A-Z' },
-                  { key: 'artist', label: 'Artist' },
-                ].map(s => (
-                  <button
-                    key={s.key}
-                    onClick={() => setLibrarySortBy(s.key)}
-                    style={{
-                      padding: '3px 8px', borderRadius: 12, border: 'none', cursor: 'pointer',
-                      fontSize: 11, fontWeight: 600,
-                      background: librarySortBy === s.key ? COLORS.textPrimary : COLORS.hover,
-                      color: librarySortBy === s.key ? COLORS.bg : COLORS.textSecondary,
-                    }}
-                  >
-                    {s.label}
-                  </button>
-                ))}
+              <div
+                style={{
+                  display: 'flex', alignItems: 'center', padding: '10px 12px',
+                  borderRadius: 6, cursor: 'pointer', fontSize: 14,
+                  background: view === 'search' ? COLORS.hover : 'transparent',
+                  color: view === 'search' ? COLORS.textPrimary : COLORS.textSecondary,
+                  fontWeight: view === 'search' ? 600 : 400,
+                }}
+                onClick={() => setView('search')}
+                role="button" tabIndex={0}
+              >
+                <span style={{ marginRight: 10 }}>{Icon.search(16, 'currentColor')}</span>
+                <span>Search</span>
               </div>
             </div>
 
-            {/* Scrollable album list */}
-            <div style={{ flex: 1, overflowY: 'auto', padding: '0 6px 6px' }}>
-              {sidebarAlbums().length === 0 ? (
-                <div style={{ textAlign: 'center', color: COLORS.textSecondary, fontSize: 13, padding: '24px 12px' }}>
-                  {libraryFilter ? 'No matches' : 'No music yet. Search and add some!'}
-                </div>
-              ) : sidebarAlbums().map(({ artist, album, tracks, coverArt, mbid }) => {
-                const isActive = view === 'album' && selectedAlbum && !selectedAlbum.fromSearch
-                  && selectedAlbum.artist === artist && selectedAlbum.album === album;
-                const isPlaying_ = currentAlbumInfo?.artist === artist && currentAlbumInfo?.album === album;
-                return (
-                  <div
-                    key={`${artist}::${album}`}
-                    onClick={() => { openAlbumFromLibrary(artist, album, tracks, coverArt, mbid); setSidebarOpen(false); }}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 10, padding: '6px 6px',
-                      borderRadius: 6, cursor: 'pointer',
-                      background: isActive ? COLORS.hover : 'transparent',
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.background = COLORS.hover}
-                    onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
-                    onContextMenu={e => showContextMenu(e, [
-                      { label: 'Play', action: () => playTrack(tracks[0], tracks, 0, { artist, album, coverArt }) },
-                      { label: 'Add to Queue', action: () => tracks.forEach(t => addToQueue(t)) },
-                      { label: 'Go to Artist', action: async () => {
-                        try {
-                          const res = await fetch(`/api/search?q=${encodeURIComponent(artist)}`);
-                          const data = await res.json();
-                          const a = data.artists?.find(x => x.name.toLowerCase() === artist.toLowerCase()) || data.artists?.[0];
-                          if (a?.mbid) openArtistPage(a.mbid, a.name, a.type);
-                        } catch {}
-                      }},
-                      { divider: true },
-                      { label: 'Remove from Library', danger: true, action: () => removeAlbumFromLibrary(artist, album) },
-                    ])}
-                  >
-                    <AlbumArt src={coverArt} size={48} radius={4} artist={artist} album={album} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{
-                        fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                        color: isPlaying_ ? COLORS.accent : COLORS.textPrimary,
-                      }}>
-                        {album}
-                      </div>
-                      <div style={{
-                        fontSize: 12, color: COLORS.textSecondary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                      }}>
-                        {artist}
-                      </div>
-                    </div>
-                    {isPlaying_ && (
-                      <span style={{ flexShrink: 0 }}>{Icon.volumeHigh(14, COLORS.accent)}</span>
+            {/* Library section */}
+            <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', borderTop: `1px solid ${COLORS.border}`, marginTop: 4 }}>
+              <div style={{ padding: '12px 12px 0' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ color: COLORS.textSecondary }}>{Icon.libraryIcon(18, COLORS.textSecondary)}</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.textPrimary }}>Your Library</span>
+                    {albumCount > 0 && (
+                      <span style={{ fontSize: 11, color: COLORS.textSecondary, background: COLORS.bg, borderRadius: 10, padding: '1px 6px' }}>{albumCount}</span>
                     )}
                   </div>
-                );
-              })}
+                  <button onClick={() => setShowLibraryFilter(v => !v)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, borderRadius: 4, display: 'flex', alignItems: 'center' }}>
+                    {Icon.search(14, showLibraryFilter ? COLORS.accent : COLORS.textSecondary)}
+                  </button>
+                </div>
+                {showLibraryFilter && (
+                  <input type="text" placeholder="Filter albums..." value={libraryFilter} onChange={e => setLibraryFilter(e.target.value)} autoFocus
+                    style={{ width: '100%', padding: '6px 10px', marginBottom: 8, background: COLORS.hover, border: `1px solid ${COLORS.border}`, borderRadius: 4, color: COLORS.textPrimary, fontSize: 12, outline: 'none', boxSizing: 'border-box' }} />
+                )}
+                <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+                  {[{ key: 'recents', label: 'Recents' }, { key: 'alpha', label: 'A-Z' }, { key: 'artist', label: 'Artist' }].map(s => (
+                    <button key={s.key} onClick={() => setLibrarySortBy(s.key)}
+                      style={{ padding: '3px 8px', borderRadius: 12, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                        background: librarySortBy === s.key ? COLORS.textPrimary : COLORS.hover, color: librarySortBy === s.key ? COLORS.bg : COLORS.textSecondary }}>
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div style={{ flex: 1, overflowY: 'auto', padding: '0 6px 6px' }}>
+                {sidebarAlbums().length === 0 ? (
+                  <div style={{ textAlign: 'center', color: COLORS.textSecondary, fontSize: 13, padding: '24px 12px' }}>
+                    {libraryFilter ? 'No matches' : 'No music yet. Search and add some!'}
+                  </div>
+                ) : sidebarAlbums().map(({ artist, album, tracks, coverArt, mbid }) => {
+                  const isActive = view === 'album' && selectedAlbum && !selectedAlbum.fromSearch
+                    && selectedAlbum.artist === artist && selectedAlbum.album === album;
+                  const isPlaying_ = currentAlbumInfo?.artist === artist && currentAlbumInfo?.album === album;
+                  return (
+                    <div key={`${artist}::${album}`} onClick={() => openAlbumFromLibrary(artist, album, tracks, coverArt, mbid)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 6px', borderRadius: 6, cursor: 'pointer', background: isActive ? COLORS.hover : 'transparent' }}
+                      onMouseEnter={e => e.currentTarget.style.background = COLORS.hover}
+                      onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
+                      onContextMenu={e => showContextMenu(e, [
+                        { label: 'Play', action: () => playTrack(tracks[0], tracks, 0, { artist, album, coverArt }) },
+                        { label: 'Add to Queue', action: () => tracks.forEach(t => addToQueue(t)) },
+                        { label: 'Go to Artist', action: async () => {
+                          try { const res = await fetch(`/api/search?q=${encodeURIComponent(artist)}`); const data = await res.json();
+                            const a = data.artists?.find(x => x.name.toLowerCase() === artist.toLowerCase()) || data.artists?.[0];
+                            if (a?.mbid) openArtistPage(a.mbid, a.name, a.type); } catch {} }},
+                        { divider: true },
+                        { label: 'Remove from Library', danger: true, action: () => removeAlbumFromLibrary(artist, album) },
+                      ])}>
+                      <AlbumArt src={coverArt} size={48} radius={4} artist={artist} album={album} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: isPlaying_ ? COLORS.accent : COLORS.textPrimary }}>{album}</div>
+                        <div style={{ fontSize: 12, color: COLORS.textSecondary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{artist}</div>
+                      </div>
+                      {isPlaying_ && <span style={{ flexShrink: 0 }}>{Icon.volumeHigh(14, COLORS.accent)}</span>}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-
-          {renderBgDownloadIndicator()}
-          {renderDownloadIndicator()}
-        </aside>
+            {renderBgDownloadIndicator()}
+            {renderDownloadIndicator()}
+          </aside>
+        )}
 
         {/* Main content */}
         <main style={{ flex: 1, position: 'relative', overflow: 'hidden', display: 'flex' }}>
-          <div ref={mainContentRef} style={{ flex: 1, overflowY: 'auto', padding: isMobile ? 12 : 28 }}>
-            {view === 'search' && renderSearch()}
-            {view === 'album' && renderAlbum()}
-            {view === 'artist' && renderArtist()}
-            {!['search', 'album', 'artist'].includes(view) && (
-              <div style={{ textAlign: 'center', color: COLORS.textSecondary, marginTop: 80, fontSize: 15 }}>
-                Select an album from your library, or search for new music.
-              </div>
+          <div ref={mainContentRef} style={{ flex: 1, overflowY: 'auto', padding: isMobile ? 12 : 28, paddingBottom: isMobile ? 8 : 28 }}>
+            {mobileShowLibrary ? renderMobileLibrary() : (
+              <>
+                {view === 'search' && renderSearch()}
+                {view === 'album' && renderAlbum()}
+                {view === 'artist' && renderArtist()}
+                {!isMobile && !['search', 'album', 'artist'].includes(view) && (
+                  <div style={{ textAlign: 'center', color: COLORS.textSecondary, marginTop: 80, fontSize: 15 }}>
+                    Select an album from your library, or search for new music.
+                  </div>
+                )}
+              </>
             )}
           </div>
           {renderQueuePanel()}
@@ -2859,6 +3054,7 @@ function App() {
       </div>
 
       {renderPlayer()}
+      {renderBottomTabBar()}
       {renderContextMenu()}
       {renderSettingsModal()}
 
@@ -2897,3 +3093,6 @@ function App() {
 }
 
 export default App;
+
+// Named exports for unit/component tests (pure functions + presentational components)
+export { formatTime, buildTrackPath, debounce, trackRowStyle, AlbumArt, SkeletonCard, TopResultCard, ArtistPill, AlbumCard, hashColor, Icon };

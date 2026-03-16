@@ -264,3 +264,6 @@ router.delete('/library/track/:id', (req, res) => {
 });
 
 module.exports = router;
+
+// Expose pure functions for unit testing
+module.exports._test = { cleanFolderName, fileId, scanMusicDir, QUALITY_RANK };

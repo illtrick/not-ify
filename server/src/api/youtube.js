@@ -53,7 +53,7 @@ let activeYtDownload = null; // { abort }
 function ytQueueAdd(item) {
   const entry = { id: ++ytQueueIdCounter, ...item, status: 'queued', progress: 0, error: null };
   ytQueue.push(entry);
-  ytQueueProcess(); // kick off processing if idle
+  ytQueueProcess().catch(err => console.error('[yt-queue] Unhandled queue error:', err.message)); // kick off processing if idle
   return entry;
 }
 
@@ -112,8 +112,17 @@ async function ytDownloadOne(entry, abort) {
   ];
 
   const downloadedFile = await new Promise((resolve, reject) => {
-    const proc = spawn('yt-dlp', args, { timeout: 120000 });
+    const proc = spawn('yt-dlp', args);
     let lastFile = '';
+    let settled = false;
+
+    // 120s hard timeout — abort via the existing AbortController so cleanup is unified
+    const timeoutId = setTimeout(() => {
+      if (!settled) {
+        console.warn(`[yt-queue] Timeout reached for: ${dlTitle}`);
+        abort.abort();
+      }
+    }, 120000);
 
     const onAbort = () => { try { proc.kill('SIGTERM'); } catch {} };
     abort.signal.addEventListener('abort', onAbort, { once: true });
@@ -136,6 +145,9 @@ async function ytDownloadOne(entry, abort) {
     });
 
     proc.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
       abort.signal.removeEventListener('abort', onAbort);
       if (abort.signal.aborted) return reject(new Error('Download cancelled'));
       if (code !== 0) return reject(new Error(`yt-dlp exited with code ${code}`));
@@ -148,6 +160,9 @@ async function ytDownloadOne(entry, abort) {
     });
 
     proc.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
       abort.signal.removeEventListener('abort', onAbort);
       reject(err);
     });
@@ -216,6 +231,90 @@ router.post('/download/yt/batch', (req, res) => {
   if (!Array.isArray(tracks) || tracks.length === 0) return res.status(400).json({ error: 'Missing tracks array' });
   const entries = tracks.filter(t => t.url).map(t => ytQueueAdd(t));
   res.json({ queued: entries.length, ids: entries.map(e => e.id) });
+});
+
+// POST /api/download/yt/album — Album-aware YT download
+// Accepts MB tracklist + artist/album info, searches YT for each track, queues downloads
+router.post('/download/yt/album', async (req, res) => {
+  const { artist, album, tracks, rgid, mbid, coverArt } = req.body;
+  if (!artist || !album) return res.status(400).json({ error: 'Missing artist or album' });
+  if (!Array.isArray(tracks) || tracks.length === 0) return res.status(400).json({ error: 'Missing tracks array' });
+
+  const safeArtist = sanitizePath(artist);
+  const safeAlbum = sanitizePath(album);
+
+  // For each track, search YouTube and queue download
+  const queued = [];
+  const errors = [];
+
+  for (const track of tracks) {
+    const trackTitle = track.title || track.name;
+    if (!trackTitle) continue;
+
+    const position = track.position || (queued.length + errors.length + 1);
+    const paddedPos = String(position).padStart(2, '0');
+
+    try {
+      // Search YouTube for this specific track
+      const searchQuery = `${artist} ${trackTitle}`;
+      const ytResults = await yt.searchYouTube(searchQuery, 3).catch(() => []);
+
+      if (ytResults.length === 0) {
+        errors.push({ track: trackTitle, error: 'No YouTube results' });
+        continue;
+      }
+
+      // Pick the best result — prefer shorter videos (likely just the song, not a full album)
+      const trackLengthSec = track.lengthMs ? track.lengthMs / 1000 : null;
+      let best = ytResults[0];
+      if (trackLengthSec) {
+        // Find the YT result closest to the expected track length
+        best = ytResults.reduce((a, b) => {
+          const diffA = Math.abs((a.duration || 0) - trackLengthSec);
+          const diffB = Math.abs((b.duration || 0) - trackLengthSec);
+          return diffA <= diffB ? a : b;
+        });
+      }
+
+      const entry = ytQueueAdd({
+        url: best.url || `https://www.youtube.com/watch?v=${best.id}`,
+        title: `${paddedPos}-${sanitizePath(trackTitle)}`,
+        artist: safeArtist,
+        album: safeAlbum,
+        coverArt: coverArt || null,
+      });
+      queued.push({ id: entry.id, track: trackTitle, position, ytTitle: best.title });
+    } catch (err) {
+      errors.push({ track: trackTitle, error: err.message });
+    }
+  }
+
+  // Write album-level metadata
+  if (queued.length > 0) {
+    const destDir = path.join(MUSIC_DIR, safeArtist, safeAlbum);
+    fs.mkdirSync(destDir, { recursive: true });
+    const metaPath = path.join(destDir, '.metadata.json');
+    const metadata = {
+      artist,
+      album,
+      rgid: rgid || null,
+      mbid: mbid || null,
+      coverArt: coverArt || null,
+      source: 'yt-album-download',
+      trackCount: tracks.length,
+      downloadedAt: new Date().toISOString(),
+    };
+    try {
+      fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2));
+    } catch {}
+  }
+
+  res.json({
+    queued: queued.length,
+    errors: errors.length,
+    tracks: queued,
+    failedTracks: errors,
+  });
 });
 
 // Stream audio proxy

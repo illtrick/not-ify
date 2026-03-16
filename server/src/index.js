@@ -294,6 +294,10 @@ app.use('/api', youtubeRouter);
 const lastfmRouter = require('./api/lastfm');
 app.use('/api', lastfmRouter);
 
+// Spotify/Last.fm import pipeline
+const importRouter = require('./api/import');
+app.use('/api', importRouter);
+
 // SPA fallback — serve index.html for non-API routes
 app.get('*', (req, res) => {
   const indexPath = path.join(__dirname, '../../client/dist/index.html');
@@ -304,6 +308,16 @@ app.get('*', (req, res) => {
   }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Not-ify server running on port ${PORT}`);
+// Safety net — log unhandled rejections instead of crashing the process
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason instanceof Error ? reason.message : reason);
 });
+
+// Only bind to a port when run directly (not when required by tests)
+if (require.main === module) {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Not-ify server running on port ${PORT}`);
+  });
+}
+
+module.exports = app;

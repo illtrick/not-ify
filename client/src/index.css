@@ -131,3 +131,13 @@ input[type="range"]::-moz-range-thumb {
 .spin-slow {
   animation: pulse-subtle 1.5s ease-in-out infinite;
 }
+
+/* Mobile responsive */
+@media (max-width: 767px) {
+  ::-webkit-scrollbar { width: 4px; }
+  body { padding-bottom: env(safe-area-inset-bottom); }
+  input[type="range"]::-webkit-slider-thumb { width: 16px; height: 16px; margin-top: -6px; }
+  input[type="range"]::-moz-range-thumb { width: 16px; height: 16px; }
+  .album-card:hover { transform: none; box-shadow: none; }
+  .album-card:active { transform: scale(0.97); transition: transform 0.1s ease; }
+}

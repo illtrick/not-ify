@@ -6,6 +6,95 @@ const llm = require('../services/llm');
 
 const router = express.Router();
 
+// ── Phase 1: Smart Query Normalization ──────────────────────────────────────
+// Spotify album names include subtitles that poison torrent search:
+//   "Interstellar (Original Motion Picture Soundtrack)" → 0 results on ApiBay
+//   "Interstellar" → 1+ results
+// This function strips those suffixes before searching.
+
+// Parenthetical content to strip (case-insensitive)
+const PAREN_STRIP_RE = /\s*\((?:Original\s+(?:Motion\s+Picture\s+|Game\s+)?Soundtrack|Original\s+Score|Deluxe\s*(?:Version|Edition)?|Remaster(?:ed)?(?:\s+\d{4})?|Expanded\s+Edition|Special\s+Edition|Anniversary\s+Edition|Collector'?s?\s+Edition|Limited\s+Edition|Bonus\s+Track\s+(?:Version|Edition)|Apple\s+TV\+?[^)]*|Official\s+[^)]*|feat\.\s+[^)]*|ft\.\s+[^)]*|with\s+[^)]*|Live\s+(?:at|from|in)\s+[^)]*)\)\s*/gi;
+
+// Volume / disc markers (covers "Vol. 1", "Vols. 4, 5, & 6", "Volume 2", "Disc 1", "CD2")
+const VOL_RE = /\s*,?\s*Vols?\.\s*[\d,\s&]+|\s*Vol(?:ume)?\.?\s*\d+(?:\s*[,&]\s*\d+)*|\s*Disc\s+\d+|\s*CD\s*\d+/gi;
+
+// Edition markers (not in parens)
+const EDITION_RE = /\s*[-–—]?\s*(?:Deluxe|Special|Anniversary|Expanded|Collector'?s?|Limited|Super\s+Deluxe|Complete)\s+Edition\b/gi;
+
+// Single/EP markers
+const SINGLE_EP_RE = /\s*[-–—]\s*(?:Single|EP)\s*$/gi;
+
+// Trailing year in parens: (1997), (2024)
+const TRAILING_YEAR_RE = /\s*\(\d{4}\)\s*$/g;
+
+// Subtitle after colon (only strip if the colon part contains known noise like "Vol.", "Soundtrack", etc.)
+const NOISY_SUBTITLE_RE = /\s*:\s*(?:Vol(?:ume)?\.?\s*\d+|Original\s+(?:Motion\s+Picture\s+)?Soundtrack|Music\s+from|Deluxe|Remaster(?:ed)?|Complete\s+Edition)[^]*/gi;
+
+// Diacritic folding for search (ø→o, ä→a, etc.)
+function foldDiacritics(s) {
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ø/gi, 'o').replace(/æ/gi, 'ae').replace(/ð/gi, 'd').replace(/þ/gi, 'th').replace(/ł/gi, 'l');
+}
+
+function cleanSearchQuery(q) {
+  if (!q) return q;
+  let cleaned = q;
+  // Strip parenthetical noise
+  cleaned = cleaned.replace(PAREN_STRIP_RE, ' ');
+  // Strip any remaining parens that are purely years
+  cleaned = cleaned.replace(TRAILING_YEAR_RE, '');
+  // Strip noisy subtitle after colon
+  cleaned = cleaned.replace(NOISY_SUBTITLE_RE, '');
+  // Strip volume/disc markers
+  cleaned = cleaned.replace(VOL_RE, ' ');
+  // Strip edition markers
+  cleaned = cleaned.replace(EDITION_RE, '');
+  // Strip single/EP markers
+  cleaned = cleaned.replace(SINGLE_EP_RE, '');
+  // Collapse whitespace
+  cleaned = cleaned.replace(/\s{2,}/g, ' ').trim();
+  return cleaned;
+}
+
+// Multi-strategy search: try progressively simpler queries if ApiBay returns 0
+async function searchMusicMultiStrategy(query) {
+  const cleaned = cleanSearchQuery(query);
+
+  // Strategy 1: Cleaned query (most common fix)
+  let results = await searchMusic(cleaned);
+  if (results.length > 0) return { results, usedQuery: cleaned };
+
+  // Strategy 2: If cleaned query differs from original, try original too
+  if (cleaned !== query) {
+    results = await searchMusic(query);
+    if (results.length > 0) return { results, usedQuery: query };
+  }
+
+  // Strategy 3: First 3-4 significant words only (for long album names)
+  const words = cleaned.split(/\s+/).filter(w => w.length > 1);
+  if (words.length > 4) {
+    const short = words.slice(0, 4).join(' ');
+    results = await searchMusic(short);
+    if (results.length > 0) return { results, usedQuery: short };
+  }
+
+  // Strategy 4: Diacritic-folded version (for ø, ä, ł etc.)
+  const folded = foldDiacritics(cleaned);
+  if (folded !== cleaned) {
+    results = await searchMusic(folded);
+    if (results.length > 0) return { results, usedQuery: folded };
+  }
+
+  // Strategy 5: Artist name only (if query looks like "Artist Album")
+  // Try first word or first two words as artist
+  if (words.length >= 3) {
+    const artistOnly = words.slice(0, 2).join(' ');
+    results = await searchMusic(artistOnly);
+    if (results.length > 0) return { results, usedQuery: artistOnly };
+  }
+
+  return { results: [], usedQuery: cleaned };
+}
+
 // Decode common HTML entities from torrent names
 function decodeEntities(s) {
   return (s || '')
@@ -257,12 +346,16 @@ router.get('/search', async (req, res) => {
   if (!q) return res.status(400).json({ error: 'Missing query parameter q' });
 
   try {
-    // Run both searches in parallel
-    const [torrents, mbReleases, mbArtists] = await Promise.all([
-      searchMusic(q),
+    // Clean the query for torrent search; keep raw for MB (exact names work well there)
+    const cleanedQ = cleanSearchQuery(q);
+
+    // Run torrent search with multi-strategy fallback, MB searches with raw query
+    const [torrentResult, mbReleases, mbArtists] = await Promise.all([
+      searchMusicMultiStrategy(q),
       searchReleases(q),
       searchArtists(q),
     ]);
+    const torrents = torrentResult.results;
 
     // Determine the primary artist for relevance filtering
     const primaryArtist = mbArtists[0]?.name || q;
@@ -387,9 +480,38 @@ router.get('/search', async (req, res) => {
     // Secondary: unmatched torrents that passed filters, limited to 10
     const otherResults = unmatched.slice(0, 10);
 
-    // If no torrent results at all, search YouTube + SoundCloud as fallback
+    // ── Phase 2: Always surface MB albums, even without torrent sources ────
+    // Collect rgids already represented in torrent-matched albums
+    const seenRgids = new Set(albums.map(a => a.rgid).filter(Boolean));
+    const seenMbids = new Set(albums.map(a => a.mbid).filter(Boolean));
+
+    // Add MB-only albums (no torrent source) that aren't already in torrent results
+    const mbOnlyAlbums = allMbReleases
+      .filter(rel => {
+        if (rel.rgid && seenRgids.has(rel.rgid)) return false;
+        if (rel.mbid && seenMbids.has(rel.mbid)) return false;
+        return true;
+      })
+      .slice(0, 12)
+      .map(rel => ({
+        id: `mb:${rel.rgid || rel.mbid}`,
+        artist: rel.artist,
+        album: rel.album,
+        year: rel.year || '',
+        coverArt: rel.rgid
+          ? `/api/cover/rg/${rel.rgid}${rel.mbid ? `?mbid=${rel.mbid}` : ''}`
+          : rel.mbid ? `/api/cover/${rel.mbid}` : null,
+        mbid: rel.mbid,
+        rgid: rel.rgid || null,
+        trackCount: rel.trackCount || null,
+        hasCoverArt: !!(rel.rgid || rel.mbid),
+        bestSeeders: 0,
+        sources: [],
+        availableVia: 'youtube', // No torrent, but can stream/download via YT
+      }));
+
+    // Search YouTube + SoundCloud as streaming fallback
     let streamingResults = [];
-    let mbAlbums = [];
     if (albums.length === 0 && otherResults.length === 0) {
       try {
         const [ytResults, scResults] = await Promise.all([
@@ -419,23 +541,17 @@ router.get('/search', async (req, res) => {
       } catch (err) {
         console.error(`Streaming search fallback error: ${err.message}`);
       }
-
-      // Include MusicBrainz albums (no torrent sources) so client can show Albums section
-      mbAlbums = allMbReleases.slice(0, 12).map(rel => ({
-        id: `mb:${rel.rgid || rel.mbid}`,
-        artist: rel.artist,
-        album: rel.album,
-        year: rel.year || '',
-        coverArt: rel.rgid
-          ? `/api/cover/rg/${rel.rgid}${rel.mbid ? `?mbid=${rel.mbid}` : ''}`
-          : rel.mbid ? `/api/cover/${rel.mbid}` : null,
-        mbid: rel.mbid,
-        rgid: rel.rgid || null,
-        trackCount: rel.trackCount || null,
-      }));
     }
 
-    res.json({ query: q, albums, otherResults, artists: mbArtists, streamingResults, mbAlbums });
+    // mbAlbums is kept for backwards compat but now always populated
+    res.json({
+      query: q,
+      albums,
+      otherResults,
+      artists: mbArtists,
+      streamingResults,
+      mbAlbums: mbOnlyAlbums,
+    });
 
     // Fire-and-forget: LLM parses regex failures in background, populates cache
     // Next search for same terms will hit cache and return better results
@@ -498,3 +614,19 @@ router.get('/artist/:mbid', async (req, res) => {
 });
 
 module.exports = router;
+
+// Expose pure functions for unit testing (not part of public API)
+module.exports._test = {
+  parseTorrentName,
+  cleanDisplayName,
+  cleanSearchQuery,
+  foldDiacritics,
+  decodeEntities,
+  normalize,
+  editDistance,
+  matchToRelease,
+  scoreSource,
+  isJunkTorrent,
+  artistRelevant,
+  rawGroupKey,
+};
