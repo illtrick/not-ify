@@ -987,7 +987,7 @@ function App() {
       setQueue(rest);
       // If this is a pending YT track, resolve it first
       if (next.ytPending) {
-        playFromYouTube(next.title, next.artist, next.album, next.coverArt);
+        playFromYouTube(next.title, next.artist, next.album, next.coverArt, next.trackArtist);
         return;
       }
       playTrack(next, playlist, playlistIdx, currentAlbumInfo);
@@ -1012,12 +1012,14 @@ function App() {
   }
 
   // YouTube quick-play: search YT and stream immediately
-  async function playFromYouTube(trackTitle, albumArtist, albumName, coverArt) {
+  async function playFromYouTube(trackTitle, albumArtist, albumName, coverArt, trackArtist) {
     if (ytSearching) return; // Prevent double-trigger
     setYtSearching(true);
     setYtPendingTrack(trackTitle);
     try {
-      const q = `${albumArtist} ${trackTitle} audio`;
+      // For compilation/VA albums, use the track-specific artist for a better YT match
+      const searchArtist = trackArtist || albumArtist;
+      const q = `${searchArtist} ${trackTitle} audio`;
       const res = await fetch(`/api/yt/search?q=${encodeURIComponent(q)}`);
       const results = await res.json();
       if (!results.length) throw new Error('No results');
@@ -1025,7 +1027,7 @@ function App() {
       const track = {
         id: `yt-${best.id}`,
         title: trackTitle,
-        artist: albumArtist,
+        artist: trackArtist || albumArtist,
         album: albumName,
         coverArt,
         path: `/api/yt/stream/${best.id}`,
@@ -1034,14 +1036,15 @@ function App() {
       };
       playTrack(track, [], 0, { artist: albumArtist, album: albumName, coverArt });
       // Auto-download this single track in background
-      if (albumArtist && !isInLibrary(albumArtist, albumName || 'Singles')) {
+      const dlArtist = trackArtist || albumArtist;
+      if (dlArtist && !isInLibrary(dlArtist, albumName || 'Singles')) {
         fetch('/api/download/yt', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             url: `https://www.youtube.com/watch?v=${best.id}`,
             title: trackTitle,
-            artist: albumArtist,
+            artist: dlArtist,
             album: albumName || 'Singles',
             coverArt: coverArt || null,
           }),
@@ -1079,13 +1082,14 @@ function App() {
   // Also triggers auto-download of the album
   async function playAllFromYouTube(tracks, albumArtist, albumName, coverArt) {
     if (!tracks.length) return;
-    // Play first track
-    await playFromYouTube(tracks[0].title, albumArtist, albumName, coverArt);
+    // Play first track — pass track-specific artist for VA/compilation albums
+    await playFromYouTube(tracks[0].title, albumArtist, albumName, coverArt, tracks[0].artist);
     // Queue remaining tracks as YT lookups (lazy — resolved when played)
     const queueTracks = tracks.slice(1).map(t => ({
       id: `yt-pending-${t.position}`,
       title: t.title,
-      artist: albumArtist,
+      artist: t.artist || albumArtist,
+      trackArtist: t.artist, // preserve per-track artist for YT search
       album: albumName,
       coverArt,
       isYtPreview: true,
