@@ -9,4 +9,6 @@ module.exports = {
   testTimeout: 10000,
   // Suppress console output in tests (keep test output clean)
   silent: false,
+  // Force exit after tests complete (search tests have open handle leak)
+  forceExit: true,
 };
