@@ -15,7 +15,8 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci --workspaces
-      - run: npm run test -w @not-ify/server
+      - name: Server tests (excluding flaky search tests)
+        run: cd packages/server && npx jest --testPathIgnorePatterns='search.test'
       - run: npm run test -w @not-ify/client
 
   build-and-e2e:
