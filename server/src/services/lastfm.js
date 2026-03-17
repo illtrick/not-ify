@@ -234,6 +234,18 @@ const getTopTracks = cached('topTracks', 10 * 60 * 1000, async (user, period = '
   return data.toptracks?.track || [];
 });
 
+const getArtistTopTracks = cached('artistTopTracks', 30 * 60 * 1000, async (artist, limit = 10) => {
+  const data = await lfmFetch({ method: 'artist.getTopTracks', artist, limit: String(limit), autocorrect: '1' });
+  const tracks = data.toptracks?.track || [];
+  return tracks.map(t => ({
+    name: t.name,
+    playcount: t.playcount,
+    listeners: t.listeners,
+    url: t.url,
+    rank: t['@attr']?.rank,
+  }));
+});
+
 module.exports = {
   getConfig,
   saveConfig,
@@ -247,4 +259,5 @@ module.exports = {
   getTopArtists,
   getTopAlbums,
   getTopTracks,
+  getArtistTopTracks,
 };

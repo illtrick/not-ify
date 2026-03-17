@@ -1,6 +1,6 @@
 const express = require('express');
 const { searchMusic } = require('../services/search');
-const { searchReleases, searchArtists, browseArtistReleases, getReleaseTracks, getReleaseGroupTracks } = require('../services/musicbrainz');
+const { searchReleases, searchArtists, browseArtistReleases, getReleaseTracks, getReleaseGroupTracks, searchReleasesFuzzy, searchArtistsFuzzy, searchRecordings, normalizeQuery, getArtistDetails } = require('../services/musicbrainz');
 const { searchYouTube, searchSoundCloud } = require('../services/youtube');
 const llm = require('../services/llm');
 
@@ -346,21 +346,115 @@ router.get('/search', async (req, res) => {
   if (!q) return res.status(400).json({ error: 'Missing query parameter q' });
 
   try {
-    // Clean the query for torrent search; keep raw for MB (exact names work well there)
+    // Clean the query for torrent search; normalize for MB
     const cleanedQ = cleanSearchQuery(q);
+    const mbQuery = normalizeQuery(q);
 
-    // Run torrent search with multi-strategy fallback, MB searches with raw query
+    // Run torrent search with multi-strategy fallback, MB searches with normalized query
     const [torrentResult, mbReleases, mbArtists] = await Promise.all([
       searchMusicMultiStrategy(q),
-      searchReleases(q),
-      searchArtists(q),
+      searchReleases(mbQuery),
+      searchArtists(mbQuery),
     ]);
     const torrents = torrentResult.results;
+
+    // ── Multi-strategy MB enhancement ─────────────────────────────────────
+    let finalMbReleases = mbReleases;
+    let finalMbArtists = mbArtists;
+
+    // Check if top artist is a close match to the full query (not just a substring)
+    const topArtistScore = mbArtists[0]?.score || 0;
+    const topArtistMatchesQuery = topArtistScore >= 95 &&
+      normalize(mbArtists[0]?.name || '') === normalize(mbQuery);
+    const hasStrongResults = topArtistMatchesQuery && mbReleases.length > 0;
+
+    // Strategy A: Compound word join/split — always try for multi-word queries
+    // "ego pusher" → "egopusher" catches compound artist names
+    const words = mbQuery.split(/\s+/);
+    if (words.length >= 2) {
+      const joinedQuery = words.join('');
+      try {
+        const [altReleases, altArtists] = await Promise.all([
+          searchReleases(joinedQuery),
+          searchArtists(joinedQuery),
+        ]);
+        // If joined query finds a strong artist match, merge or replace
+        const bestAlt = altArtists[0];
+        if (bestAlt?.score >= 90) {
+          if (!hasStrongResults || bestAlt.score > topArtistScore) {
+            // Joined form is better — use it as primary
+            finalMbReleases = altReleases;
+            finalMbArtists = altArtists;
+          } else {
+            // Both good — merge (compound artist results after primary)
+            const existingRgids = new Set(finalMbReleases.map(r => r.rgid));
+            const existingMbids = new Set(finalMbArtists.map(a => a.mbid));
+            finalMbReleases = [...finalMbReleases, ...altReleases.filter(r => !existingRgids.has(r.rgid))];
+            finalMbArtists = [...finalMbArtists, ...altArtists.filter(a => !existingMbids.has(a.mbid))];
+          }
+        }
+      } catch {}
+    }
+
+    // Strategy B: Lucene fuzzy search (~) — catches typos like "balmoreha" → "Balmorhea"
+    // Only fire if we still don't have strong results
+    if (!finalMbArtists.some(a => a.score >= 95 && normalize(a.name) === normalize(mbQuery))) {
+      try {
+        const [fuzzyReleases, fuzzyArtists] = await Promise.all([
+          searchReleasesFuzzy(mbQuery),
+          searchArtistsFuzzy(mbQuery),
+        ]);
+        if (fuzzyArtists.length > 0 || fuzzyReleases.length > 0) {
+          const existingRgids = new Set(finalMbReleases.map(r => r.rgid));
+          finalMbReleases = [...finalMbReleases, ...fuzzyReleases.filter(r => !existingRgids.has(r.rgid))];
+          if (fuzzyArtists.some(a => a.score >= 70)) {
+            const existingMbids = new Set(finalMbArtists.map(a => a.mbid));
+            finalMbArtists = [...finalMbArtists, ...fuzzyArtists.filter(a => !existingMbids.has(a.mbid))];
+          }
+        }
+      } catch {}
+    }
+
+    // ── Recording search (track-level) ──────────────────────────────────────
+    // If query looks like "artist trackname" (we found the artist but no album match),
+    // search MB recordings to find the specific track → album mapping
+    let recordingAlbums = [];
+    const topArtistMatch = finalMbArtists[0];
+    if (topArtistMatch?.score >= 90) {
+      // Check if query has words beyond the artist name
+      const artistWords = topArtistMatch.name.toLowerCase().split(/\s+/);
+      const queryWords = mbQuery.toLowerCase().split(/\s+/);
+      const extraWords = queryWords.filter(w => !artistWords.includes(w) && w.length > 2);
+
+      if (extraWords.length > 0) {
+        // Query has extra words beyond artist name — could be a track title
+        try {
+          const recQuery = `artist:"${topArtistMatch.name}" AND recording:"${extraWords.join(' ')}"`;
+          const recordings = await searchRecordings(recQuery);
+          // Convert recording results to album format for merging
+          const seenRgids = new Set();
+          for (const rec of recordings) {
+            if (rec.rgid && !seenRgids.has(rec.rgid)) {
+              seenRgids.add(rec.rgid);
+              recordingAlbums.push({
+                mbid: rec.mbid,
+                rgid: rec.rgid,
+                artist: rec.artist,
+                album: rec.album,
+                year: rec.year,
+                trackCount: null,
+                _fromRecording: rec.title, // track title that matched
+              });
+            }
+          }
+        } catch {}
+      }
+    }
 
     // Determine the primary artist for relevance filtering
     // Skip special-purpose MB artists that poison results
     const SKIP_ARTISTS = new Set(['[unknown]', 'unknown', 'various artists', 'soundtrack', '[no artist]']);
-    const validArtists = mbArtists.filter(a => !SKIP_ARTISTS.has(a.name.toLowerCase()));
+    const validArtists = finalMbArtists.filter(a => !SKIP_ARTISTS.has(a.name.toLowerCase()));
     const primaryArtist = validArtists[0]?.name || q;
 
     // If we have a strong artist match (score >= 90), browse their discography
@@ -369,16 +463,27 @@ router.get('/search', async (req, res) => {
     // Skip artist browse for soundtrack/ost queries — the artist match is coincidental
     // (e.g. "dark soundtrack" matches "Dark Tranquillity" but user wants the Netflix Dark OST)
     const isSoundtrackQuery = /\b(soundtrack|ost|score)\b/i.test(q);
-    let allMbReleases = mbReleases;
+    let allMbReleases = finalMbReleases;
     const browseCandidate = validArtists[0];
     if (browseCandidate?.score >= 90 && browseCandidate?.mbid && !isSoundtrackQuery) {
       try {
         const artistReleases = await browseArtistReleases(browseCandidate.mbid, browseCandidate.name);
         // Merge: artist browse results first, then generic search results (dedup by rgid)
         const seenRgids = new Set(artistReleases.map(r => r.rgid));
-        allMbReleases = [...artistReleases, ...mbReleases.filter(r => !seenRgids.has(r.rgid))];
+        allMbReleases = [...artistReleases, ...finalMbReleases.filter(r => !seenRgids.has(r.rgid))];
       } catch (err) {
         console.error(`Artist browse failed, using generic results: ${err.message}`);
+      }
+    }
+
+    // Merge recording-matched albums into allMbReleases (dedup by rgid)
+    if (recordingAlbums.length > 0) {
+      const existingRgids = new Set(allMbReleases.map(r => r.rgid).filter(Boolean));
+      for (const ra of recordingAlbums) {
+        if (ra.rgid && !existingRgids.has(ra.rgid)) {
+          allMbReleases.push(ra);
+          existingRgids.add(ra.rgid);
+        }
       }
     }
 
@@ -615,7 +720,10 @@ router.get('/artist/:mbid', async (req, res) => {
 
   try {
     const artistName = name || 'Unknown Artist';
-    const releases = await browseArtistReleases(mbid, artistName);
+    const [releases, details] = await Promise.all([
+      browseArtistReleases(mbid, artistName),
+      getArtistDetails(mbid).catch(() => null),
+    ]);
 
     // Add cover art URLs
     const withCoverArt = releases.map(r => ({
@@ -625,10 +733,51 @@ router.get('/artist/:mbid', async (req, res) => {
         : r.mbid ? `/api/cover/${r.mbid}` : null,
     }));
 
-    res.json({ mbid, name: artistName, releases: withCoverArt });
+    res.json({ mbid, name: artistName, releases: withCoverArt, details: details || null });
   } catch (err) {
     console.error(`Artist endpoint error: ${err.message}`);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/recording/lookup?artist=X&track=Y — Find which album a track belongs to
+// Prefers official studio albums over live bootlegs, compilations, etc.
+router.get('/recording/lookup', async (req, res) => {
+  const { artist, track } = req.query;
+  if (!artist || !track) return res.json(null);
+  try {
+    const query = `artist:"${artist}" AND recording:"${track}"`;
+    const results = await searchRecordings(query);
+    const norm = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    // Filter to exact artist matches
+    const artistMatches = results.filter(r => norm(r.artist) === norm(artist));
+    const candidates = artistMatches.length > 0 ? artistMatches : results;
+    if (candidates.length === 0) return res.json(null);
+
+    // Score each candidate to prefer studio albums
+    // Live bootlegs have date-formatted names: "2002-04-24: Venue, City"
+    // Compilations have "Greatest Hits", "Best of", etc.
+    const LIVE_RE = /^\d{4}-\d{2}-\d{2}[:\s]|^Live\s+(at|in|from)\b|\bLive\b.*\b(Tour|Concert|Show)\b/i;
+    const COMPILATION_RE = /\b(Greatest\s+Hits|Best\s+of|Essentials|Collection|Anthology)\b/i;
+
+    function candidateScore(r) {
+      let score = r.score || 0;
+      if (LIVE_RE.test(r.album)) score -= 200;
+      if (COMPILATION_RE.test(r.album)) score -= 50;
+      // Prefer results with a year (well-catalogued official releases tend to have dates)
+      if (r.year && r.year.length === 4) score += 10;
+      return score;
+    }
+
+    const sorted = candidates.slice().sort((a, b) => candidateScore(b) - candidateScore(a));
+    const match = sorted[0];
+    if (match && match.rgid) {
+      match.coverArt = `/api/cover/rg/${match.rgid}`;
+    }
+    res.json(match);
+  } catch (err) {
+    console.error('Recording lookup failed:', err.message);
+    res.json(null);
   }
 });
 

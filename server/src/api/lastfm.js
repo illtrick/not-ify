@@ -113,6 +113,20 @@ router.get('/lastfm/top/tracks', async (req, res) => {
   }
 });
 
+// GET /api/lastfm/artist/top-tracks?artist= — Top tracks for an artist (no auth needed, just API key)
+router.get('/lastfm/artist/top-tracks', async (req, res) => {
+  const { artist } = req.query;
+  if (!artist) return res.json([]);
+  const cfg = lfm.getConfig();
+  if (!cfg.apiKey) return res.json([]);
+  try {
+    const tracks = await lfm.getArtistTopTracks(artist, parseInt(req.query.limit) || 10);
+    res.json(tracks);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/lastfm/queue — Failed scrobble queue
 router.get('/lastfm/queue', (req, res) => {
   const queue = lfm.getScrobbleQueue();

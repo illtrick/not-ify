@@ -262,4 +262,277 @@ async function getReleaseGroupTracks(rgid) {
   return result;
 }
 
-module.exports = { searchReleases, searchArtists, browseArtistReleases, getCoverArtUrl, getReleaseTracks, getReleaseGroupTracks };
+// ── Query Normalization ──────────────────────────────────────────────────────
+// Normalize a search query before sending to MB:
+// - Accent/diacritic folding (MB does this too, but normalizing our side ensures consistency)
+// - & → and (MB aliases handle "The X" but not always "&")
+// - Strip excess punctuation that confuses Lucene
+function normalizeQuery(q) {
+  if (!q) return q;
+  let n = q;
+  // Accent fold: ø→o, ä→a, etc.
+  n = n.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  // & → and (but not inside Lucene field queries like "artist:X AND album:Y")
+  n = n.replace(/&/g, 'and');
+  // Strip Lucene special chars that users won't intend: + ! ( ) { } [ ] ^ " ~ * ? : \
+  // Keep - (for hyphenated names) and / (for date ranges)
+  n = n.replace(/[+!(){}[\]^"~*?:\\]/g, ' ');
+  // Collapse whitespace
+  n = n.replace(/\s{2,}/g, ' ').trim();
+  return n;
+}
+
+// ── Fuzzy Search (Lucene ~ operator) ─────────────────────────────────────────
+// When a standard search returns 0 results, retry with ~ appended to each term.
+// MB's eDisMax parser supports Lucene fuzzy: "balmoreha~" finds "Balmorhea".
+async function searchReleasesFuzzy(query) {
+  const key = `releases-fuzzy:${query.toLowerCase().trim()}`;
+  const cached = cacheGet(key);
+  if (cached) return cached;
+
+  try {
+    // Append ~ to each word for fuzzy matching (default edit distance 0.5)
+    const fuzzyQ = query.split(/\s+/).map(w => w.length >= 3 ? `${w}~` : w).join(' ');
+    const luceneQuery = `${fuzzyQ} NOT secondarytype:Live NOT secondarytype:Bootleg`;
+    const url = `${MB_BASE}/release-group/?query=${encodeURIComponent(luceneQuery)}&fmt=json&limit=15&inc=releases`;
+    const data = await mbFetch(url);
+    const releases = parseReleaseGroups(data);
+    cacheSet(key, releases);
+    return releases;
+  } catch (err) {
+    console.error(`MusicBrainz fuzzy search failed: ${err.message}`);
+    return [];
+  }
+}
+
+// Fuzzy artist search with ~ operator
+async function searchArtistsFuzzy(query) {
+  const key = `artists-fuzzy:${query.toLowerCase().trim()}`;
+  const cached = cacheGet(key);
+  if (cached) return cached;
+
+  try {
+    const fuzzyQ = query.split(/\s+/).map(w => w.length >= 3 ? `${w}~` : w).join(' ');
+    const url = `${MB_BASE}/artist/?query=${encodeURIComponent(fuzzyQ)}&fmt=json&limit=10`;
+    const data = await mbFetch(url);
+
+    const seen = new Map();
+    for (const a of (data.artists || [])) {
+      const normName = a.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (!seen.has(normName) || (a.score || 0) > (seen.get(normName).score || 0)) {
+        seen.set(normName, {
+          mbid: a.id, name: a.name, type: a.type || null,
+          disambiguation: a.disambiguation || null,
+          sortName: a['sort-name'] || a.name, score: a.score || 0,
+        });
+      }
+    }
+    const artists = Array.from(seen.values()).slice(0, 6);
+    cacheSet(key, artists);
+    return artists;
+  } catch (err) {
+    console.error(`MusicBrainz fuzzy artist search failed: ${err.message}`);
+    return [];
+  }
+}
+
+// ── Release Ranking (for recording search) ──────────────────────────────────
+// When a recording appears on multiple releases (studio album, live bootleg,
+// compilation, etc.), pick the most "canonical" one.
+function pickBestRelease(releases) {
+  if (releases.length === 1) return releases[0];
+
+  function releaseScore(r) {
+    const rg = r['release-group'] || {};
+    const primary = (rg['primary-type'] || '').toLowerCase();
+    const secondaries = (rg['secondary-types'] || []).map(s => s.toLowerCase());
+    let score = 0;
+
+    // Primary type scoring
+    if (primary === 'album') score += 100;
+    else if (primary === 'ep') score += 60;
+    else if (primary === 'single') score += 40;
+    else score += 10;
+
+    // Penalize secondary types (live, compilation, bootleg, etc.)
+    if (secondaries.includes('live')) score -= 80;
+    if (secondaries.includes('bootleg')) score -= 90;
+    if (secondaries.includes('compilation')) score -= 30;
+    if (secondaries.includes('remix')) score -= 40;
+    if (secondaries.includes('demo')) score -= 50;
+    if (secondaries.includes('dj-mix')) score -= 40;
+
+    // No secondary types = official studio release → bonus
+    if (secondaries.length === 0) score += 20;
+
+    // Prefer releases with a date (well-catalogued)
+    if (r.date) score += 5;
+
+    return score;
+  }
+
+  return releases.slice().sort((a, b) => releaseScore(b) - releaseScore(a))[0];
+}
+
+// ── Recording Search (track-level) ───────────────────────────────────────────
+// Search MB recordings to find specific tracks. Useful when query is "artist songname".
+// Returns: [{ title, artist, album, rgid, mbid, year }]
+async function searchRecordings(query) {
+  const key = `recordings:${query.toLowerCase().trim()}`;
+  const cached = cacheGet(key);
+  if (cached) return cached;
+
+  try {
+    // Add status:official to filter out bootleg recordings that dominate results for popular artists
+    const filteredQuery = `${query} AND status:official`;
+    const url = `${MB_BASE}/recording/?query=${encodeURIComponent(filteredQuery)}&fmt=json&limit=15`;
+    const data = await mbFetch(url);
+
+    // Collect all recording results, then deduplicate keeping the best release per artist::title
+    const LIVE_ALBUM_RE = /^\d{4}-\d{2}-\d{2}[:\s]|^Live\s+(at|in|from)\b/i;
+    const bestByKey = new Map(); // dedupKey → { entry, releaseQuality }
+
+    for (const rec of (data.recordings || [])) {
+      const artist = rec['artist-credit']?.[0]?.artist?.name || 'Unknown Artist';
+      const releases = rec.releases || [];
+      if (releases.length === 0) continue;
+      const release = pickBestRelease(releases);
+      const rgid = release['release-group']?.id || null;
+      const mbid = release.id || null;
+      const dedupKey = `${artist}::${rec.title}`.toLowerCase();
+
+      // Score this release to decide if it's better than what we already have
+      const rg = release['release-group'] || {};
+      const primary = (rg['primary-type'] || '').toLowerCase();
+      const secondaries = (rg['secondary-types'] || []).map(s => s.toLowerCase());
+      let quality = 0;
+      // Primary type: prefer Album > EP > Single
+      if (primary === 'album') quality += 100;
+      else if (primary === 'ep') quality += 60;
+      else if (primary === 'single') quality += 40;
+      else quality += 20;
+      // Penalize secondary types
+      if (secondaries.includes('live') || LIVE_ALBUM_RE.test(release.title || '')) quality -= 80;
+      if (secondaries.includes('bootleg') || (release.status || '').toLowerCase() === 'bootleg') quality -= 90;
+      if (secondaries.includes('compilation')) quality -= 30;
+      if (secondaries.includes('soundtrack')) quality -= 20;
+      // No secondary types = official studio release → bonus
+      if (secondaries.length === 0 && (release.status || '').toLowerCase() !== 'bootleg') quality += 20;
+      // Official status bonus
+      if ((release.status || '').toLowerCase() === 'official') quality += 10;
+      if (release.date) quality += 5;
+
+      const existing = bestByKey.get(dedupKey);
+      if (!existing || quality > existing.releaseQuality) {
+        bestByKey.set(dedupKey, {
+          entry: {
+            title: rec.title,
+            artist,
+            artistMbid: rec['artist-credit']?.[0]?.artist?.id || null,
+            album: release.title || '',
+            rgid,
+            mbid,
+            year: release.date ? release.date.slice(0, 4) : '',
+            score: rec.score || 0,
+          },
+          releaseQuality: quality,
+        });
+      }
+    }
+
+    const results = Array.from(bestByKey.values()).map(v => v.entry);
+
+    cacheSet(key, results);
+    return results;
+  } catch (err) {
+    console.error(`MusicBrainz recording search failed: ${err.message}`);
+    return [];
+  }
+}
+
+// ── Artist Detail Lookup ─────────────────────────────────────────────────────
+// Full artist metadata: genres, external links, band members, country, active years
+// Returns: { genres, country, area, activeYears, type, disambiguation, links, members }
+async function getArtistDetails(mbid) {
+  const key = `artist-detail:${mbid}`;
+  const cached = cacheGet(key);
+  if (cached) return cached;
+
+  try {
+    const url = `${MB_BASE}/artist/${mbid}?inc=genres+url-rels+artist-rels&fmt=json`;
+    const data = await mbFetch(url);
+
+    // Parse genres (sorted by count descending)
+    const genres = (data.genres || [])
+      .sort((a, b) => (b.count || 0) - (a.count || 0))
+      .map(g => g.name)
+      .slice(0, 8);
+
+    // Parse external links from URL relationships
+    const links = { wikipedia: null, wikidata: null, official: null, bandcamp: null, social: [] };
+    for (const rel of (data.relations || [])) {
+      if (rel['target-type'] !== 'url') continue;
+      const href = rel.url?.resource;
+      if (!href) continue;
+      const t = rel.type;
+      if (t === 'wikipedia') links.wikipedia = href;
+      else if (t === 'wikidata') links.wikidata = href;
+      else if (t === 'official homepage') links.official = href;
+      else if (t === 'bandcamp' || (href && href.includes('bandcamp.com'))) links.bandcamp = href;
+      else if (t === 'social network') links.social.push(href);
+      else if (t === 'youtube' || t === 'video channel') links.youtube = href;
+    }
+
+    // Parse band members from artist-artist relationships (dedup by mbid)
+    const memberMap = new Map();
+    for (const rel of (data.relations || [])) {
+      if (rel['target-type'] !== 'artist') continue;
+      if (rel.type !== 'member of band') continue;
+      const member = rel.direction === 'backward' ? rel.artist : null;
+      if (!member) continue;
+      // Keep the entry with the latest activity (prefer active over ended)
+      const existing = memberMap.get(member.id);
+      const ended = rel.ended || false;
+      if (!existing || (!ended && existing.active === false)) {
+        memberMap.set(member.id, {
+          name: member.name,
+          mbid: member.id,
+          active: !ended,
+          begin: rel.begin || existing?.begin || null,
+          end: rel.end || null,
+        });
+      }
+    }
+    const members = Array.from(memberMap.values());
+
+    const result = {
+      genres,
+      country: data.country || null,
+      area: data.area?.name || null,
+      beginArea: data['begin-area']?.name || null,
+      activeYears: {
+        begin: data['life-span']?.begin || null,
+        end: data['life-span']?.end || null,
+        ended: data['life-span']?.ended || false,
+      },
+      type: data.type || null,
+      gender: data.gender || null,
+      disambiguation: data.disambiguation || null,
+      links,
+      members: members.sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0)),
+    };
+
+    cacheSet(key, result);
+    return result;
+  } catch (err) {
+    console.error(`MusicBrainz artist detail failed: ${err.message}`);
+    return null;
+  }
+}
+
+module.exports = {
+  searchReleases, searchArtists, browseArtistReleases,
+  getCoverArtUrl, getReleaseTracks, getReleaseGroupTracks,
+  searchReleasesFuzzy, searchArtistsFuzzy, searchRecordings,
+  normalizeQuery, getArtistDetails,
+};

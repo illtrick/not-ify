@@ -9,6 +9,7 @@ const COLORS = {
   hover: '#282828',
   card: '#181818',
   accent: '#e94560',
+  accentRgb: '233,69,96',
   accentHover: '#ff6b81',
   textPrimary: '#f5f5f5',
   textSecondary: '#b0b0b0',
@@ -180,10 +181,12 @@ const MAX_RECENTLY_PLAYED = 50;
 
 function trackRowStyle(isActive, isHovered, mobile) {
   return {
-    display: 'flex', alignItems: 'center', padding: mobile ? '10px 8px' : '10px 16px', borderRadius: 4,
-    cursor: 'pointer', gap: 0, minHeight: 44,
-    background: isActive ? 'rgba(255,255,255,0.08)' : isHovered ? 'rgba(255,255,255,0.04)' : 'transparent',
-    transition: 'background 0.15s ease',
+    display: 'flex', alignItems: 'center',
+    padding: mobile ? '10px 8px' : `10px 16px 10px ${isActive ? 13 : 16}px`,
+    borderRadius: 4, cursor: 'pointer', gap: 0, minHeight: 44,
+    background: isActive ? `rgba(${COLORS.accentRgb || '233,69,96'},0.12)` : isHovered ? 'rgba(255,255,255,0.04)' : 'transparent',
+    borderLeft: isActive ? `3px solid ${COLORS.accent}` : '3px solid transparent',
+    transition: 'background 0.15s ease, border-color 0.15s ease',
   };
 }
 
@@ -632,6 +635,11 @@ function App() {
   // Artist page
   const [selectedArtist, setSelectedArtist] = useState(null); // { mbid, name, type }
   const [artistReleases, setArtistReleases] = useState([]);
+  const [trackDurations, setTrackDurations] = useState({}); // { trackId: seconds }
+  const [artistDetails, setArtistDetails] = useState(null); // genres, links, members, etc.
+  const [artistBio, setArtistBio] = useState(null); // { extract, description, thumbnail }
+  const [artistTopTracks, setArtistTopTracks] = useState([]); // top tracks from Last.fm
+  const [moreByArtist, setMoreByArtist] = useState([]); // albums for "More by Artist" on album page
 
   // Background download status (discrete indicator)
   const [bgDownloadStatus, setBgDownloadStatus] = useState(null); // { type: 'yt'|'torrent', message, count, done }
@@ -851,6 +859,90 @@ function App() {
       setMbTracks([]);
     }
   }, [selectedAlbum?.mbid, selectedAlbum?.rgid, selectedAlbum?.fromSearch]);
+
+  // Fetch "More by Artist" for album page — find artist MBID and get their discography
+  useEffect(() => {
+    setMoreByArtist([]);
+    if (!selectedAlbum?.artist || view !== 'album') return;
+    const artistName = selectedAlbum.artist;
+    const currentAlbumTitle = selectedAlbum.album;
+    // Try to find artist MBID from search results or by searching
+    const cached = searchArtistResults.find(a => a.name.toLowerCase() === artistName.toLowerCase());
+    const fetchArtist = cached?.mbid
+      ? Promise.resolve(cached.mbid)
+      : fetch(`/api/search?q=${encodeURIComponent(artistName)}`)
+          .then(r => r.json())
+          .then(d => {
+            const match = d.artists?.find(a => a.name.toLowerCase() === artistName.toLowerCase());
+            return match?.mbid || null;
+          })
+          .catch(() => null);
+
+    fetchArtist.then(artistMbid => {
+      if (!artistMbid) return;
+      fetch(`/api/artist/${artistMbid}?name=${encodeURIComponent(artistName)}`)
+        .then(r => r.json())
+        .then(d => {
+          const other = (d.releases || [])
+            .filter(r => r.album.toLowerCase() !== currentAlbumTitle.toLowerCase())
+            .slice(0, 6);
+          setMoreByArtist(other);
+        })
+        .catch(() => {});
+    });
+  }, [selectedAlbum?.artist, selectedAlbum?.album, view]);
+
+  // Load track durations sequentially — all side effects outside setState to avoid strict mode double-invoke
+  useEffect(() => {
+    if (!selectedAlbum || selectedAlbum.fromSearch) return;
+    const tracks = selectedAlbum.tracks || [];
+    if (!tracks.length) return;
+    let cancelled = false;
+    let activeAudio = null;
+    const seen = new Set(); // tracks we've started loading in this effect run
+
+    const loadNext = (idx) => {
+      if (cancelled || idx >= tracks.length) return;
+      const track = tracks[idx];
+      const id = track.id;
+      if (!id || seen.has(id)) { loadNext(idx + 1); return; }
+      seen.add(id);
+
+      const audio = new Audio();
+      activeAudio = audio;
+      audio.preload = 'metadata';
+      audio.onloadedmetadata = () => {
+        const dur = audio.duration;
+        audio.onloadedmetadata = null;
+        audio.onerror = null;
+        audio.src = '';
+        activeAudio = null;
+        if (!cancelled && dur && isFinite(dur)) {
+          setTrackDurations(prev => prev[id] !== undefined ? prev : { ...prev, [id]: dur });
+        }
+        setTimeout(() => loadNext(idx + 1), 60);
+      };
+      audio.onerror = () => {
+        audio.onloadedmetadata = null;
+        audio.onerror = null;
+        audio.src = '';
+        activeAudio = null;
+        setTimeout(() => loadNext(idx + 1), 60);
+      };
+      audio.src = track.path || buildTrackPath(id);
+    };
+
+    loadNext(0);
+    return () => {
+      cancelled = true;
+      if (activeAudio) {
+        activeAudio.onloadedmetadata = null;
+        activeAudio.onerror = null;
+        activeAudio.src = '';
+        activeAudio = null;
+      }
+    };
+  }, [selectedAlbum]);
 
   // Fetch dominant color from cover art for gradient header
   useEffect(() => {
@@ -1152,7 +1244,7 @@ function App() {
   }
 
   // YouTube quick-play: search YT and stream immediately
-  async function playFromYouTube(trackTitle, albumArtist, albumName, coverArt, trackArtist) {
+  async function playFromYouTube(trackTitle, albumArtist, albumName, coverArt, trackArtist, artistMbid, albumRgid, albumMbid) {
     if (ytSearching) return; // Prevent double-trigger
     setYtSearching(true);
     setYtPendingTrack(trackTitle);
@@ -1174,7 +1266,11 @@ function App() {
         isYtPreview: true,
         ytVideoId: best.id,
       };
-      playTrack(track, [], 0, { artist: albumArtist, album: albumName, coverArt });
+      const info = { artist: albumArtist, album: albumName, coverArt };
+      if (artistMbid) info.artistMbid = artistMbid;
+      if (albumRgid) info.rgid = albumRgid;
+      if (albumMbid) info.mbid = albumMbid;
+      playTrack(track, [], 0, info);
       // Auto-download this single track in background
       const dlArtist = trackArtist || albumArtist;
       if (dlArtist && !isInLibrary(dlArtist, albumName || 'Singles')) {
@@ -1399,13 +1495,33 @@ function App() {
   async function openArtistPage(mbid, name, type) {
     setSelectedArtist({ mbid, name, type: type || null });
     setArtistReleases([]);
+    setArtistDetails(null);
+    setArtistBio(null);
+    setArtistTopTracks([]);
     prevViewRef.current = view;
     setView('artist');
+
+    // Fetch top tracks from Last.fm (fires immediately, independent of MB data)
+    fetch(`/api/lastfm/artist/top-tracks?artist=${encodeURIComponent(name)}&limit=10`)
+      .then(r => r.ok ? r.json() : [])
+      .then(tracks => { if (Array.isArray(tracks) && tracks.length) setArtistTopTracks(tracks); })
+      .catch(() => {});
 
     try {
       const res = await fetch(`/api/artist/${mbid}?name=${encodeURIComponent(name)}`);
       const data = await res.json();
       setArtistReleases(data.releases || []);
+      if (data.details) {
+        setArtistDetails(data.details);
+        // Lazy-load Wikipedia bio if link available (prefer Wikipedia, fall back to Wikidata)
+        const wikiUrl = data.details.links?.wikipedia || data.details.links?.wikidata;
+        if (wikiUrl) {
+          fetch(`/api/wiki/summary?url=${encodeURIComponent(wikiUrl)}`)
+            .then(r => r.ok ? r.json() : null)
+            .then(bio => { if (bio) setArtistBio(bio); })
+            .catch(() => {});
+        }
+      }
     } catch (err) {
       console.error('Artist page load failed:', err);
     }
@@ -1691,9 +1807,73 @@ function App() {
   function goToCurrentAlbum() {
     if (!currentAlbumInfo) return;
     const albums = libraryAlbums();
-    const match = albums.find(a => a.artist === currentAlbumInfo.artist && a.album === currentAlbumInfo.album);
-    if (match) {
-      openAlbumFromLibrary(match.artist, match.album, match.tracks, match.coverArt, match.mbid);
+    const normArtist = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    // Try to find matching library album by exact artist + album name
+    if (currentAlbumInfo.album) {
+      const match = albums.find(a => a.artist === currentAlbumInfo.artist && a.album === currentAlbumInfo.album);
+      if (match && match.tracks.length > 1) {
+        // Library album has multiple tracks — open from library (complete album)
+        openAlbumFromLibrary(match.artist, match.album, match.tracks, match.coverArt, match.mbid);
+        return;
+      }
+      // Library album has only 1 track (likely auto-downloaded single) and we have MB metadata
+      // → prefer the MB search view which shows the full album tracklist
+      if (currentAlbumInfo.rgid || currentAlbumInfo.mbid) {
+        openAlbumFromSearch({
+          artist: currentAlbumInfo.artist,
+          album: currentAlbumInfo.album,
+          coverArt: currentAlbumInfo.coverArt,
+          mbid: currentAlbumInfo.mbid || null,
+          rgid: currentAlbumInfo.rgid || null,
+          sources: [],
+        });
+        return;
+      }
+      // Library album with 1 track and no MB metadata — open from library as fallback
+      if (match) {
+        openAlbumFromLibrary(match.artist, match.album, match.tracks, match.coverArt, match.mbid);
+        return;
+      }
+    }
+
+    // Fallback: find the currently playing track in ANY library album by this artist
+    // (handles case where recording lookup found a different album name, e.g. a compilation,
+    // but the track actually lives in a different library album)
+    if (currentTrack?.title && currentAlbumInfo.artist) {
+      const na = normArtist(currentAlbumInfo.artist);
+      const nt = normArtist(currentTrack.title);
+      const trackMatch = albums.find(a =>
+        normArtist(a.artist) === na &&
+        a.tracks.length > 1 &&
+        a.tracks.some(t => normArtist(t.title) === nt)
+      );
+      if (trackMatch) {
+        openAlbumFromLibrary(trackMatch.artist, trackMatch.album, trackMatch.tracks, trackMatch.coverArt, trackMatch.mbid);
+        return;
+      }
+    }
+
+    // Have MB metadata — open as search album (full tracklist from MusicBrainz)
+    if (currentAlbumInfo.album && (currentAlbumInfo.rgid || currentAlbumInfo.mbid)) {
+      openAlbumFromSearch({
+        artist: currentAlbumInfo.artist,
+        album: currentAlbumInfo.album,
+        coverArt: currentAlbumInfo.coverArt,
+        mbid: currentAlbumInfo.mbid || null,
+        rgid: currentAlbumInfo.rgid || null,
+        sources: [],
+      });
+      return;
+    }
+    // Fallback: navigate to artist page if we have an MBID
+    if (currentAlbumInfo.artistMbid && currentAlbumInfo.artist) {
+      openArtistPage(currentAlbumInfo.artistMbid, currentAlbumInfo.artist);
+      return;
+    }
+    // Last fallback: search for the artist
+    if (currentAlbumInfo.artist) {
+      handleSearch(null, currentAlbumInfo.artist);
     }
   }
 
@@ -2197,10 +2377,11 @@ function App() {
         {/* Track list (library) */}
         {isLib && (
           <div role="list" style={{ marginTop: 24 }}>
-            <div style={{ display: 'flex', padding: isMobile ? '6px 8px' : '6px 12px', borderBottom: `1px solid ${COLORS.border}`, marginBottom: 4 }}>
+            <div style={{ display: 'flex', padding: isMobile ? '6px 8px' : '6px 16px', borderBottom: `1px solid ${COLORS.border}`, marginBottom: 4 }}>
               <span style={{ width: isMobile ? 24 : 32, fontSize: 12, color: COLORS.textSecondary, textAlign: 'right', marginRight: isMobile ? 10 : 16 }}>#</span>
               <span style={{ flex: 1, fontSize: 12, color: COLORS.textSecondary }}>Title</span>
               {!isMobile && <span style={{ width: 56, fontSize: 12, color: COLORS.textSecondary, textAlign: 'right' }}>Format</span>}
+              {!isMobile && <span style={{ width: 50, fontSize: 12, color: COLORS.textSecondary, textAlign: 'right', marginLeft: 12 }}>Time</span>}
             </div>
             {pl.map((track, idx) => {
               const isActive = currentTrack?.id === track.id;
@@ -2249,6 +2430,11 @@ function App() {
                       {Icon.checkCircle(13, ['flac', 'wav'].includes(track.format?.toLowerCase()) ? COLORS.success : COLORS.textSecondary)}
                     </span>
                   </span>}
+                  {!isMobile && (
+                    <span style={{ width: 50, textAlign: 'right', fontSize: 12, color: COLORS.textSecondary, flexShrink: 0, marginLeft: 12 }}>
+                      {trackDurations[track.id] ? formatTime(trackDurations[track.id]) : ''}
+                    </span>
+                  )}
                   {isMobile && (
                     <span style={{ opacity: 0.45, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
                       {Icon.checkCircle(13, ['flac', 'wav'].includes(track.format?.toLowerCase()) ? COLORS.success : COLORS.textSecondary)}
@@ -2354,6 +2540,39 @@ function App() {
           </details>
         )}
 
+        {/* More by Artist */}
+        {moreByArtist.length > 0 && (
+          <div style={{ marginTop: 36 }}>
+            <h3 style={{ fontSize: 18, fontWeight: 700, color: COLORS.textPrimary, marginBottom: 14 }}>More by {artist}</h3>
+            <div style={{ display: 'flex', gap: 16, overflowX: 'auto', paddingBottom: 8, WebkitOverflowScrolling: 'touch' }}>
+              {moreByArtist.map(rel => {
+                const a = {
+                  id: `mb:${rel.rgid || rel.mbid}`,
+                  artist: artist,
+                  album: rel.album,
+                  year: rel.year || '',
+                  coverArt: rel.coverArt,
+                  mbid: rel.mbid,
+                  rgid: rel.rgid,
+                  trackCount: rel.trackCount,
+                  sources: [],
+                };
+                return (
+                  <div key={a.id} style={{ flexShrink: 0, width: isMobile ? 130 : 160 }}>
+                    <AlbumCard
+                      album={a}
+                      isDownloading={false}
+                      inLibrary={isInLibrary(artist, rel.album)}
+                      onPlay={() => openAlbumFromSearch(a)}
+                      onClick={() => openAlbumFromSearch(a)}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
       </div>
     );
   }
@@ -2363,7 +2582,37 @@ function App() {
     if (!selectedArtist) return null;
     const { mbid, name, type } = selectedArtist;
     const imageUrl = `/api/artist/image?name=${encodeURIComponent(name)}`;
-    const typeLabel = type === 'Group' ? 'Band' : type === 'Person' ? 'Artist' : 'Artist';
+    const det = artistDetails;
+    const typeLabel = det?.type === 'Group' ? 'Band' : det?.type === 'Person' ? 'Artist' : type === 'Group' ? 'Band' : 'Artist';
+
+    // Build info line parts
+    const infoParts = [];
+    if (det?.area) infoParts.push(det.area);
+    else if (det?.country) infoParts.push(det.country);
+    if (det?.activeYears?.begin) {
+      const beginYear = det.activeYears.begin.slice(0, 4);
+      infoParts.push(det.activeYears.ended && det.activeYears.end
+        ? `${beginYear}–${det.activeYears.end.slice(0, 4)}`
+        : `Active since ${beginYear}`);
+    }
+    const activeMembers = det?.members?.filter(m => m.active) || [];
+    if (activeMembers.length > 0) infoParts.push(`${activeMembers.length} member${activeMembers.length > 1 ? 's' : ''}`);
+
+    // Categorize links for display
+    const linkItems = [];
+    if (det?.links?.wikipedia) linkItems.push({ label: 'Wikipedia', url: det.links.wikipedia });
+    else if (det?.links?.wikidata) linkItems.push({ label: 'Wikipedia', url: det.links.wikidata });
+    if (det?.links?.official) linkItems.push({ label: 'Official Site', url: det.links.official });
+    if (det?.links?.bandcamp) linkItems.push({ label: 'Bandcamp', url: det.links.bandcamp });
+    if (det?.links?.youtube) linkItems.push({ label: 'YouTube', url: det.links.youtube });
+    for (const s of (det?.links?.social || []).slice(0, 4)) {
+      const domain = (() => { try { return new URL(s).hostname.replace('www.', ''); } catch { return null; } })();
+      if (!domain) continue;
+      // Skip defunct services
+      if (domain.includes('plus.google') || domain.includes('myspace.com')) continue;
+      const label = domain.includes('instagram') ? 'Instagram' : domain.includes('twitter') || domain.includes('x.com') ? 'X' : domain.includes('facebook') ? 'Facebook' : domain.includes('tiktok') ? 'TikTok' : domain.includes('soundcloud') ? 'SoundCloud' : domain.split('.')[0];
+      linkItems.push({ label, url: s });
+    }
 
     return (
       <div>
@@ -2384,8 +2633,78 @@ function App() {
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 12, color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>{typeLabel}</div>
             <h1 style={{ fontSize: isMobile ? 24 : 48, fontWeight: 800, color: COLORS.textPrimary, margin: 0, lineHeight: 1.1 }}>{name}</h1>
+            {infoParts.length > 0 && (
+              <div style={{ fontSize: 13, color: COLORS.textSecondary, marginTop: 6 }}>
+                {infoParts.join(' · ')}
+              </div>
+            )}
           </div>
         </div>
+
+        {/* Genre tags */}
+        {det?.genres?.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 20 }}>
+            {det.genres.map(g => (
+              <span key={g} style={{ fontSize: 12, padding: '4px 12px', borderRadius: 20, background: COLORS.surface, color: COLORS.textSecondary, border: `1px solid ${COLORS.hover}` }}>{g}</span>
+            ))}
+          </div>
+        )}
+
+        {/* Top Songs (from Last.fm) */}
+        {artistTopTracks.length > 0 && (
+          <div style={{ marginTop: 32 }}>
+            <h2 style={{ fontSize: 22, fontWeight: 700, color: COLORS.textPrimary, marginBottom: 4 }}>Top Songs</h2>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {artistTopTracks.map((t, i) => {
+                const isPending = ytPendingTrack === t.name;
+                const isActive = currentTrack && currentTrack.title === t.name && currentAlbumInfo?.artist?.toLowerCase() === name.toLowerCase();
+                const highlight = isPending || isActive;
+                return (
+                  <div
+                    key={t.name}
+                    onClick={async () => {
+                      if (ytSearching) return;
+                      // Look up which album this track belongs to
+                      let albumName = null, albumCover = artistReleases[0]?.coverArt || null, rgid = null, albumMbid = null;
+                      try {
+                        const lr = await fetch(`/api/recording/lookup?artist=${encodeURIComponent(name)}&track=${encodeURIComponent(t.name)}`);
+                        const info = await lr.json();
+                        if (info) {
+                          albumName = info.album || null;
+                          rgid = info.rgid || null;
+                          albumMbid = info.mbid || null;
+                          if (info.coverArt) albumCover = info.coverArt;
+                        }
+                      } catch {}
+                      playFromYouTube(t.name, name, albumName, albumCover, null, mbid, rgid, albumMbid);
+                    }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 16,
+                      padding: isActive ? '10px 8px 10px 5px' : '10px 8px',
+                      borderRadius: 6, transition: 'background 0.15s, border-color 0.15s',
+                      cursor: ytSearching ? 'default' : 'pointer',
+                      opacity: (ytSearching && !isPending) ? 0.5 : 1,
+                      background: isActive ? `rgba(${COLORS.accentRgb},0.12)` : 'transparent',
+                      borderLeft: isActive ? `3px solid ${COLORS.accent}` : '3px solid transparent',
+                    }}
+                    onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = COLORS.hover; }}
+                    onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <span style={{ width: 20, textAlign: 'right', fontSize: 13, color: highlight ? COLORS.accent : COLORS.textSecondary, flexShrink: 0 }}>
+                      {isActive ? '♫' : isPending ? '▶' : i + 1}
+                    </span>
+                    <span style={{ flex: 1, fontSize: 14, color: highlight ? COLORS.accent : COLORS.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: isActive ? 600 : 400 }}>{t.name}</span>
+                    {t.listeners && (
+                      <span style={{ fontSize: 12, color: COLORS.textSecondary, flexShrink: 0 }}>
+                        {parseInt(t.listeners).toLocaleString()} listeners
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Discography */}
         {artistReleases.length > 0 && (
@@ -2422,6 +2741,67 @@ function App() {
         {artistReleases.length === 0 && (
           <div style={{ textAlign: 'center', color: COLORS.textSecondary, marginTop: 60, fontSize: 15 }}>
             Loading discography...
+          </div>
+        )}
+
+        {/* Band members */}
+        {det?.type === 'Group' && det?.members?.length > 0 && (
+          <div style={{ marginTop: 32 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 700, color: COLORS.textPrimary, marginBottom: 8 }}>Members</h3>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, fontSize: 14 }}>
+              {det.members.map((m, i) => (
+                <span key={m.mbid || m.name}>
+                  <span
+                    style={{ color: m.active ? COLORS.textPrimary : COLORS.textSecondary, cursor: m.mbid ? 'pointer' : 'default', opacity: m.active ? 1 : 0.6 }}
+                    onClick={() => { if (m.mbid) openArtistPage(m.mbid, m.name); }}
+                    onMouseEnter={e => { if (m.mbid) e.target.style.textDecoration = 'underline'; }}
+                    onMouseLeave={e => { e.target.style.textDecoration = 'none'; }}
+                  >
+                    {m.name}
+                  </span>
+                  {i < det.members.length - 1 && <span style={{ color: COLORS.textSecondary }}>{' · '}</span>}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* External links */}
+        {linkItems.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginTop: 24, paddingBottom: 4 }}>
+            {linkItems.map(l => (
+              <a
+                key={l.url}
+                href={l.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ fontSize: 13, color: COLORS.textSecondary, textDecoration: 'none', padding: '4px 0', borderBottom: '1px solid transparent', transition: 'color 0.15s, border-color 0.15s' }}
+                onMouseEnter={e => { e.target.style.color = COLORS.textPrimary; e.target.style.borderBottomColor = COLORS.textPrimary; }}
+                onMouseLeave={e => { e.target.style.color = COLORS.textSecondary; e.target.style.borderBottomColor = 'transparent'; }}
+              >
+                {l.label}
+              </a>
+            ))}
+          </div>
+        )}
+
+        {/* About / Wikipedia bio — shown at the bottom */}
+        {artistBio?.extract && (
+          <div style={{ marginTop: 32, paddingTop: 32, borderTop: `1px solid ${COLORS.hover}` }}>
+            <h2 style={{ fontSize: 22, fontWeight: 700, color: COLORS.textPrimary, marginBottom: 12 }}>About</h2>
+            <p style={{ fontSize: 14, lineHeight: 1.7, color: COLORS.textSecondary, margin: 0, maxWidth: 700 }}>
+              {artistBio.extract.length > 600 ? artistBio.extract.slice(0, 600).replace(/\s\S*$/, '') + '...' : artistBio.extract}
+            </p>
+            {(det?.links?.wikipedia || det?.links?.wikidata) && (
+              <a
+                href={det.links.wikipedia || `https://en.wikipedia.org/wiki/${name.replace(/\s/g, '_')}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ fontSize: 13, color: COLORS.accent, textDecoration: 'none', marginTop: 10, display: 'inline-block' }}
+              >
+                Read more on Wikipedia &rarr;
+              </a>
+            )}
           </div>
         )}
       </div>
@@ -2862,7 +3242,7 @@ function App() {
   function renderPlayer() {
     const has = !!currentTrack;
     const pct = duration ? (progress / duration) * 100 : 0;
-    const canGoToAlbum = has && currentAlbumInfo && library.length > 0;
+    const canGoToAlbum = has && currentAlbumInfo && (library.length > 0 || currentAlbumInfo.artistMbid);
 
     return (
       <footer style={{
@@ -2884,12 +3264,14 @@ function App() {
         )}
 
         {/* Album art + info */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 12, width: isMobile ? undefined : 220, minWidth: 0, flexShrink: isMobile ? 1 : 0, flex: isMobile ? 1 : undefined, overflow: 'hidden' }}>
+        <div
+          style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 12, width: isMobile ? undefined : 220, minWidth: 0, flexShrink: isMobile ? 1 : 0, flex: isMobile ? 1 : undefined, overflow: 'hidden', cursor: canGoToAlbum ? 'pointer' : 'default' }}
+          onClick={canGoToAlbum ? goToCurrentAlbum : undefined}
+          title={canGoToAlbum ? 'Go to album' : undefined}
+        >
           <AlbumArt src={currentCoverArt} size={isMobile ? 40 : 52} radius={4} artist={currentAlbumInfo?.artist} album={currentAlbumInfo?.album} />
           <div
-            style={{ minWidth: 0, cursor: canGoToAlbum ? 'pointer' : 'default' }}
-            onClick={canGoToAlbum ? goToCurrentAlbum : undefined}
-            title={canGoToAlbum ? 'Go to album' : undefined}
+            style={{ minWidth: 0 }}
           >
             {has ? (
               <>
@@ -3325,6 +3707,14 @@ function App() {
 
       <audio
         ref={audioRef}
+        onLoadedMetadata={() => {
+          // Capture duration for the current track as soon as metadata is available
+          if (!audioRef.current || !currentTrack?.id) return;
+          const dur = audioRef.current.duration;
+          if (dur && isFinite(dur)) {
+            setTrackDurations(prev => prev[currentTrack.id] === dur ? prev : { ...prev, [currentTrack.id]: dur });
+          }
+        }}
         onTimeUpdate={() => {
           if (!audioRef.current) return;
           const ct = audioRef.current.currentTime;

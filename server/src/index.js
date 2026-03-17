@@ -159,6 +159,62 @@ app.get('/api/artist/image', async (req, res) => {
   res.status(404).end();
 });
 
+// Wikipedia summary proxy (avoids CORS, memory-cached)
+const wikiCache = new Map();
+const WIKI_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+app.get('/api/wiki/summary', async (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.status(400).json({ error: 'Missing url param' });
+
+  // Extract article title from Wikipedia URL, or resolve Wikidata QID
+  let title;
+  const wikiMatch = url.match(/wikipedia\.org\/wiki\/(.+?)(?:#.*)?$/);
+  const wikidataMatch = url.match(/wikidata\.org\/wiki\/(Q\d+)/);
+  if (wikiMatch) {
+    title = decodeURIComponent(wikiMatch[1]);
+  } else if (wikidataMatch) {
+    // Resolve Wikidata QID to Wikipedia article title
+    try {
+      const wdRes = await fetch(`https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${wikidataMatch[1]}&props=sitelinks&sitefilter=enwiki&format=json`, {
+        headers: { 'User-Agent': 'Not-ify/1.0.0 (personal-use)' },
+        signal: AbortSignal.timeout(5000),
+      });
+      const wdData = await wdRes.json();
+      title = wdData.entities?.[wikidataMatch[1]]?.sitelinks?.enwiki?.title;
+      if (!title) return res.status(404).json({ error: 'No English Wikipedia article for this Wikidata entity' });
+    } catch (err) {
+      return res.status(502).json({ error: 'Wikidata resolution failed' });
+    }
+  } else {
+    return res.status(400).json({ error: 'Not a valid Wikipedia or Wikidata URL' });
+  }
+
+  // Check cache
+  const cached = wikiCache.get(title);
+  if (cached && Date.now() < cached.expires) {
+    return res.json(cached.data);
+  }
+
+  try {
+    const wikiRes = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`, {
+      headers: { 'User-Agent': 'Not-ify/1.0.0 (personal-use)' },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!wikiRes.ok) return res.status(404).json({ error: 'Wikipedia article not found' });
+    const data = await wikiRes.json();
+    const result = {
+      extract: data.extract || null,
+      description: data.description || null,
+      thumbnail: data.thumbnail?.source || null,
+    };
+    wikiCache.set(title, { data: result, expires: Date.now() + WIKI_CACHE_TTL });
+    res.json(result);
+  } catch (err) {
+    console.error(`Wikipedia fetch failed: ${err.message}`);
+    res.status(502).json({ error: 'Wikipedia fetch failed' });
+  }
+});
+
 // Color extraction for search-based cover art
 app.get('/api/cover/search/color', (req, res) => {
   const { artist, album } = req.query;
