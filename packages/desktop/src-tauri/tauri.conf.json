@@ -8,7 +8,6 @@
     "frontendDist": "../../client/dist"
   },
   "app": {
-    "title": "Not-ify",
     "windows": [
       {
         "title": "Not-ify",
