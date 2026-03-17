@@ -609,6 +609,9 @@ function App() {
   const [playlistIdx, setPlaylistIdx] = useState(0);
   const [currentCoverArt, setCurrentCoverArt] = useState(null);
   const audioRef = useRef(null);
+  const nextAudioRef = useRef(null);
+  const crossfadeAnimRef = useRef(null); // requestAnimationFrame ID for active crossfade
+  const preBufferedTrackRef = useRef(null); // track that's pre-buffered in nextAudioRef
   const recentlyPlayedAddedRef = useRef(false); // gate: only add to recently played once per track
 
   // Hover state
@@ -627,6 +630,13 @@ function App() {
   // Queue
   const [queue, setQueue] = useState([]);
   const [showQueue, setShowQueue] = useState(false);
+  const [dragIdx, setDragIdx] = useState(null); // drag-to-reorder in queue
+  const [dragOverIdx, setDragOverIdx] = useState(null);
+
+  // Crossfade / gapless
+  const [crossfadeDuration, setCrossfadeDuration] = useState(() => {
+    try { return parseInt(localStorage.getItem('notify_crossfade') || '0', 10); } catch { return 0; }
+  });
 
   // YouTube quick-play
   const [ytSearching, setYtSearching] = useState(false);
@@ -969,7 +979,12 @@ function App() {
 
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = volume;
+    // Don't set nextAudioRef volume here — crossfade controls it separately
   }, [volume]);
+
+  useEffect(() => {
+    try { localStorage.setItem('notify_crossfade', String(crossfadeDuration)); } catch {}
+  }, [crossfadeDuration]);
 
   // -------------------------------------------------------------------------
   // Library
@@ -1179,7 +1194,33 @@ function App() {
   // -------------------------------------------------------------------------
   // Player
   // -------------------------------------------------------------------------
+
+  // Get the next track that would play (from queue or playlist), without consuming it
+  function peekNextTrack() {
+    if (queue.length > 0) return queue[0];
+    if (!playlist.length) return null;
+    const next = (playlistIdx + 1) % playlist.length;
+    return playlist[next] || null;
+  }
+
+  // Cancel any active crossfade animation and reset nextAudioRef
+  function cancelCrossfade() {
+    if (crossfadeAnimRef.current) {
+      cancelAnimationFrame(crossfadeAnimRef.current);
+      crossfadeAnimRef.current = null;
+    }
+    if (nextAudioRef.current) {
+      nextAudioRef.current.pause();
+      nextAudioRef.current.removeAttribute('src');
+      nextAudioRef.current.load();
+    }
+    preBufferedTrackRef.current = null;
+  }
+
   function playTrack(track, pl, idx, albumInfo) {
+    // Cancel any pending crossfade/pre-buffer when user manually selects a track
+    cancelCrossfade();
+
     const i = idx ?? (pl ? pl.findIndex(t => t.id === track.id) : 0);
     setCurrentTrack(track);
     setCurrentCoverArt(track.coverArt || null);
@@ -1187,6 +1228,7 @@ function App() {
     setIsPlaying(true);
     if (pl) { setPlaylist(pl); setPlaylistIdx(i >= 0 ? i : 0); }
     if (audioRef.current) {
+      audioRef.current.volume = volume;
       audioRef.current.src = track.path || buildTrackPath(track.id);
       audioRef.current.play().catch(() => {});
     }
@@ -1212,13 +1254,35 @@ function App() {
     else { audioRef.current.play().catch(() => {}); setIsPlaying(true); }
   }
 
+  // Transition state to a new track (update React state without touching audio element)
+  function _applyTrackState(nextTrack) {
+    if (queue.length > 0 && queue[0].id === nextTrack.id) {
+      setQueue(prev => prev.slice(1));
+    } else if (playlist.length > 0) {
+      const nextIdx = (playlistIdx + 1) % playlist.length;
+      setPlaylistIdx(nextIdx);
+    }
+    setCurrentTrack(nextTrack);
+    setCurrentCoverArt(nextTrack.coverArt || null);
+    recentlyPlayedAddedRef.current = false;
+    const artist = nextTrack.artist || '';
+    const album = nextTrack.album || '';
+    scrobbleRef.current = { artist, track: nextTrack.title, album, startTime: Math.floor(Date.now() / 1000), duration: 0, scrobbled: false };
+    if (lastfmStatus.authenticated && artist && nextTrack.title) {
+      fetch('/api/lastfm/nowplaying', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ artist, track: nextTrack.title, album }),
+      }).catch(() => {});
+    }
+  }
+
   function playNext() {
     // Play from user queue first
     if (queue.length > 0) {
       const [next, ...rest] = queue;
       setQueue(rest);
-      // If this is a pending YT track, resolve it first
       if (next.ytPending) {
+        cancelCrossfade();
         playFromYouTube(next.title, next.artist, next.album, next.coverArt, next.trackArtist);
         return;
       }
@@ -1229,6 +1293,72 @@ function App() {
     const next = (playlistIdx + 1) % playlist.length;
     playTrack(playlist[next], null, next);
     setPlaylistIdx(next);
+  }
+
+  // Start crossfade transition to next track.
+  // nextAudioRef plays audibly for the fade duration, then audioRef takes over
+  // at the same position so React's event handlers remain on the active element.
+  function startCrossfade(nextTrack, fadeDuration) {
+    if (!nextAudioRef.current || !audioRef.current) return;
+    const nextSrc = nextTrack.path || buildTrackPath(nextTrack.id);
+    // Load into secondary if not already pre-buffered
+    if (preBufferedTrackRef.current?.id !== nextTrack.id) {
+      nextAudioRef.current.src = nextSrc;
+      nextAudioRef.current.load();
+    }
+    nextAudioRef.current.volume = 0;
+    nextAudioRef.current.play().catch(() => {});
+
+    const startTime = performance.now();
+    const fadeMs = fadeDuration * 1000;
+    const startVol = volume;
+
+    function fadeStep(now) {
+      const elapsed = now - startTime;
+      const pct = Math.min(1, elapsed / fadeMs);
+      if (audioRef.current) audioRef.current.volume = startVol * (1 - pct);
+      if (nextAudioRef.current) nextAudioRef.current.volume = startVol * pct;
+      if (pct < 1) {
+        crossfadeAnimRef.current = requestAnimationFrame(fadeStep);
+      } else {
+        crossfadeAnimRef.current = null;
+        // Crossfade complete — hand off to audioRef so React handlers keep working.
+        // Snap audioRef to where nextAudioRef is, then stop nextAudioRef.
+        const resumeTime = nextAudioRef.current?.currentTime || 0;
+        if (nextAudioRef.current) {
+          nextAudioRef.current.pause();
+          nextAudioRef.current.removeAttribute('src');
+          nextAudioRef.current.load();
+        }
+        preBufferedTrackRef.current = null;
+        if (audioRef.current) {
+          audioRef.current.src = nextSrc;
+          audioRef.current.volume = startVol;
+          // Seek to match where the crossfade left off, then play
+          audioRef.current.addEventListener('loadedmetadata', () => {
+            if (audioRef.current) {
+              audioRef.current.currentTime = resumeTime;
+              audioRef.current.play().catch(() => {});
+            }
+          }, { once: true });
+          audioRef.current.load();
+        }
+        _applyTrackState(nextTrack);
+      }
+    }
+    crossfadeAnimRef.current = requestAnimationFrame(fadeStep);
+  }
+
+  // Pre-buffer the next track for gapless playback
+  function preBufferNext() {
+    const nextTrack = peekNextTrack();
+    if (!nextTrack || nextTrack.ytPending) return;
+    if (preBufferedTrackRef.current?.id === nextTrack.id) return; // already buffered
+    if (!nextAudioRef.current) return;
+    const nextSrc = nextTrack.path || buildTrackPath(nextTrack.id);
+    nextAudioRef.current.src = nextSrc;
+    nextAudioRef.current.load();
+    preBufferedTrackRef.current = nextTrack;
   }
 
   function addToQueue(track) {
@@ -2384,7 +2514,11 @@ function App() {
               {!isMobile && <span style={{ width: 50, fontSize: 12, color: COLORS.textSecondary, textAlign: 'right', marginLeft: 12 }}>Time</span>}
             </div>
             {pl.map((track, idx) => {
-              const isActive = currentTrack?.id === track.id;
+              // Match by ID (library-to-library) or by title when a YouTube
+              // preview of the same song is playing. Title-only is safe here
+              // because we're inside one specific album's track list.
+              const isActive = currentTrack?.id === track.id
+                || (currentTrack?.isYtPreview && currentTrack?.title === track.title);
               const isHovered = hoveredTrack === track.id;
               return (
                 <div
@@ -2456,7 +2590,14 @@ function App() {
             </div>
             {mbTracks.map((t, i) => {
               const isHovered = hoveredMbTrack === i;
-              const isActive = currentTrack?.isYtPreview && currentTrack?.title === t.title && currentTrack?.artist === artist;
+              // Match YouTube previews by title+artist, OR library tracks by title
+              // (handles navigating to MB view while a library track is playing)
+              const isActive = (currentTrack?.isYtPreview
+                  && currentTrack?.title === t.title
+                  && currentTrack?.artist === artist)
+                || (!currentTrack?.isYtPreview
+                    && currentTrack?.title === t.title
+                    && (currentAlbumInfo?.album === album || currentTrack?.album === album));
               const isPending = ytPendingTrack === t.title;
               return (
                 <div
@@ -2876,6 +3017,30 @@ function App() {
             </button>
           </div>
 
+          {/* Playback section */}
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Playback</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 13, color: COLORS.textPrimary }}>Crossfade</div>
+                <div style={{ fontSize: 11, color: COLORS.textSecondary }}>Smooth transition between tracks</div>
+              </div>
+              <select
+                value={crossfadeDuration}
+                onChange={e => setCrossfadeDuration(parseInt(e.target.value, 10))}
+                style={{
+                  padding: '6px 10px', borderRadius: 6, border: `1px solid ${COLORS.border}`,
+                  background: COLORS.hover, color: COLORS.textPrimary, fontSize: 13, cursor: 'pointer',
+                }}
+              >
+                <option value={0}>Off (gapless)</option>
+                <option value={3}>3 seconds</option>
+                <option value={5}>5 seconds</option>
+                <option value={8}>8 seconds</option>
+              </select>
+            </div>
+          </div>
+
           {/* Last.fm section */}
           <div style={{ marginBottom: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
@@ -3197,7 +3362,34 @@ function App() {
                 <button onClick={clearQueue} style={{ background: 'none', border: 'none', color: COLORS.textSecondary, fontSize: 11, cursor: 'pointer', textDecoration: 'underline' }}>Clear</button>
               </div>
               {queue.map((track, idx) => (
-                <div key={`q-${idx}`} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0' }}>
+                <div
+                  key={`q-${idx}`}
+                  draggable
+                  onDragStart={e => { setDragIdx(idx); e.dataTransfer.effectAllowed = 'move'; }}
+                  onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOverIdx(idx); }}
+                  onDragLeave={() => setDragOverIdx(null)}
+                  onDrop={e => {
+                    e.preventDefault();
+                    if (dragIdx !== null && dragIdx !== idx) {
+                      setQueue(prev => {
+                        const updated = [...prev];
+                        const [moved] = updated.splice(dragIdx, 1);
+                        updated.splice(idx, 0, moved);
+                        return updated;
+                      });
+                    }
+                    setDragIdx(null);
+                    setDragOverIdx(null);
+                  }}
+                  onDragEnd={() => { setDragIdx(null); setDragOverIdx(null); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0',
+                    opacity: dragIdx === idx ? 0.4 : 1,
+                    borderTop: dragOverIdx === idx && dragIdx !== null && dragIdx !== idx ? `2px solid ${COLORS.accent}` : '2px solid transparent',
+                    cursor: 'grab', transition: 'opacity 0.15s',
+                  }}
+                >
+                  <span style={{ fontSize: 10, color: COLORS.textSecondary, cursor: 'grab', padding: '0 2px', userSelect: 'none' }}>⠿</span>
                   <AlbumArt src={track.coverArt} size={32} radius={3} artist={track.artist} album={track.album} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, color: COLORS.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.title}</div>
@@ -3741,8 +3933,48 @@ function App() {
               body: JSON.stringify({ artist: sr.artist, track: sr.track, album: sr.album, timestamp: sr.startTime, duration: Math.round(dur) }),
             }).catch(() => {});
           }
+          // Gapless / Crossfade: pre-buffer next track when within threshold
+          if (dur > 0 && !crossfadeAnimRef.current) {
+            const remaining = dur - ct;
+            const fadeTime = crossfadeDuration || 0;
+            // Pre-buffer at 10s or fadeTime+2s (whichever is larger)
+            const preBufferThreshold = Math.max(10, fadeTime + 2);
+            if (remaining <= preBufferThreshold && remaining > 0) {
+              preBufferNext();
+            }
+            // Start crossfade if enabled and within fade window
+            if (fadeTime > 0 && remaining <= fadeTime && remaining > 0.5) {
+              const nextTrack = peekNextTrack();
+              if (nextTrack && !nextTrack.ytPending) {
+                startCrossfade(nextTrack, remaining);
+              }
+            }
+          }
         }}
-        onEnded={playNext}
+        onEnded={() => {
+          // If crossfade is in progress, it handles the transition — ignore onEnded
+          if (crossfadeAnimRef.current) return;
+          // Gapless: if next track is pre-buffered, switch audioRef src directly
+          // (keeps React event handlers on audioRef — no ref swapping needed)
+          const nextTrack = peekNextTrack();
+          if (nextTrack && !nextTrack.ytPending && preBufferedTrackRef.current?.id === nextTrack.id && nextAudioRef.current) {
+            const nextSrc = nextAudioRef.current.src;
+            // Clear secondary element
+            nextAudioRef.current.pause();
+            nextAudioRef.current.removeAttribute('src');
+            nextAudioRef.current.load();
+            preBufferedTrackRef.current = null;
+            // Switch primary element to next track — browser serves from cache
+            if (audioRef.current) {
+              audioRef.current.src = nextSrc;
+              audioRef.current.volume = volume;
+              audioRef.current.play().catch(() => {});
+            }
+            _applyTrackState(nextTrack);
+          } else {
+            playNext();
+          }
+        }}
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
         onError={() => {
@@ -3754,6 +3986,8 @@ function App() {
           }
         }}
       />
+      {/* Hidden secondary audio element for gapless pre-buffering and crossfade */}
+      <audio ref={nextAudioRef} preload="auto" style={{ display: 'none' }} />
     </div>
   );
 }
