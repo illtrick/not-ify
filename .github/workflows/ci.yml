@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci --workspaces
+      - run: npm run test -w @not-ify/server
+      - run: npm run test -w @not-ify/client
+
+  build-and-e2e:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production Docker image
+        run: docker build -f docker/Dockerfile -t not-ify:ci .
+      - name: Start container
+        run: |
+          mkdir -p music config
+          docker run -d --name not-ify-ci -p 3000:3000 \
+            -v $PWD/music:/app/music \
+            -v $PWD/config:/app/config \
+            not-ify:ci
+      - name: Wait for server
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:3000/api/health && break
+            sleep 1
+          done
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test
+      - name: Stop container
+        if: always()
+        run: docker stop not-ify-ci && docker rm not-ify-ci
+
+  push-image:
+    needs: build-and-e2e
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        run: |
+          IMAGE=ghcr.io/${{ github.repository }}
+          docker build -f docker/Dockerfile -t $IMAGE:latest -t $IMAGE:${{ github.sha }} .
+          docker push $IMAGE:latest
+          docker push $IMAGE:${{ github.sha }}

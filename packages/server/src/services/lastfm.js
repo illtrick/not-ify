@@ -2,8 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const CONFIG_PATH = path.join(__dirname, '../../../config/settings.json');
-const QUEUE_PATH = path.join(__dirname, '../../../config/lastfm-queue.json');
+const CONFIG_DIR = process.env.CONFIG_DIR || '/app/config';
+const CONFIG_PATH = path.join(CONFIG_DIR, 'settings.json');
+const QUEUE_PATH = path.join(CONFIG_DIR, 'lastfm-queue.json');
 const LFM_BASE = 'https://ws.audioscrobbler.com/2.0/';
 const LFM_AUTH_URL = 'https://www.last.fm/api/auth/';
 

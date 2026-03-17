@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const router = express.Router();
 const yt = require('../services/youtube');
 
-const MUSIC_DIR = '/app/music';
+const MUSIC_DIR = process.env.MUSIC_DIR || '/app/music';
 
 function sanitizePath(s) {
   return (s || 'Unknown').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim() || 'Unknown';

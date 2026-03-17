@@ -8,7 +8,8 @@ const path = require('path');
 
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://ollama:11434';
 const MODEL = process.env.LLM_MODEL || 'qwen3:4b';
-const CACHE_PATH = '/app/config/llm-cache.json';
+const CONFIG_DIR = process.env.CONFIG_DIR || '/app/config';
+const CACHE_PATH = path.join(CONFIG_DIR, 'llm-cache.json');
 const TIMEOUT_MS = 60000; // 60s — CPU inference on 4B model can be slow
 
 // --- Persistent cache ---

@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const router = express.Router();
 
-const CONFIG_DIR = '/app/config';
+const CONFIG_DIR = process.env.CONFIG_DIR || '/app/config';
 const WANTED_PATH = path.join(CONFIG_DIR, 'wanted.json');
 
 // ─── Wanted list persistence ────────────────────────────────────────────────

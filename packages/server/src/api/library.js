@@ -19,13 +19,14 @@ function cleanFolderName(s) {
 }
 
 const router = express.Router();
-const MUSIC_DIR = '/app/music';
+const MUSIC_DIR = process.env.MUSIC_DIR || '/app/music';
+const CONFIG_DIR = process.env.CONFIG_DIR || '/app/config';
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.flac', '.ogg', '.m4a', '.aac', '.wav', '.opus']);
 
 // ---------------------------------------------------------------------------
 // Recently Played — server-side canonical store + SSE broadcast
 // ---------------------------------------------------------------------------
-const RP_PATH = path.join(MUSIC_DIR, '../config/recently-played.json');
+const RP_PATH = path.join(CONFIG_DIR, 'recently-played.json');
 const MAX_RP = 50;
 const sseClients = new Set();
 

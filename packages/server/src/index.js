@@ -10,8 +10,10 @@ const pipelineRouter = require('./api/pipeline');
 const libraryRouter = require('./api/library');
 
 const app = express();
-const PORT = 3000;
-const COVERS_DIR = '/app/config/covers';
+const PORT = process.env.PORT || 3000;
+const CONFIG_DIR = process.env.CONFIG_DIR || '/app/config';
+const MUSIC_DIR = process.env.MUSIC_DIR || '/app/music';
+const COVERS_DIR = path.join(CONFIG_DIR, 'covers');
 
 app.use(cors());
 app.use(express.json());
@@ -19,9 +21,10 @@ app.use(express.json());
 // Serve static client build
 app.use(express.static(path.join(__dirname, '../../client/dist')));
 
-// Health check
+// Health check — includes version for client compatibility checking
+const pkg = require('../../../package.json');
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', service: 'not-ify-server' });
+  res.json({ status: 'ok', version: pkg.version, apiVersion: 1, service: 'not-ify-server' });
 });
 
 // Test RD token

@@ -1,0 +1,27 @@
+# =============================================================================
+# Not-ify — Production overrides (QNAP deployment)
+# =============================================================================
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# With VPN: docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile vpn up -d
+
+services:
+  not-ify:
+    image: ghcr.io/${GITHUB_USER:-user}/not-ify:${VERSION:-latest}
+    environment:
+      - NODE_ENV=production
+      - LOG_LEVEL=warn
+      # Uncomment when VPN sidecar is active:
+      # - PRIVACY_PROXY=socks5://gluetun:8888
+
+  gluetun:
+    image: qmcgaw/gluetun
+    profiles: ["vpn"]
+    cap_add: [NET_ADMIN]
+    environment:
+      - VPN_SERVICE_PROVIDER=private internet access
+      - VPN_TYPE=wireguard
+      - WIREGUARD_PRIVATE_KEY=${PIA_WG_KEY}
+      - SERVER_REGIONS=${PIA_REGION:-US New York}
+    ports:
+      - "8888:8888/tcp"
+    restart: unless-stopped

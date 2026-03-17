@@ -10,7 +10,7 @@ function fileId(filepath) {
 }
 
 const router = express.Router();
-const MUSIC_DIR = '/app/music';
+const MUSIC_DIR = process.env.MUSIC_DIR || '/app/music';
 
 // Track the active download so it can be cancelled
 let activeDownload = null; // { abort: AbortController, torrentId, name }

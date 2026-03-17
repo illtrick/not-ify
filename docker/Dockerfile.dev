@@ -1,0 +1,31 @@
+# =============================================================================
+# Not-ify Development Dockerfile — nodemon + bind mounts for hot reload
+# =============================================================================
+
+FROM node:20-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg curl ca-certificates unrar-free \
+    && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
+       -o /usr/local/bin/yt-dlp && chmod +x /usr/local/bin/yt-dlp \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install all deps (including devDeps for nodemon)
+COPY package.json package-lock.json ./
+COPY packages/server/package.json packages/server/
+COPY packages/client/package.json packages/client/
+COPY packages/shared/package.json packages/shared/
+RUN npm ci --workspaces
+
+# Copy source and build client
+COPY packages/ packages/
+RUN npm run build -w @not-ify/client
+
+EXPOSE 3000
+
+# Bind mounts in docker-compose.dev.yml overlay server/src and client/src
+# for hot reload. nodemon watches server/src for changes.
+WORKDIR /app/packages/server
+CMD ["npx", "nodemon", "src/index.js"]

@@ -1,7 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const CONFIG_PATH = path.join(__dirname, '../../../config/settings.json');
+const CONFIG_DIR = process.env.CONFIG_DIR || '/app/config';
+const CONFIG_PATH = path.join(CONFIG_DIR, 'settings.json');
 const RD_BASE = 'https://api.real-debrid.com/rest/1.0';
 
 function getToken() {

@@ -5,7 +5,7 @@ const { Readable } = require('stream');
 const { createExtractorFromFile } = require('node-unrar-js');
 const AdmZip = require('adm-zip');
 
-const MUSIC_DIR = '/app/music';
+const MUSIC_DIR = process.env.MUSIC_DIR || '/app/music';
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.flac', '.ogg', '.m4a', '.aac', '.wav', '.opus']);
 const ARCHIVE_EXTENSIONS = new Set(['.rar', '.zip']);
 
