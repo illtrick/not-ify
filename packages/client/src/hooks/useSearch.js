@@ -1,6 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import * as api from '@not-ify/shared';
-import { SEARCH_HISTORY_KEY, MAX_SEARCH_HISTORY } from '../constants';
 
 export function useSearch({ setView }) {
   const [query, setQuery] = useState('');
@@ -10,25 +9,30 @@ export function useSearch({ setView }) {
   const [searchArtistResults, setSearchArtistResults] = useState([]);
   const [streamingResults, setStreamingResults] = useState([]);
   const [otherResults, setOtherResults] = useState([]);
-  const [searchHistory, setSearchHistory] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY)) || []; } catch { return []; }
-  });
+  const [searchHistory, setSearchHistory] = useState([]);
+
+  // Load search history from server on mount
+  useEffect(() => {
+    api.getSearchHistory()
+      .then(rows => setSearchHistory(rows.map(r => r.query)))
+      .catch(() => {});
+  }, []);
 
   function addToSearchHistory(q) {
+    // Optimistic update
     setSearchHistory(prev => {
       const filtered = prev.filter(s => s.toLowerCase() !== q.toLowerCase());
-      const next = [q, ...filtered].slice(0, MAX_SEARCH_HISTORY);
-      try { localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(next)); } catch {}
-      return next;
+      return [q, ...filtered];
     });
+    // Persist to server
+    api.addSearchHistoryEntry(q).catch(() => {});
   }
 
   function removeFromSearchHistory(q) {
-    setSearchHistory(prev => {
-      const next = prev.filter(s => s !== q);
-      try { localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(next)); } catch {}
-      return next;
-    });
+    // Optimistic update
+    setSearchHistory(prev => prev.filter(s => s !== q));
+    // Persist to server
+    api.removeSearchHistoryEntry(q).catch(() => {});
   }
 
   async function handleSearch(e, overrideQuery) {
