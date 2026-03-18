@@ -9,6 +9,56 @@ jest.mock('node-ssdp', () => ({
 jest.mock('upnp-client-ts', () => ({
   UpnpMediaRendererClient: jest.fn(),
 }));
+jest.mock('../../src/services/db', () => ({
+  getDb: jest.fn(),
+  isValidUser: jest.fn().mockReturnValue(true),
+  getUsers: jest.fn().mockReturnValue([]),
+  getRecentlyPlayed: jest.fn().mockReturnValue([]),
+  addRecentlyPlayed: jest.fn().mockReturnValue([]),
+  bulkSetRecentlyPlayed: jest.fn().mockReturnValue([]),
+  getLastfmConfig: jest.fn().mockReturnValue({}),
+  saveLastfmConfig: jest.fn(),
+  clearLastfmConfig: jest.fn(),
+  getScrobbleQueue: jest.fn().mockReturnValue([]),
+  addToScrobbleQueue: jest.fn(),
+  removeFromScrobbleQueue: jest.fn(),
+  getAllUsersWithScrobbleQueue: jest.fn().mockReturnValue([]),
+  getGlobalSetting: jest.fn(),
+  setGlobalSetting: jest.fn(),
+  getUserSetting: jest.fn(),
+  setUserSetting: jest.fn(),
+  getAllUserSettings: jest.fn().mockReturnValue({}),
+  getSearchHistory: jest.fn().mockReturnValue([]),
+  addSearchHistory: jest.fn(),
+  removeSearchHistory: jest.fn(),
+  clearSearchHistory: jest.fn(),
+  getFavorites: jest.fn().mockReturnValue([]),
+  addFavorite: jest.fn(),
+  removeFavorite: jest.fn(),
+  isFavorite: jest.fn().mockReturnValue(false),
+  getUserSession: jest.fn().mockReturnValue({ queue: [], state: {} }),
+  saveUserSession: jest.fn(),
+}));
+jest.mock('../../src/services/migrate', () => ({ migrate: jest.fn() }));
+jest.mock('../../src/services/realdebrid', () => ({}));
+jest.mock('../../src/services/search', () => ({ searchMusic: jest.fn().mockResolvedValue([]) }));
+jest.mock('../../src/services/musicbrainz', () => ({
+  searchReleases: jest.fn().mockResolvedValue([]),
+  searchArtists: jest.fn().mockResolvedValue([]),
+  getArtistDetails: jest.fn().mockResolvedValue(null),
+  normalizeQuery: jest.fn(q => q),
+}));
+jest.mock('../../src/services/youtube', () => ({
+  search: jest.fn().mockResolvedValue([]),
+  getStreamUrl: jest.fn().mockResolvedValue('http://example.com/stream'),
+}));
+jest.mock('../../src/services/llm', () => ({ checkHealth: jest.fn().mockResolvedValue(false) }));
+jest.mock('../../src/services/lastfm', () => ({}));
+jest.mock('../../src/services/stream-auth', () => ({
+  generateSignedUrl: jest.fn((id, base) => `${base}/api/stream/${id}?sig=testhash&exp=9999999999`),
+  generateSignedYtUrl: jest.fn((id, base) => `${base}/api/yt/stream/${id}?sig=testhash&exp=9999999999`),
+  verifySignature: jest.fn().mockReturnValue(true),
+}));
 
 const request = require('supertest');
 const app = require('../../src/index');
