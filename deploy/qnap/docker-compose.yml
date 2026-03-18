@@ -9,7 +9,7 @@
 #
 # Both services use network_mode: host so that the production instance can
 # discover DLNA/UPnP renderers (Sonos, WiiM) via SSDP multicast.
-# DLNA is only enabled on prod — staging has it disabled to avoid SSDP conflicts.
+# DLNA is enabled on both prod and staging for development iteration.
 # =============================================================================
 
 services:
@@ -53,7 +53,7 @@ services:
       - CONFIG_DIR=/app/config
       - MUSIC_DIR=/app/music
       - LOG_LEVEL=info
-      - DLNA_ENABLED=false
+      - DLNA_ENABLED=true
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]

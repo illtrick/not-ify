@@ -170,14 +170,18 @@ export function PlayerBar({
             isCasting={cast.isCasting}
             showDevicePicker={cast.showDevicePicker}
             setShowDevicePicker={cast.setShowDevicePicker}
-            selectDevice={cast.selectDevice}
+            selectDevice={cast.onSelectDevice || cast.selectDevice}
             castStop={cast.castStop}
           />
         )}
       </div>}
-      {cast?.isCasting && (
-        <div style={{ position: 'absolute', bottom: -18, left: '50%', transform: 'translateX(-50%)', fontSize: 11, color: COLORS.accent, whiteSpace: 'nowrap' }}>
-          Casting to {cast.devices.find(d => d.usn === cast.activeDevice)?.friendlyName || 'device'}
+      {/* Cast status + log */}
+      {cast && (cast.isCasting || cast.castLog?.length > 0) && (
+        <div style={{ position: 'absolute', bottom: -20, left: '50%', transform: 'translateX(-50%)', fontSize: 11, color: COLORS.accent, whiteSpace: 'nowrap', textAlign: 'center' }}>
+          {cast.isCasting
+            ? `Casting to ${cast.devices.find(d => d.usn === cast.activeDevice)?.friendlyName || 'device'}`
+            : cast.castLog?.[0]?.message || ''
+          }
         </div>
       )}
     </footer>

@@ -46,14 +46,29 @@ function _expireDevices() {
   }
 }
 
-function _fetchFriendlyName(location) {
+// Names/patterns that indicate non-playable renderers (subwoofers, bridges, etc.)
+const NON_PLAYABLE_PATTERNS = [/\bsub\b/i, /\bhue\s*bridge\b/i, /\bbridge\b/i];
+
+function _isPlayableDevice(friendlyName, xml) {
+  // Must have AVTransport service to actually play audio
+  if (!xml.includes('AVTransport')) return false;
+  // Filter out known non-playable devices
+  for (const pattern of NON_PLAYABLE_PATTERNS) {
+    if (pattern.test(friendlyName)) return false;
+  }
+  return true;
+}
+
+function _fetchDeviceInfo(location) {
   return fetch(location, { signal: AbortSignal.timeout(5000) })
     .then(r => r.text())
     .then(xml => {
-      const m = xml.match(/<friendlyName>([^<]+)<\/friendlyName>/);
-      return m ? m[1].trim() : 'Unknown Device';
+      const nameMatch = xml.match(/<friendlyName>([^<]+)<\/friendlyName>/);
+      const friendlyName = nameMatch ? nameMatch[1].trim() : 'Unknown Device';
+      const playable = _isPlayableDevice(friendlyName, xml);
+      return { friendlyName, playable };
     })
-    .catch(() => 'Unknown Device');
+    .catch(() => ({ friendlyName: 'Unknown Device', playable: false }));
 }
 
 async function startDiscovery() {
@@ -73,7 +88,8 @@ async function startDiscovery() {
       return;
     }
 
-    const friendlyName = await _fetchFriendlyName(location);
+    const { friendlyName, playable } = await _fetchDeviceInfo(location);
+    if (!playable) return; // skip non-audio devices (Hue Bridge, Sub, etc.)
     _devices.set(usn, {
       usn,
       friendlyName,

@@ -10,8 +10,15 @@ export function useCast() {
   const [isCasting, setIsCasting] = useState(false);
   const [castState, setCastState] = useState({ position: 0, duration: 0, state: 'STOPPED', volume: 50 });
   const [showDevicePicker, setShowDevicePicker] = useState(false);
+  const [castLog, setCastLog] = useState([]); // { id, message, timestamp }
   const sseRef = useRef(null);
   const pollRef = useRef(null);
+
+  const addLog = useCallback((message) => {
+    const entry = { id: Date.now(), message, timestamp: new Date().toLocaleTimeString() };
+    setCastLog(prev => [entry, ...prev].slice(0, 20)); // keep last 20
+    console.log(`[cast] ${message}`);
+  }, []);
 
   // Refresh device list periodically
   const refreshDevices = useCallback(() => {
@@ -36,7 +43,12 @@ export function useCast() {
       try {
         const data = JSON.parse(e.data);
         if (data.event === 'deviceLost') {
+          addLog('Device lost — stopping cast');
           setIsCasting(false);
+          return;
+        }
+        if (data.event === 'error') {
+          addLog(`Device error: ${data.message}`);
           return;
         }
         setCastState({
@@ -50,7 +62,7 @@ export function useCast() {
     };
 
     es.onerror = () => {
-      // SSE disconnected — stop casting
+      addLog('SSE connection lost — stopping cast');
       setIsCasting(false);
     };
 
@@ -62,27 +74,45 @@ export function useCast() {
 
   const selectDevice = useCallback((usn) => {
     setActiveDeviceState(usn);
-    if (usn) localStorage.setItem(STORAGE_KEY, usn);
-    else localStorage.removeItem(STORAGE_KEY);
+    if (usn) {
+      localStorage.setItem(STORAGE_KEY, usn);
+      const name = devices.find(d => d.usn === usn)?.friendlyName || 'device';
+      addLog(`Selected device: ${name}`);
+    } else {
+      localStorage.removeItem(STORAGE_KEY);
+      addLog('Disconnected from device');
+    }
     setShowDevicePicker(false);
-  }, []);
+  }, [devices, addLog]);
 
-  const castTrack = useCallback(async (track, albumInfo, queue) => {
-    if (!activeDevice) return;
-    await api.castPlay({
-      deviceUsn: activeDevice,
-      trackId: track.id,
-      albumInfo,
-      queue: (queue || [track]).map(t => ({ id: t.id, title: t.title, artist: t.artist })),
-    });
-    setIsCasting(true);
-  }, [activeDevice]);
+  const castTrack = useCallback(async (track, albumInfo, queue, overrideDevice) => {
+    const device = overrideDevice || activeDevice;
+    if (!device) return;
+    try {
+      await api.castPlay({
+        deviceUsn: device,
+        trackId: track.id,
+        albumInfo,
+        queue: (queue || [track]).map(t => ({ id: t.id, title: t.title, artist: t.artist })),
+      });
+      setIsCasting(true);
+      addLog(`Casting "${track.title}" to ${devices.find(d => d.usn === device)?.friendlyName || 'device'}`);
+    } catch (err) {
+      addLog(`Cast failed: ${err.message}`);
+    }
+  }, [activeDevice, devices]);
 
-  const castYtTrack = useCallback(async (videoId, title, artist, album, coverArt) => {
-    if (!activeDevice) return;
-    await api.castPlayYt({ deviceUsn: activeDevice, videoId, title, artist, album, coverArt });
-    setIsCasting(true);
-  }, [activeDevice]);
+  const castYtTrack = useCallback(async (videoId, title, artist, album, coverArt, overrideDevice) => {
+    const device = overrideDevice || activeDevice;
+    if (!device) return;
+    try {
+      await api.castPlayYt({ deviceUsn: device, videoId, title, artist, album, coverArt });
+      setIsCasting(true);
+      addLog(`Casting "${title}" (YT) to ${devices.find(d => d.usn === device)?.friendlyName || 'device'}`);
+    } catch (err) {
+      addLog(`Cast failed: ${err.message}`);
+    }
+  }, [activeDevice, devices]);
 
   const castPause = useCallback(async () => {
     if (!activeDevice) return;
@@ -96,10 +126,15 @@ export function useCast() {
 
   const castStop = useCallback(async () => {
     if (!activeDevice) return;
-    await api.castStop(activeDevice);
+    try {
+      await api.castStop(activeDevice);
+      addLog('Cast stopped');
+    } catch (err) {
+      addLog(`Stop failed: ${err.message}`);
+    }
     setIsCasting(false);
     setCastState({ position: 0, duration: 0, state: 'STOPPED', volume: castState.volume });
-  }, [activeDevice, castState.volume]);
+  }, [activeDevice, castState.volume, addLog]);
 
   const castSeek = useCallback(async (seconds) => {
     if (!activeDevice) return;
@@ -129,6 +164,7 @@ export function useCast() {
     isCasting,
     castState,
     showDevicePicker,
+    castLog,
     // Actions
     selectDevice,
     refreshDevices,
@@ -141,5 +177,6 @@ export function useCast() {
     castSetVolume,
     castNext,
     castPrev,
+    addLog,
   };
 }

@@ -195,6 +195,18 @@ function App() {
   const { trackDurations, setTrackDurations } = useTrackDurations(selectedAlbum);
   const cast = useCast();
 
+  // When a cast device is selected and a track is playing, auto-cast it
+  const handleCastDeviceSelected = (usn) => {
+    cast.selectDevice(usn);
+    if (!usn || !currentTrack) return;
+    if (currentTrack.isYtPreview) {
+      const videoId = currentTrack.ytVideoId || currentTrack.id?.replace('yt-', '');
+      cast.castYtTrack(videoId, currentTrack.title, currentTrack.artist, currentTrack.album, currentCoverArt, usn);
+    } else {
+      cast.castTrack(currentTrack, currentAlbumInfo, playlist, usn);
+    }
+  };
+
   // Bridge function: uses library + download state
   function getTrackDlStatus(artist, trackTitle, trackArtist) {
     const titleLower = trackTitle?.toLowerCase();
@@ -639,7 +651,7 @@ function App() {
         togglePlay={togglePlay} playNext={playNext} playPrev={playPrev}
         handleSeekClick={handleSeekClick}
         library={library}
-        cast={cast}
+        cast={{ ...cast, onSelectDevice: handleCastDeviceSelected }}
       />
       <BottomTabBar isMobile={isMobile} mobileTab={mobileTab} setMobileTab={setMobileTab} view={view} setView={setView} />
       <ContextMenu contextMenu={contextMenu} setContextMenu={setContextMenu} isMobile={isMobile} />
