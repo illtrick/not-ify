@@ -21,7 +21,8 @@ export function UserPicker({ onUserSelected }) {
   function selectUser(userId) {
     localStorage.setItem(USER_KEY, userId);
     api.setUser(userId);
-    onUserSelected(userId);
+    // Reload so all hooks re-initialize with the correct user context
+    window.location.reload();
   }
 
   if (loading) return null;
