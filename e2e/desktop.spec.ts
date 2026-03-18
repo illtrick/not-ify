@@ -8,8 +8,13 @@
  *       mock-heavy tests live in Suites A/B/D. These are smoke tests.
  */
 import { test, expect, Page } from '@playwright/test';
+import { seedUser } from './helpers';
 
 const BASE = 'http://localhost:3000';
+
+test.beforeEach(async ({ context }) => {
+  await seedUser(context);
+});
 
 test.describe('Desktop UI — basic rendering', () => {
   test('loads the app and shows search input', async ({ page }) => {

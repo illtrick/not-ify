@@ -5,8 +5,13 @@
  * Requires docker compose up.
  */
 import { test, expect } from '@playwright/test';
+import { seedUser } from './helpers';
 
 const BASE = 'http://localhost:3000';
+
+test.beforeEach(async ({ context }) => {
+  await seedUser(context);
+});
 
 test.describe('Mobile UI — basic rendering', () => {
   test('loads the app on mobile viewport', async ({ page }) => {

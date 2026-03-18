@@ -3,8 +3,13 @@
  * Verifies the app handles bad inputs and missing resources gracefully.
  */
 import { test, expect } from '@playwright/test';
+import { seedUser } from './helpers';
 
 const BASE = 'http://localhost:3000';
+
+test.beforeEach(async ({ context }) => {
+  await seedUser(context);
+});
 
 test.describe('API error handling', () => {
   test('GET /api/search with empty q returns 400', async ({ request }) => {

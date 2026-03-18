@@ -3,8 +3,13 @@
  * Verifies the UI adapts correctly at key breakpoints without layout overflow.
  */
 import { test, expect } from '@playwright/test';
+import { seedUser } from './helpers';
 
 const BASE = 'http://localhost:3000';
+
+test.beforeEach(async ({ context }) => {
+  await seedUser(context);
+});
 
 test.describe('Responsive layout', () => {
   test('no horizontal overflow at 390px (iPhone 15 width)', async ({ page }) => {
