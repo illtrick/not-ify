@@ -24,7 +24,8 @@ test.describe('Mobile UI — basic rendering', () => {
 
   test('bottom tab bar visible on mobile', async ({ page }) => {
     await page.goto(BASE);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await page.locator('body').waitFor({ state: 'visible' });
     // Mobile layout should show a tab bar — look for navigation elements
     const bodyText = await page.textContent('body');
     // App renders something (not blank)

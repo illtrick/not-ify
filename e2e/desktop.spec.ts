@@ -40,7 +40,8 @@ test.describe('Desktop UI — basic rendering', () => {
 
   test('sidebar or navigation is visible on desktop', async ({ page }) => {
     await page.goto(BASE);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await page.locator('body').waitFor({ state: 'visible' });
     // App should show some navigation structure
     const body = await page.locator('body');
     await expect(body).toBeVisible();
@@ -72,7 +73,7 @@ test.describe('Desktop — search flow', () => {
     await page.keyboard.press('Enter');
 
     // Wait for loading to settle
-    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(5000);
 
     // The page should render something (not just blank)
     const cards = page.locator('[class*="card"], [class*="album"], [class*="result"]');

@@ -10,7 +10,8 @@ test.describe('Responsive layout', () => {
   test('no horizontal overflow at 390px (iPhone 15 width)', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(BASE);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await page.locator('body').waitFor({ state: 'visible' });
     const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     const clientWidth = await page.evaluate(() => document.documentElement.clientWidth);
     expect(scrollWidth).toBeLessThanOrEqual(clientWidth + 5);
@@ -19,7 +20,8 @@ test.describe('Responsive layout', () => {
   test('no horizontal overflow at 768px (tablet)', async ({ page }) => {
     await page.setViewportSize({ width: 768, height: 1024 });
     await page.goto(BASE);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await page.locator('body').waitFor({ state: 'visible' });
     const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     const clientWidth = await page.evaluate(() => document.documentElement.clientWidth);
     expect(scrollWidth).toBeLessThanOrEqual(clientWidth + 5);
@@ -28,7 +30,8 @@ test.describe('Responsive layout', () => {
   test('no horizontal overflow at 1280px (desktop)', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(BASE);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await page.locator('body').waitFor({ state: 'visible' });
     const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     const clientWidth = await page.evaluate(() => document.documentElement.clientWidth);
     expect(scrollWidth).toBeLessThanOrEqual(clientWidth + 5);
