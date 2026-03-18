@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import * as api from '@not-ify/shared';
 import { COLORS, SESSION_KEY, SEARCH_HISTORY_KEY, RECENTLY_PLAYED_KEY, MAX_SEARCH_HISTORY, MAX_RECENTLY_PLAYED } from './constants';
 import { formatTime, buildTrackPath, contextMenuProps, debounce, trackRowStyle, hashColor } from './utils';
 import { Icon } from './components/Icon';
@@ -11,122 +12,39 @@ import { SectionHeader } from './components/SectionHeader';
 import { StreamingTopResult } from './components/StreamingTopResult';
 import { StreamingSongRow } from './components/StreamingSongRow';
 import { TrackStatusIcon } from './components/TrackStatusIcon';
+import { SearchView } from './components/SearchView';
+import { AlbumView } from './components/AlbumView';
+import { ArtistView } from './components/ArtistView';
+import { SettingsModal } from './components/SettingsModal';
+import { ContextMenu } from './components/ContextMenu';
+import { BgDownloadIndicator } from './components/BgDownloadIndicator';
+import { DownloadIndicator } from './components/DownloadIndicator';
+import { QueuePanel } from './components/QueuePanel';
+import { PlayerBar } from './components/PlayerBar';
+import { MobileLibrary } from './components/MobileLibrary';
+import { BottomTabBar } from './components/BottomTabBar';
+import { useQueue } from './hooks/useQueue';
+import { useRecentlyPlayed } from './hooks/useRecentlyPlayed';
+import { useSearch } from './hooks/useSearch';
+import { useLastFm } from './hooks/useLastFm';
+import { useLibrary } from './hooks/useLibrary';
+import { usePlayer } from './hooks/usePlayer';
+import { useDownload } from './hooks/useDownload';
+import { useSession } from './hooks/useSession';
 
 
 // ---------------------------------------------------------------------------
 // Main App
 // ---------------------------------------------------------------------------
 function App() {
-  // Navigation
+  // Navigation (stays in App)
   const [view, setView] = useState('search');
   const [selectedAlbum, setSelectedAlbum] = useState(null);
   const prevViewRef = useRef('search');
 
-  // Search
-  const [query, setQuery] = useState('');
-  const [searching, setSearching] = useState(false);
-  const [searchAlbums, setSearchAlbums] = useState([]);
-  const [searchDone, setSearchDone] = useState(false);
-  const [searchArtistResults, setSearchArtistResults] = useState([]);
-  const [streamingResults, setStreamingResults] = useState([]);
-  const [mbAlbums, setMbAlbums] = useState([]);
-  const [otherResults, setOtherResults] = useState([]);
-
-  // Download
-  const [downloading, setDownloading] = useState(null);
-  const [downloadStatus, setDownloadStatus] = useState(null);
-  const [dlExpanded, setDlExpanded] = useState(false);
-  const pendingPlayRef = useRef(false);
-
-  // Library
-  const [library, setLibrary] = useState([]);
-  const [librarySortBy, setLibrarySortBy] = useState('recents');
-  const [libraryFilter, setLibraryFilter] = useState('');
-  const [showLibraryFilter, setShowLibraryFilter] = useState(false);
-
-  // Player
-  const [currentTrack, setCurrentTrack] = useState(null);
-  const [currentAlbumInfo, setCurrentAlbumInfo] = useState(null); // { artist, album, coverArt }
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [volume, setVolume] = useState(0.8);
-  const [progress, setProgress] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [playlist, setPlaylist] = useState([]);
-  const [playlistIdx, setPlaylistIdx] = useState(0);
-  const [currentCoverArt, setCurrentCoverArt] = useState(null);
-  const audioRef = useRef(null);
-  const nextAudioRef = useRef(null);
-  const crossfadeAnimRef = useRef(null); // requestAnimationFrame ID for active crossfade
-  const preBufferedTrackRef = useRef(null); // track that's pre-buffered in nextAudioRef
-  const recentlyPlayedAddedRef = useRef(false); // gate: only add to recently played once per track
-
-  // Hover state
-  const [hoveredTrack, setHoveredTrack] = useState(null);
-  const [hoveredMbTrack, setHoveredMbTrack] = useState(null);
-
-  // MusicBrainz track listing for search album detail
-  const [mbTracks, setMbTracks] = useState([]);
-
-  // Gradient album header
-  const [albumColor, setAlbumColor] = useState(null);
-  const albumHeaderRef = useRef(null);
-  const mainContentRef = useRef(null);
-  const [showStickyHeader, setShowStickyHeader] = useState(false);
-
-  // Queue
-  const [queue, setQueue] = useState([]);
-  const [showQueue, setShowQueue] = useState(false);
-  const [dragIdx, setDragIdx] = useState(null); // drag-to-reorder in queue
-  const [dragOverIdx, setDragOverIdx] = useState(null);
-
-  // Crossfade / gapless
-  const [crossfadeDuration, setCrossfadeDuration] = useState(() => {
-    try { return parseInt(localStorage.getItem('notify_crossfade') || '0', 10); } catch { return 0; }
-  });
-
-  // YouTube quick-play
-  const [ytSearching, setYtSearching] = useState(false);
-  const [ytPendingTrack, setYtPendingTrack] = useState(null); // title of track being resolved
-
-  // Artist page
-  const [selectedArtist, setSelectedArtist] = useState(null); // { mbid, name, type }
-  const [artistReleases, setArtistReleases] = useState([]);
-  const [trackDurations, setTrackDurations] = useState({}); // { trackId: seconds }
-  const [artistDetails, setArtistDetails] = useState(null); // genres, links, members, etc.
-  const [artistBio, setArtistBio] = useState(null); // { extract, description, thumbnail }
-  const [artistTopTracks, setArtistTopTracks] = useState([]); // top tracks from Last.fm
-  const [moreByArtist, setMoreByArtist] = useState([]); // albums for "More by Artist" on album page
-
-  // Background download status (discrete indicator)
-  const [bgDownloadStatus, setBgDownloadStatus] = useState(null); // { type: 'yt'|'torrent', message, count, done }
-  const bgPollRef = useRef(null);
-  const [contextMenu, setContextMenu] = useState(null); // { x, y, items: [{label, action, danger?}] }
-
-  // Last.fm
-  const [lastfmStatus, setLastfmStatus] = useState({ configured: false, authenticated: false, username: null });
-  const [showSettings, setShowSettings] = useState(false);
-  const [lastfmApiKey, setLastfmApiKey] = useState('');
-  const [lastfmApiSecret, setLastfmApiSecret] = useState('');
-  const [lastfmAuthStep, setLastfmAuthStep] = useState(0); // 0=config, 1=authorize, 2=done
-  const [lastfmAuthUrl, setLastfmAuthUrl] = useState('');
-  const [lastfmAuthToken, setLastfmAuthToken] = useState('');
-  const [lastfmError, setLastfmError] = useState('');
-  const [lastfmTopArtists, setLastfmTopArtists] = useState([]);
-  const scrobbleRef = useRef({ artist: '', track: '', album: '', startTime: 0, duration: 0, scrobbled: false });
-
-  // Search & play history
-  const [searchHistory, setSearchHistory] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY)) || []; } catch { return []; }
-  });
-  const [recentlyPlayed, setRecentlyPlayed] = useState([]);
-
-  // Track download status (per-title tracking for status indicators)
-  // Map of normalized "artist::title" → 'queued' | 'active' | 'done'
-  const [dlTrackStatus, setDlTrackStatus] = useState(new Map());
-
-  // Mobile responsive
+  // Mobile (stays in App)
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
-  const [mobileTab, setMobileTab] = useState('search'); // 'search' | 'library'
+  const [mobileTab, setMobileTab] = useState('search');
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 767px)');
     const handler = (e) => setIsMobile(e.matches);
@@ -134,177 +52,204 @@ function App() {
     return () => mq.removeEventListener('change', handler);
   }, []);
 
-  // Ref mirror of lastfmStatus so onTimeUpdate closure always sees latest
-  const lastfmStatusRef = useRef(lastfmStatus);
-  useEffect(() => { lastfmStatusRef.current = lastfmStatus; }, [lastfmStatus]);
+  // UI state (stays in App)
+  const [contextMenu, setContextMenu] = useState(null);
+  const [showSettings, setShowSettings] = useState(false);
 
-  // -------------------------------------------------------------------------
-  // Effects
-  // -------------------------------------------------------------------------
+  // Album page state (stays in App)
+  const [mbTracks, setMbTracks] = useState([]);
+  const [albumColor, setAlbumColor] = useState(null);
+  const albumHeaderRef = useRef(null);
+  const mainContentRef = useRef(null);
+  const [showStickyHeader, setShowStickyHeader] = useState(false);
+  const [moreByArtist, setMoreByArtist] = useState([]);
+  const [trackDurations, setTrackDurations] = useState({});
 
-  // Session restore on mount
+  // Artist page state (stays in App)
+  const [selectedArtist, setSelectedArtist] = useState(null);
+  const [artistReleases, setArtistReleases] = useState([]);
+  const [artistDetails, setArtistDetails] = useState(null);
+  const [artistBio, setArtistBio] = useState(null);
+  const [artistTopTracks, setArtistTopTracks] = useState([]);
+
+  // ===== HOOKS =====
+  const {
+    queue, setQueue,
+    showQueue, setShowQueue,
+    dragIdx, setDragIdx,
+    dragOverIdx, setDragOverIdx,
+    addToQueue, removeFromQueue, clearQueue,
+  } = useQueue();
+
+  const { list: recentlyPlayed, add: addToRecentlyPlayed } = useRecentlyPlayed();
+
+  const lastfm = useLastFm();
+  const {
+    status: lastfmStatus, setStatus: setLastfmStatus,
+    apiKey: lastfmApiKey, setApiKey: setLastfmApiKey,
+    apiSecret: lastfmApiSecret, setApiSecret: setLastfmApiSecret,
+    authStep: lastfmAuthStep, setAuthStep: setLastfmAuthStep,
+    authUrl: lastfmAuthUrl,
+    authToken: lastfmAuthToken,
+    error: lastfmError,
+    topArtists: lastfmTopArtists,
+    statusRef: lastfmStatusRef,
+    scrobbleRef,
+  } = lastfm;
+  // Aliases so render functions stay unchanged
+  const lastfmSaveConfig = lastfm.saveConfig;
+  const lastfmCompleteAuth = lastfm.completeAuth;
+  const lastfmDisconnect = lastfm.disconnect;
+
+  const {
+    query, setQuery,
+    searching,
+    searchAlbums,
+    searchDone,
+    searchArtistResults,
+    streamingResults,
+    otherResults,
+    searchHistory,
+    handleSearch,
+    addToSearchHistory,
+    removeFromSearchHistory,
+  } = useSearch({ setView });
+
+  const {
+    library,
+    librarySortBy, setLibrarySortBy,
+    libraryFilter, setLibraryFilter,
+    showLibraryFilter, setShowLibraryFilter,
+    loadLibrary,
+    libraryAlbums,
+    libraryKeys,
+    isInLibrary,
+    sidebarAlbums,
+  } = useLibrary({ recentlyPlayed });
+
+  const player = usePlayer({
+    queue,
+    setQueue,
+    addToRecentlyPlayed,
+    lastfm,
+    loadLibrary,
+    isInLibrary,
+    library,
+    onStartBgPoll: () => download.startBgPoll(),
+    onSetBgStatus: (status) => download.setBgDownloadStatus(status),
+  });
+  const {
+    currentTrack, setCurrentTrack,
+    currentAlbumInfo, setCurrentAlbumInfo,
+    isPlaying, setIsPlaying,
+    volume, setVolume,
+    progress, setProgress,
+    duration, setDuration,
+    playlist, setPlaylist,
+    playlistIdx, setPlaylistIdx,
+    currentCoverArt, setCurrentCoverArt,
+    crossfadeDuration, setCrossfadeDuration,
+    ytSearching,
+    ytPendingTrack,
+    hoveredTrack, setHoveredTrack,
+    hoveredMbTrack, setHoveredMbTrack,
+    audioRef, nextAudioRef,
+    recentlyPlayedAddedRef,
+    playTrack, togglePlay, playNext, playPrev,
+    handleSeekClick,
+    cancelCrossfade,
+    peekNextTrack,
+    playFromYouTube,
+    playStreamingResult,
+    audioHandlers,
+  } = player;
+
+  const download = useDownload({
+    playTrack,
+    loadLibrary,
+    library,
+  });
+  const {
+    downloading, setDownloading,
+    downloadStatus, setDownloadStatus,
+    dlExpanded, setDlExpanded,
+    bgDownloadStatus, setBgDownloadStatus,
+    dlTrackStatus,
+    startDownload,
+    startYtDownload,
+    downloadAlbumViaYouTube,
+    startBgPoll,
+    autoAcquireAlbum,
+    handleCancel,
+    handleYtCancel,
+  } = download;
+
+  // Bridge function: uses library + download state
+  function getTrackDlStatus(artist, trackTitle, trackArtist) {
+    const titleLower = trackTitle?.toLowerCase();
+    const artistLower = artist?.toLowerCase();
+    const trackArtistLower = trackArtist?.toLowerCase();
+    const inLib = library.some(t => {
+      if (t.title?.toLowerCase() !== titleLower) return false;
+      const tArtist = t.artist?.toLowerCase();
+      return tArtist === artistLower || (trackArtistLower && tArtist === trackArtistLower);
+    });
+    if (inLib) return 'library';
+    const norm = (artist + '::' + trackTitle).toLowerCase();
+    const dlStatus = dlTrackStatus.get(norm);
+    if (dlStatus) return dlStatus;
+    return null;
+  }
+
+  // ===== SESSION =====
+  useSession({
+    audioRef,
+    onRestoreVolume: setVolume,
+    onRestoreView: setView,
+    onRestoreAlbum: setSelectedAlbum,
+    onRestoreQueue: setQueue,
+    onRestorePlaylist: setPlaylist,
+    onRestorePlaylistIdx: setPlaylistIdx,
+    onRestoreTrack: (track, albumInfo, savedProgress) => {
+      setCurrentTrack(track);
+      setCurrentAlbumInfo(albumInfo || null);
+      setCurrentCoverArt(track.coverArt || null);
+      if (audioRef.current) {
+        audioRef.current.src = track.path || buildTrackPath(track.id);
+        audioRef.current.addEventListener('loadedmetadata', () => {
+          if (savedProgress) audioRef.current.currentTime = savedProgress;
+        }, { once: true });
+      }
+    },
+    sessionData: { currentTrack, currentAlbumInfo, playlist, playlistIdx, volume, view, selectedAlbum, queue },
+  });
+
+  // ===== EFFECTS =====
+
+  // Initial load: library + Last.fm + URL param search
   useEffect(() => {
     loadLibrary();
-    // Check Last.fm status
-    fetch('/api/lastfm/status').then(r => r.json()).then(s => {
-      setLastfmStatus(s);
-      if (s.authenticated && s.username) {
-        fetch(`/api/lastfm/top/artists?period=overall&limit=8`).then(r => r.json()).then(a => setLastfmTopArtists(a || [])).catch(() => {});
-      }
-    }).catch(() => {});
-    // Check for URL query param search (e.g. ?q=daft+punk)
+    lastfm.load();
     const urlParams = new URLSearchParams(window.location.search);
     const urlQuery = urlParams.get('q');
     if (urlQuery) {
-      // Clean the URL without reload
       window.history.replaceState({}, '', window.location.pathname);
       setTimeout(() => handleSearch(null, urlQuery), 0);
-      return; // Skip session restore when URL search is present
     }
-    try {
-      const raw = localStorage.getItem(SESSION_KEY);
-      if (!raw) return;
-      const s = JSON.parse(raw);
-      if (s.volume != null) setVolume(s.volume);
-      if (s.view) setView(s.view);
-      if (s.selectedAlbum) setSelectedAlbum(s.selectedAlbum);
-      if (s.queue) setQueue(s.queue);
-      if (s.playlist) setPlaylist(s.playlist);
-      if (s.playlistIdx != null) setPlaylistIdx(s.playlistIdx);
-      if (s.currentTrack && !s.currentTrack.isYtPreview) {
-        setCurrentTrack(s.currentTrack);
-        setCurrentAlbumInfo(s.currentAlbumInfo || null);
-        setCurrentCoverArt(s.currentTrack.coverArt || null);
-        if (audioRef.current) {
-          audioRef.current.src = s.currentTrack.path || buildTrackPath(s.currentTrack.id);
-          audioRef.current.addEventListener('loadedmetadata', () => {
-            if (s.progress) audioRef.current.currentTime = s.progress;
-          }, { once: true });
-        }
-      }
-    } catch {}
   }, []);
 
-  // Session save — stable debounced fn reads from ref to always have latest values
-  const sessionDataRef = useRef({});
-  useEffect(() => {
-    sessionDataRef.current = { currentTrack, currentAlbumInfo, playlist, playlistIdx, volume, view, selectedAlbum, queue };
-  }, [currentTrack, currentAlbumInfo, playlist, playlistIdx, volume, view, selectedAlbum, queue]);
-
-  const saveSession = useRef(debounce(() => {
-    try {
-      localStorage.setItem(SESSION_KEY, JSON.stringify({
-        ...sessionDataRef.current,
-        progress: audioRef.current?.currentTime || 0,
-      }));
-    } catch {}
-  }, 500)).current;
-
-  useEffect(() => { saveSession(); }, [currentTrack, currentAlbumInfo, playlist, playlistIdx, volume, view, selectedAlbum, queue]);
-
-  // Save progress on beforeunload for accurate resume
-  useEffect(() => {
-    const handler = () => {
-      try {
-        const raw = localStorage.getItem(SESSION_KEY);
-        const s = raw ? JSON.parse(raw) : {};
-        s.progress = audioRef.current?.currentTime || 0;
-        localStorage.setItem(SESSION_KEY, JSON.stringify(s));
-      } catch {}
-    };
-    window.addEventListener('beforeunload', handler);
-    return () => window.removeEventListener('beforeunload', handler);
-  }, []);
-
-  // Recently Played — SSE sync across devices
-  useEffect(() => {
-    const abort = new AbortController();
-    let reconnectTimer;
-
-    function connectSSE() {
-      fetch('/api/recently-played/stream', { signal: abort.signal })
-        .then(res => {
-          const reader = res.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = '';
-          function read() {
-            reader.read().then(({ done, value }) => {
-              if (done) { scheduleReconnect(); return; }
-              buffer += decoder.decode(value, { stream: true });
-              const lines = buffer.split('\n');
-              buffer = lines.pop();
-              for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                  try {
-                    const list = JSON.parse(line.slice(6));
-                    setRecentlyPlayed(prev => {
-                      if (prev.length === list.length && prev[0]?.playedAt === list[0]?.playedAt) return prev;
-                      return list;
-                    });
-                  } catch {}
-                }
-              }
-              read();
-            }).catch(() => scheduleReconnect());
-          }
-          read();
-        })
-        .catch(() => { if (!abort.signal.aborted) scheduleReconnect(); });
-    }
-
-    function scheduleReconnect() {
-      if (abort.signal.aborted) return;
-      reconnectTimer = setTimeout(connectSSE, 3000);
-    }
-
-    // Initial load: check server, migrate localStorage if needed, then connect SSE
-    fetch('/api/recently-played')
-      .then(r => r.ok ? r.json() : [])
-      .then(serverList => {
-        if (serverList.length === 0) {
-          // One-time migration from localStorage
-          try {
-            const local = JSON.parse(localStorage.getItem(RECENTLY_PLAYED_KEY)) || [];
-            if (local.length > 0) {
-              return fetch('/api/recently-played', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(local),
-              }).then(r => r.ok ? r.json() : local)
-                .then(list => {
-                  setRecentlyPlayed(list);
-                  try { localStorage.removeItem(RECENTLY_PLAYED_KEY); } catch {}
-                });
-            }
-          } catch {}
-        }
-        setRecentlyPlayed(serverList);
-        try { localStorage.removeItem(RECENTLY_PLAYED_KEY); } catch {}
-      })
-      .catch(() => {
-        // Offline fallback: use localStorage if migration hasn't happened yet
-        try { setRecentlyPlayed(JSON.parse(localStorage.getItem(RECENTLY_PLAYED_KEY)) || []); } catch {}
-      })
-      .finally(() => connectSSE());
-
-    return () => { abort.abort(); clearTimeout(reconnectTimer); };
-  }, []);
-
-  // Fetch MB track listing when opening a search album with an mbid or rgid
+  // MB track listing for album detail
   useEffect(() => {
     if (selectedAlbum?.fromSearch && (selectedAlbum?.mbid || selectedAlbum?.rgid)) {
       setMbTracks([]);
       if (selectedAlbum.mbid) {
-        fetch(`/api/mb/release/${selectedAlbum.mbid}/tracks`)
-          .then(r => r.json())
+        api.getMbReleaseTracks(selectedAlbum.mbid)
           .then(d => setMbTracks(d.tracks || []))
           .catch(() => {});
       } else if (selectedAlbum.rgid) {
-        fetch(`/api/mb/release-group/${selectedAlbum.rgid}/tracks`)
-          .then(r => r.json())
+        api.getMbRgTracks(selectedAlbum.rgid)
           .then(d => {
             setMbTracks(d.tracks || []);
-            // Update mbid if we resolved one
             if (d.releaseMbid && !selectedAlbum.mbid) {
               setSelectedAlbum(prev => prev ? { ...prev, mbid: d.releaseMbid } : prev);
             }
@@ -316,28 +261,24 @@ function App() {
     }
   }, [selectedAlbum?.mbid, selectedAlbum?.rgid, selectedAlbum?.fromSearch]);
 
-  // Fetch "More by Artist" for album page — find artist MBID and get their discography
+  // "More by Artist" for album page
   useEffect(() => {
     setMoreByArtist([]);
     if (!selectedAlbum?.artist || view !== 'album') return;
     const artistName = selectedAlbum.artist;
     const currentAlbumTitle = selectedAlbum.album;
-    // Try to find artist MBID from search results or by searching
     const cached = searchArtistResults.find(a => a.name.toLowerCase() === artistName.toLowerCase());
     const fetchArtist = cached?.mbid
       ? Promise.resolve(cached.mbid)
-      : fetch(`/api/search?q=${encodeURIComponent(artistName)}`)
-          .then(r => r.json())
+      : api.search(artistName)
           .then(d => {
             const match = d.artists?.find(a => a.name.toLowerCase() === artistName.toLowerCase());
             return match?.mbid || null;
           })
           .catch(() => null);
-
     fetchArtist.then(artistMbid => {
       if (!artistMbid) return;
-      fetch(`/api/artist/${artistMbid}?name=${encodeURIComponent(artistName)}`)
-        .then(r => r.json())
+      api.getArtist(artistMbid, artistName)
         .then(d => {
           const other = (d.releases || [])
             .filter(r => r.album.toLowerCase() !== currentAlbumTitle.toLowerCase())
@@ -348,22 +289,20 @@ function App() {
     });
   }, [selectedAlbum?.artist, selectedAlbum?.album, view]);
 
-  // Load track durations sequentially — all side effects outside setState to avoid strict mode double-invoke
+  // Load track durations sequentially for library album view
   useEffect(() => {
     if (!selectedAlbum || selectedAlbum.fromSearch) return;
     const tracks = selectedAlbum.tracks || [];
     if (!tracks.length) return;
     let cancelled = false;
     let activeAudio = null;
-    const seen = new Set(); // tracks we've started loading in this effect run
-
+    const seen = new Set();
     const loadNext = (idx) => {
       if (cancelled || idx >= tracks.length) return;
       const track = tracks[idx];
       const id = track.id;
       if (!id || seen.has(id)) { loadNext(idx + 1); return; }
       seen.add(id);
-
       const audio = new Audio();
       activeAudio = audio;
       audio.preload = 'metadata';
@@ -387,7 +326,6 @@ function App() {
       };
       audio.src = track.path || buildTrackPath(id);
     };
-
     loadNext(0);
     return () => {
       cancelled = true;
@@ -400,16 +338,16 @@ function App() {
     };
   }, [selectedAlbum]);
 
-  // Fetch dominant color from cover art for gradient header
+  // Album header gradient color
   useEffect(() => {
     setAlbumColor(null);
     setShowStickyHeader(false);
     if (!selectedAlbum?.coverArt) return;
     const url = selectedAlbum.coverArt.replace('/api/cover/', '/api/cover/') + '/color';
-    fetch(url).then(r => r.json()).then(d => { if (d.color) setAlbumColor(d.color); }).catch(() => {});
+    api.getCoverColor(url).then(d => { if (d.color) setAlbumColor(d.color); }).catch(() => {});
   }, [selectedAlbum]);
 
-  // Sticky header via IntersectionObserver
+  // Sticky album header via IntersectionObserver
   useEffect(() => {
     if (view !== 'album' || !albumHeaderRef.current || !mainContentRef.current) {
       setShowStickyHeader(false);
@@ -422,641 +360,6 @@ function App() {
     observer.observe(albumHeaderRef.current);
     return () => observer.disconnect();
   }, [view, selectedAlbum]);
-
-  useEffect(() => {
-    if (audioRef.current) audioRef.current.volume = volume;
-    // Don't set nextAudioRef volume here — crossfade controls it separately
-  }, [volume]);
-
-  useEffect(() => {
-    try { localStorage.setItem('notify_crossfade', String(crossfadeDuration)); } catch {}
-  }, [crossfadeDuration]);
-
-  // -------------------------------------------------------------------------
-  // Library
-  // -------------------------------------------------------------------------
-  async function loadLibrary() {
-    try {
-      const res = await fetch('/api/library');
-      const data = await res.json();
-      setLibrary(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error('Library load failed:', err);
-    }
-  }
-
-  function groupLibrary(tracks) {
-    return tracks.reduce((acc, t) => {
-      const artist = t.artist || 'Unknown Artist';
-      const album = t.album || 'Unknown Album';
-      if (!acc[artist]) acc[artist] = {};
-      if (!acc[artist][album]) acc[artist][album] = { tracks: [], coverArt: t.coverArt || null, mbid: t.mbid || null };
-      acc[artist][album].tracks.push(t);
-      return acc;
-    }, {});
-  }
-
-  // Build library as flat album list for card grid
-  // Merges VA/compilation albums: if an album name appears under 3+ different artists
-  // with shared coverArt, merge them into one "Various Artists" entry
-  function libraryAlbums() {
-    const grouped = groupLibrary(library);
-    // First pass: collect all entries keyed by album name
-    const byAlbumName = {};
-    for (const [artist, albumMap] of Object.entries(grouped)) {
-      for (const [albumName, data] of Object.entries(albumMap)) {
-        if (!byAlbumName[albumName]) byAlbumName[albumName] = [];
-        byAlbumName[albumName].push({ artist, ...data });
-      }
-    }
-    // Second pass: detect VA albums and merge
-    const albums = [];
-    const mergedAlbumNames = new Set();
-    for (const [albumName, entries] of Object.entries(byAlbumName)) {
-      if (entries.length >= 3) {
-        // 3+ different artists with the same album name — treat as VA
-        const allTracks = entries.flatMap(e => e.tracks);
-        const coverArt = entries.find(e => e.coverArt)?.coverArt || null;
-        const mbid = entries.find(e => e.mbid)?.mbid || null;
-        albums.push({ artist: 'Various Artists', album: albumName, tracks: allTracks, coverArt, mbid, trackCount: allTracks.length });
-        mergedAlbumNames.add(albumName);
-      }
-    }
-    // Add non-merged albums normally
-    for (const [artist, albumMap] of Object.entries(grouped)) {
-      for (const [albumName, { tracks, coverArt, mbid }] of Object.entries(albumMap)) {
-        if (!mergedAlbumNames.has(albumName)) {
-          albums.push({ artist, album: albumName, tracks, coverArt, mbid, trackCount: tracks.length });
-        }
-      }
-    }
-    return albums;
-  }
-
-  // Set of normalized "artist::album" keys for quick library membership checks
-  const libraryKeys = useMemo(() => {
-    const s = new Set();
-    libraryAlbums().forEach(a => s.add((a.artist + '::' + a.album).toLowerCase()));
-    return s;
-  }, [library]);
-
-  function isInLibrary(artist, album) {
-    return libraryKeys.has((artist + '::' + album).toLowerCase());
-  }
-
-  // Track download status for a given artist + track title
-  // Returns: 'library' | 'active' | 'queued' | null
-  // For VA albums, trackArtist is the per-track artist (e.g., "Apparat") while
-  // artist may be album-level ("Various Artists")
-  function getTrackDlStatus(artist, trackTitle, trackArtist) {
-    // Check if this specific track is in the library — match either album or track artist
-    const titleLower = trackTitle?.toLowerCase();
-    const artistLower = artist?.toLowerCase();
-    const trackArtistLower = trackArtist?.toLowerCase();
-    const inLib = library.some(t => {
-      if (t.title?.toLowerCase() !== titleLower) return false;
-      const tArtist = t.artist?.toLowerCase();
-      return tArtist === artistLower || (trackArtistLower && tArtist === trackArtistLower);
-    });
-    if (inLib) return 'library';
-    // Check active downloads — try both artist keys
-    const norm = (artist + '::' + trackTitle).toLowerCase();
-    const dlStatus = dlTrackStatus.get(norm);
-    if (dlStatus) return dlStatus; // 'active' or 'queued'
-    return null;
-  }
-
-  // TrackStatusIcon is now imported from ./components/TrackStatusIcon
-
-  // Sorted + filtered library for sidebar
-  function sidebarAlbums() {
-    let albums = libraryAlbums();
-    if (libraryFilter) {
-      const f = libraryFilter.toLowerCase();
-      albums = albums.filter(a => a.album.toLowerCase().includes(f) || a.artist.toLowerCase().includes(f));
-    }
-    if (librarySortBy === 'recents') {
-      // Sort by most recently played (from recentlyPlayed state)
-      const recencyMap = new Map();
-      recentlyPlayed.forEach(r => {
-        const key = (r.artist + '::' + r.album).toLowerCase();
-        if (!recencyMap.has(key)) recencyMap.set(key, r.playedAt || 0);
-      });
-      albums.sort((a, b) => {
-        const aTime = recencyMap.get((a.artist + '::' + a.album).toLowerCase()) || 0;
-        const bTime = recencyMap.get((b.artist + '::' + b.album).toLowerCase()) || 0;
-        return bTime - aTime;
-      });
-    } else if (librarySortBy === 'alpha') {
-      albums.sort((a, b) => a.album.localeCompare(b.album));
-    } else if (librarySortBy === 'artist') {
-      albums.sort((a, b) => a.artist.localeCompare(b.artist) || a.album.localeCompare(b.album));
-    }
-    return albums;
-  }
-
-  // -------------------------------------------------------------------------
-  // Search
-  // -------------------------------------------------------------------------
-  function addToSearchHistory(q) {
-    setSearchHistory(prev => {
-      const filtered = prev.filter(s => s.toLowerCase() !== q.toLowerCase());
-      const next = [q, ...filtered].slice(0, MAX_SEARCH_HISTORY);
-      try { localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(next)); } catch {}
-      return next;
-    });
-  }
-
-  function removeFromSearchHistory(q) {
-    setSearchHistory(prev => {
-      const next = prev.filter(s => s !== q);
-      try { localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(next)); } catch {}
-      return next;
-    });
-  }
-
-  function addToRecentlyPlayed(item) {
-    // item: { artist, album, coverArt, mbid, rgid }
-    // Optimistic local update for instant UI feedback
-    setRecentlyPlayed(prev => {
-      const key = (item.artist + '::' + item.album).toLowerCase();
-      const filtered = prev.filter(r => (r.artist + '::' + r.album).toLowerCase() !== key);
-      return [{ ...item, playedAt: Date.now() }, ...filtered].slice(0, MAX_RECENTLY_PLAYED);
-    });
-    // Persist to server — server broadcasts to all SSE clients (cross-device sync)
-    fetch('/api/recently-played', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(item),
-    })
-      .then(r => r.ok ? r.json() : null)
-      .then(list => { if (list) setRecentlyPlayed(list); })
-      .catch(() => {}); // silent — SSE reconnect will sync eventually
-  }
-
-  async function handleSearch(e, overrideQuery) {
-    if (e?.preventDefault) e.preventDefault();
-    const q = (overrideQuery || query).trim();
-    if (!q) return;
-    if (overrideQuery) setQuery(q);
-    addToSearchHistory(q);
-    setSearching(true);
-    setSearchDone(false);
-    setSearchAlbums([]);
-    setSearchArtistResults([]);
-    setStreamingResults([]);
-    setMbAlbums([]);
-    setOtherResults([]);
-    setView('search');
-    try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-      const data = await res.json();
-      // Merge torrent-matched albums and MB-only albums into one unified list
-      // Torrent albums come first (they have download sources), MB albums fill in below
-      // This ensures MB-only albums (like "Dark" soundtrack) appear as first-class results
-      // with proper Top Result card, not buried below YouTube videos
-      const torrentAlbums = data.albums || [];
-      const mbOnly = (data.mbAlbums || []).map(a => ({ ...a, sources: a.sources || [] }));
-      setSearchAlbums([...torrentAlbums, ...mbOnly]);
-      setSearchArtistResults(data.artists || []);
-      setStreamingResults((data.streamingResults || []).filter(r => r.duration));
-      setMbAlbums([]); // No longer needed separately — merged into searchAlbums
-      setOtherResults(data.otherResults || []);
-    } catch (err) {
-      console.error('Search failed:', err);
-    } finally {
-      setSearching(false);
-      setSearchDone(true);
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  // Player
-  // -------------------------------------------------------------------------
-
-  // Get the next track that would play (from queue or playlist), without consuming it
-  function peekNextTrack() {
-    if (queue.length > 0) return queue[0];
-    if (!playlist.length) return null;
-    const next = (playlistIdx + 1) % playlist.length;
-    return playlist[next] || null;
-  }
-
-  // Cancel any active crossfade animation and reset nextAudioRef
-  function cancelCrossfade() {
-    if (crossfadeAnimRef.current) {
-      cancelAnimationFrame(crossfadeAnimRef.current);
-      crossfadeAnimRef.current = null;
-    }
-    if (nextAudioRef.current) {
-      nextAudioRef.current.pause();
-      nextAudioRef.current.removeAttribute('src');
-      nextAudioRef.current.load();
-    }
-    preBufferedTrackRef.current = null;
-  }
-
-  function playTrack(track, pl, idx, albumInfo) {
-    // Cancel any pending crossfade/pre-buffer when user manually selects a track
-    cancelCrossfade();
-
-    const i = idx ?? (pl ? pl.findIndex(t => t.id === track.id) : 0);
-    setCurrentTrack(track);
-    setCurrentCoverArt(track.coverArt || null);
-    setCurrentAlbumInfo(albumInfo || { artist: track.artist, album: track.album, coverArt: track.coverArt });
-    setIsPlaying(true);
-    if (pl) { setPlaylist(pl); setPlaylistIdx(i >= 0 ? i : 0); }
-    if (audioRef.current) {
-      audioRef.current.volume = volume;
-      audioRef.current.src = track.path || buildTrackPath(track.id);
-      audioRef.current.play().catch(() => {});
-    }
-    // Reset recently-played gate — will be added after 2s of playback in onTimeUpdate
-    recentlyPlayedAddedRef.current = false;
-
-    const artist = track.artist || albumInfo?.artist || '';
-    const album = track.album || albumInfo?.album || '';
-
-    // Last.fm: now playing + reset scrobble state
-    scrobbleRef.current = { artist, track: track.title, album, startTime: Math.floor(Date.now() / 1000), duration: 0, scrobbled: false };
-    if (lastfmStatus.authenticated && artist && track.title) {
-      fetch('/api/lastfm/nowplaying', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ artist, track: track.title, album }),
-      }).catch(() => {});
-    }
-  }
-
-  function togglePlay() {
-    if (!audioRef.current || !currentTrack) return;
-    if (isPlaying) { audioRef.current.pause(); setIsPlaying(false); }
-    else { audioRef.current.play().catch(() => {}); setIsPlaying(true); }
-  }
-
-  // Transition state to a new track (update React state without touching audio element)
-  function _applyTrackState(nextTrack) {
-    if (queue.length > 0 && queue[0].id === nextTrack.id) {
-      setQueue(prev => prev.slice(1));
-    } else if (playlist.length > 0) {
-      const nextIdx = (playlistIdx + 1) % playlist.length;
-      setPlaylistIdx(nextIdx);
-    }
-    setCurrentTrack(nextTrack);
-    setCurrentCoverArt(nextTrack.coverArt || null);
-    recentlyPlayedAddedRef.current = false;
-    const artist = nextTrack.artist || '';
-    const album = nextTrack.album || '';
-    scrobbleRef.current = { artist, track: nextTrack.title, album, startTime: Math.floor(Date.now() / 1000), duration: 0, scrobbled: false };
-    if (lastfmStatus.authenticated && artist && nextTrack.title) {
-      fetch('/api/lastfm/nowplaying', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ artist, track: nextTrack.title, album }),
-      }).catch(() => {});
-    }
-  }
-
-  function playNext() {
-    // Play from user queue first
-    if (queue.length > 0) {
-      const [next, ...rest] = queue;
-      setQueue(rest);
-      if (next.ytPending) {
-        cancelCrossfade();
-        playFromYouTube(next.title, next.artist, next.album, next.coverArt, next.trackArtist);
-        return;
-      }
-      playTrack(next, playlist, playlistIdx, currentAlbumInfo);
-      return;
-    }
-    if (!playlist.length) return;
-    const next = (playlistIdx + 1) % playlist.length;
-    playTrack(playlist[next], null, next);
-    setPlaylistIdx(next);
-  }
-
-  // Start crossfade transition to next track.
-  // nextAudioRef plays audibly for the fade duration, then audioRef takes over
-  // at the same position so React's event handlers remain on the active element.
-  function startCrossfade(nextTrack, fadeDuration) {
-    if (!nextAudioRef.current || !audioRef.current) return;
-    const nextSrc = nextTrack.path || buildTrackPath(nextTrack.id);
-    // Load into secondary if not already pre-buffered
-    if (preBufferedTrackRef.current?.id !== nextTrack.id) {
-      nextAudioRef.current.src = nextSrc;
-      nextAudioRef.current.load();
-    }
-    nextAudioRef.current.volume = 0;
-    nextAudioRef.current.play().catch(() => {});
-
-    const startTime = performance.now();
-    const fadeMs = fadeDuration * 1000;
-    const startVol = volume;
-
-    function fadeStep(now) {
-      const elapsed = now - startTime;
-      const pct = Math.min(1, elapsed / fadeMs);
-      if (audioRef.current) audioRef.current.volume = startVol * (1 - pct);
-      if (nextAudioRef.current) nextAudioRef.current.volume = startVol * pct;
-      if (pct < 1) {
-        crossfadeAnimRef.current = requestAnimationFrame(fadeStep);
-      } else {
-        crossfadeAnimRef.current = null;
-        // Crossfade complete — hand off to audioRef so React handlers keep working.
-        // Snap audioRef to where nextAudioRef is, then stop nextAudioRef.
-        const resumeTime = nextAudioRef.current?.currentTime || 0;
-        if (nextAudioRef.current) {
-          nextAudioRef.current.pause();
-          nextAudioRef.current.removeAttribute('src');
-          nextAudioRef.current.load();
-        }
-        preBufferedTrackRef.current = null;
-        if (audioRef.current) {
-          audioRef.current.src = nextSrc;
-          audioRef.current.volume = startVol;
-          // Seek to match where the crossfade left off, then play
-          audioRef.current.addEventListener('loadedmetadata', () => {
-            if (audioRef.current) {
-              audioRef.current.currentTime = resumeTime;
-              audioRef.current.play().catch(() => {});
-            }
-          }, { once: true });
-          audioRef.current.load();
-        }
-        _applyTrackState(nextTrack);
-      }
-    }
-    crossfadeAnimRef.current = requestAnimationFrame(fadeStep);
-  }
-
-  // Pre-buffer the next track for gapless playback
-  function preBufferNext() {
-    const nextTrack = peekNextTrack();
-    if (!nextTrack || nextTrack.ytPending) return;
-    if (preBufferedTrackRef.current?.id === nextTrack.id) return; // already buffered
-    if (!nextAudioRef.current) return;
-    const nextSrc = nextTrack.path || buildTrackPath(nextTrack.id);
-    nextAudioRef.current.src = nextSrc;
-    nextAudioRef.current.load();
-    preBufferedTrackRef.current = nextTrack;
-  }
-
-  function addToQueue(track) {
-    setQueue(prev => [...prev, track]);
-  }
-
-  function removeFromQueue(index) {
-    setQueue(prev => prev.filter((_, i) => i !== index));
-  }
-
-  function clearQueue() {
-    setQueue([]);
-  }
-
-  // YouTube quick-play: search YT and stream immediately
-  async function playFromYouTube(trackTitle, albumArtist, albumName, coverArt, trackArtist, artistMbid, albumRgid, albumMbid) {
-    if (ytSearching) return; // Prevent double-trigger
-    setYtSearching(true);
-    setYtPendingTrack(trackTitle);
-    try {
-      // For compilation/VA albums, use the track-specific artist for a better YT match
-      const searchArtist = trackArtist || albumArtist;
-      const q = `${searchArtist} ${trackTitle} audio`;
-      const res = await fetch(`/api/yt/search?q=${encodeURIComponent(q)}`);
-      const results = await res.json();
-      if (!results.length) throw new Error('No results');
-      const best = results[0];
-      const track = {
-        id: `yt-${best.id}`,
-        title: trackTitle,
-        artist: trackArtist || albumArtist,
-        album: albumName,
-        coverArt,
-        path: `/api/yt/stream/${best.id}`,
-        isYtPreview: true,
-        ytVideoId: best.id,
-      };
-      const info = { artist: albumArtist, album: albumName, coverArt };
-      if (artistMbid) info.artistMbid = artistMbid;
-      if (albumRgid) info.rgid = albumRgid;
-      if (albumMbid) info.mbid = albumMbid;
-      playTrack(track, [], 0, info);
-      // Auto-download this single track in background
-      const dlArtist = trackArtist || albumArtist;
-      if (dlArtist && !isInLibrary(dlArtist, albumName || 'Singles')) {
-        fetch('/api/download/yt', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            url: `https://www.youtube.com/watch?v=${best.id}`,
-            title: trackTitle,
-            artist: dlArtist,
-            album: albumName || 'Singles',
-            coverArt: coverArt || null,
-          }),
-        }).then(() => startBgPoll()).catch(() => {});
-        setBgDownloadStatus({ type: 'yt', message: `Saving: ${trackTitle}`, count: 1, done: false });
-      }
-    } catch (err) {
-      console.error('YouTube play failed:', err);
-    } finally {
-      setYtSearching(false);
-      setYtPendingTrack(null);
-    }
-  }
-
-  // Play a streaming result (YouTube direct or SoundCloud via YT search)
-  function playStreamingResult(r) {
-    if (r.source === 'youtube') {
-      const track = {
-        id: `yt-${r.id}`,
-        title: r.title,
-        artist: r.artist,
-        album: '',
-        coverArt: r.thumbnail,
-        path: `/api/yt/stream/${r.id}`,
-        isYtPreview: true,
-        ytVideoId: r.id,
-      };
-      playTrack(track, [], 0, { artist: r.artist, album: r.title, coverArt: r.thumbnail });
-    } else {
-      playFromYouTube(r.title, r.artist, '', r.thumbnail);
-    }
-  }
-
-  // Play all MB tracks via YouTube (first track immediate, rest queued)
-  // Also triggers auto-download of the album
-  async function playAllFromYouTube(tracks, albumArtist, albumName, coverArt) {
-    if (!tracks.length) return;
-    // Play first track — pass track-specific artist for VA/compilation albums
-    await playFromYouTube(tracks[0].title, albumArtist, albumName, coverArt, tracks[0].artist);
-    // Queue remaining tracks as YT lookups (lazy — resolved when played)
-    const queueTracks = tracks.slice(1).map(t => ({
-      id: `yt-pending-${t.position}`,
-      title: t.title,
-      artist: t.artist || albumArtist,
-      trackArtist: t.artist, // preserve per-track artist for YT search
-      album: albumName,
-      coverArt,
-      isYtPreview: true,
-      ytPending: true, // needs YT search when it's time to play
-    }));
-    setQueue(queueTracks);
-
-    // Auto-acquire the FULL album in background (not just the tracks from click position)
-    // Use mbTracks (full tracklist from state) rather than `tracks` (which may be a subset)
-    const fullTrackList = mbTracks.length > tracks.length ? mbTracks : tracks;
-    // Filter out tracks already in the library (check per-track artist for VA albums)
-    const missingTracks = fullTrackList.filter(t => {
-      const trackArtist = t.artist || albumArtist;
-      return !library.some(lt =>
-        lt.title?.toLowerCase() === t.title?.toLowerCase() &&
-        (lt.artist?.toLowerCase() === trackArtist.toLowerCase() ||
-         lt.artist?.toLowerCase() === albumArtist.toLowerCase()) &&
-        lt.album?.toLowerCase() === albumName.toLowerCase()
-      );
-    });
-    if (missingTracks.length > 0) {
-      autoAcquireAlbum({
-        artist: albumArtist,
-        album: albumName,
-        coverArt,
-        sources: selectedAlbum?.sources || [],
-        mbid: selectedAlbum?.mbid,
-        rgid: selectedAlbum?.rgid,
-        year: selectedAlbum?.year,
-        mbTracks: missingTracks,
-      });
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  // Auto-acquire: download album in background when user plays something
-  // -------------------------------------------------------------------------
-  function autoAcquireAlbum(albumInfo) {
-    // albumInfo: { artist, album, coverArt, sources, mbid, rgid, mbTracks }
-    if (!albumInfo?.artist || !albumInfo?.album) return;
-
-    // Check: does this album have torrent sources? If so, use torrent (better quality, full album)
-    const torrentSrc = albumInfo.sources?.find(s => s.magnetLink);
-    if (torrentSrc) {
-      // Background torrent download
-      setBgDownloadStatus({ type: 'torrent', message: `Saving ${albumInfo.album}...`, count: 0, done: false });
-      fetch('/api/download/background', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          magnetLink: torrentSrc.magnetLink,
-          name: torrentSrc.name,
-          mbid: albumInfo.mbid || null,
-          artist: albumInfo.artist,
-          albumName: albumInfo.album,
-          year: albumInfo.year || '',
-          coverArt: albumInfo.coverArt || null,
-        }),
-      }).then(r => r.json()).then(() => {
-        // Poll for completion
-        startBgPoll();
-      }).catch(err => console.warn('Bg torrent start failed:', err));
-      return;
-    }
-
-    // No torrent — use yt-dlp for each track
-    const tracks = albumInfo.mbTracks || [];
-    if (tracks.length === 0) return;
-
-    setBgDownloadStatus({ type: 'yt', message: `Saving ${albumInfo.album}...`, count: tracks.length, done: false });
-
-    // Resolve YT URLs for all tracks and batch-queue downloads
-    // For VA/compilation albums, use per-track artist for better YT search accuracy
-    (async () => {
-      const ytTracks = [];
-      for (const t of tracks) {
-        try {
-          const trackArtist = t.artist || albumInfo.artist;
-          const q = `${trackArtist} ${t.title} audio`;
-          const res = await fetch(`/api/yt/search?q=${encodeURIComponent(q)}`);
-          const results = await res.json();
-          if (results.length) {
-            ytTracks.push({
-              url: `https://www.youtube.com/watch?v=${results[0].id}`,
-              title: t.title,
-              artist: trackArtist,
-              album: albumInfo.album,
-              coverArt: albumInfo.coverArt || null,
-            });
-          }
-        } catch {}
-      }
-      if (ytTracks.length) {
-        fetch('/api/download/yt/batch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tracks: ytTracks }),
-        }).then(() => startBgPoll()).catch(() => {});
-      }
-    })();
-  }
-
-  const libRefreshCountRef = useRef(0);
-  function startBgPoll() {
-    if (bgPollRef.current) return;
-    libRefreshCountRef.current = 0;
-    bgPollRef.current = setInterval(async () => {
-      try {
-        const res = await fetch('/api/download/yt/queue');
-        const data = await res.json();
-        // Build per-track download status map
-        const statusMap = new Map();
-        if (data.active) {
-          statusMap.set((data.active.artist + '::' + data.active.title).toLowerCase(), 'active');
-        }
-        for (const q of (data.queued || [])) {
-          statusMap.set((q.artist + '::' + q.title).toLowerCase(), 'queued');
-        }
-        setDlTrackStatus(statusMap);
-        if (data.active) {
-          setBgDownloadStatus(prev => ({
-            ...prev,
-            message: `Saving: ${data.active.title}`,
-            count: data.queued.length + 1,
-            done: false,
-          }));
-        } else if (data.queued.length === 0) {
-          // Check bg torrent status too
-          const bgRes = await fetch('/api/download/background/status');
-          const bgData = await bgRes.json();
-          if (bgData.active) {
-            setBgDownloadStatus(prev => ({
-              ...prev,
-              message: bgData.message || 'Downloading...',
-              done: false,
-            }));
-          } else {
-            // All done
-            setBgDownloadStatus(prev => prev ? { ...prev, message: 'All saved!', done: true, count: 0 } : null);
-            setDlTrackStatus(new Map());
-            loadLibrary();
-            clearInterval(bgPollRef.current);
-            bgPollRef.current = null;
-            // Auto-hide after 3s
-            setTimeout(() => setBgDownloadStatus(null), 3000);
-            // Run dedupe
-            fetch('/api/library/dedupe', { method: 'POST' }).catch(() => {});
-          }
-        } else {
-          setBgDownloadStatus(prev => ({
-            ...prev,
-            message: `Queued: ${data.queued.length} tracks`,
-            count: data.queued.length,
-            done: false,
-          }));
-        }
-        // Refresh library every ~15s (not every 3s poll) to avoid re-render churn during playback
-        libRefreshCountRef.current++;
-        if (libRefreshCountRef.current % 5 === 0) loadLibrary();
-      } catch {}
-    }, 3000);
-  }
 
   // -------------------------------------------------------------------------
   // Artist page
@@ -1071,22 +374,19 @@ function App() {
     setView('artist');
 
     // Fetch top tracks from Last.fm (fires immediately, independent of MB data)
-    fetch(`/api/lastfm/artist/top-tracks?artist=${encodeURIComponent(name)}&limit=10`)
-      .then(r => r.ok ? r.json() : [])
+    api.getLastfmTopTracks(name, 10)
       .then(tracks => { if (Array.isArray(tracks) && tracks.length) setArtistTopTracks(tracks); })
       .catch(() => {});
 
     try {
-      const res = await fetch(`/api/artist/${mbid}?name=${encodeURIComponent(name)}`);
-      const data = await res.json();
+      const data = await api.getArtist(mbid, name);
       setArtistReleases(data.releases || []);
       if (data.details) {
         setArtistDetails(data.details);
         // Lazy-load Wikipedia bio if link available (prefer Wikipedia, fall back to Wikidata)
         const wikiUrl = data.details.links?.wikipedia || data.details.links?.wikidata;
         if (wikiUrl) {
-          fetch(`/api/wiki/summary?url=${encodeURIComponent(wikiUrl)}`)
-            .then(r => r.ok ? r.json() : null)
+          api.getWikiSummary(wikiUrl)
             .then(bio => { if (bio) setArtistBio(bio); })
             .catch(() => {});
         }
@@ -1094,240 +394,6 @@ function App() {
     } catch (err) {
       console.error('Artist page load failed:', err);
     }
-  }
-
-  function playPrev() {
-    if (!playlist.length) return;
-    if (audioRef.current?.currentTime > 3) { audioRef.current.currentTime = 0; return; }
-    const prev = (playlistIdx - 1 + playlist.length) % playlist.length;
-    playTrack(playlist[prev], null, prev);
-    setPlaylistIdx(prev);
-  }
-
-  function handleSeekClick(e) {
-    if (!audioRef.current || !duration) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    audioRef.current.currentTime = Math.max(0, Math.min(duration, ((e.clientX - rect.left) / rect.width) * duration));
-  }
-
-  // -------------------------------------------------------------------------
-  // Download & SSE
-  // -------------------------------------------------------------------------
-  async function handleCancel() {
-    try { await fetch('/api/download', { method: 'DELETE' }); } catch {}
-  }
-
-  function handleSSEEvent(event) {
-    setDownloadStatus(prev => {
-      const logs = [...(prev?.logs || [])];
-
-      if (event.type === 'step') {
-        logs.push(event.message);
-        return { ...prev, step: event.step, total: event.total, message: event.message, logs };
-      }
-      if (event.type === 'progress') {
-        return { ...prev, step: event.step, total: event.total, message: event.message, percent: event.percent, logs };
-      }
-      if (event.type === 'file') {
-        if (!event.done || event.error) {
-          logs.push(event.message);
-        } else {
-          const last = logs.length - 1;
-          if (last >= 0 && (logs[last].startsWith('Downloading:') || logs[last].startsWith('Extracting:'))) {
-            logs[last] = event.message;
-          } else {
-            logs.push(event.message);
-          }
-          // Auto-play first completed track
-          if (event.trackId && pendingPlayRef.current) {
-            pendingPlayRef.current = false;
-            const track = {
-              id: event.trackId,
-              title: event.filename || 'Track',
-              artist: prev?.artist || '',
-              album: prev?.albumName || '',
-              coverArt: prev?.coverArt || null,
-              path: buildTrackPath(event.trackId),
-            };
-            playTrack(track, [track], 0, { artist: prev?.artist, album: prev?.albumName, coverArt: prev?.coverArt });
-          }
-          loadLibrary();
-        }
-        return { ...prev, step: event.step, message: event.message, fileIndex: event.fileIndex, fileTotal: event.fileTotal, logs };
-      }
-      if (event.type === 'complete') {
-        logs.push(event.message);
-        setDownloading(null);
-        pendingPlayRef.current = false;
-        loadLibrary();
-        return { ...prev, message: event.message, complete: true, logs };
-      }
-      if (event.type === 'cancelled') {
-        setDownloading(null);
-        pendingPlayRef.current = false;
-        return { ...prev, message: 'Cancelled.', cancelled: true, logs: [...logs, 'Cancelled.'] };
-      }
-      if (event.type === 'error') {
-        setDownloading(null);
-        pendingPlayRef.current = false;
-        return { ...prev, message: event.message, error: true, logs: [...logs, `Error: ${event.message}`] };
-      }
-      return prev;
-    });
-  }
-
-  async function startDownload(source, albumMeta, autoPlay) {
-    setDownloading(source.id);
-    setDownloadStatus({
-      step: 0, message: 'Starting...', percent: null, logs: [],
-      artist: albumMeta?.artist || '',
-      albumName: albumMeta?.album || '',
-      coverArt: albumMeta?.coverArt || null,
-    });
-    pendingPlayRef.current = !!autoPlay;
-
-    try {
-      const res = await fetch('/api/download', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          magnetLink: source.magnetLink,
-          name: source.name,
-          mbid: albumMeta?.mbid || null,
-          artist: albumMeta?.artist || '',
-          albumName: albumMeta?.album || '',
-          year: albumMeta?.year || '',
-          coverArt: albumMeta?.coverArt || null,
-        }),
-      });
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try { handleSSEEvent(JSON.parse(line.slice(6))); } catch {}
-          }
-        }
-      }
-    } catch (err) {
-      setDownloadStatus(prev => ({ ...prev, message: `Error: ${err.message}`, error: true }));
-      setDownloading(null);
-      pendingPlayRef.current = false;
-    }
-  }
-
-  // Download a streaming result (YouTube/SoundCloud) via yt-dlp
-  async function startYtDownload(result) {
-    setDownloading(`stream-${result.id}`);
-    setDownloadStatus({
-      step: 0, message: 'Starting...', percent: null, logs: [],
-      artist: result.artist || '',
-      albumName: result.title || '',
-      coverArt: result.thumbnail || null,
-    });
-    pendingPlayRef.current = true;
-
-    try {
-      const res = await fetch('/api/download/yt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url: result.url,
-          title: result.title,
-          artist: result.artist || 'Unknown Artist',
-          album: 'Singles',
-          coverArt: result.thumbnail || null,
-        }),
-      });
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try { handleSSEEvent(JSON.parse(line.slice(6))); } catch {}
-          }
-        }
-      }
-    } catch (err) {
-      setDownloadStatus(prev => ({ ...prev, message: `Error: ${err.message}`, error: true }));
-      setDownloading(null);
-      pendingPlayRef.current = false;
-    }
-  }
-
-  // Download entire album via YouTube (using MB tracklist)
-  async function downloadAlbumViaYouTube(albumInfo, tracks) {
-    if (!tracks || tracks.length === 0) return;
-    setDownloading(`yt-album-${albumInfo.rgid || albumInfo.mbid || 'unknown'}`);
-    setDownloadStatus({
-      step: 0, message: `Searching YouTube for ${tracks.length} tracks...`, percent: null, logs: [],
-      artist: albumInfo.artist || '',
-      albumName: albumInfo.album || '',
-      coverArt: albumInfo.coverArt || null,
-    });
-
-    try {
-      const res = await fetch('/api/download/yt/album', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          artist: albumInfo.artist,
-          album: albumInfo.album,
-          tracks: tracks.map(t => ({ title: t.title, position: t.position, lengthMs: t.lengthMs })),
-          rgid: albumInfo.rgid || null,
-          mbid: albumInfo.mbid || null,
-          coverArt: albumInfo.coverArt || null,
-        }),
-      });
-      const data = await res.json();
-      setDownloadStatus(prev => ({
-        ...prev,
-        message: `Queued ${data.queued} tracks${data.errors > 0 ? ` (${data.errors} failed)` : ''}`,
-        percent: 100,
-      }));
-      // Poll queue status periodically
-      const pollId = setInterval(async () => {
-        try {
-          const qRes = await fetch('/api/download/yt/queue');
-          const qData = await qRes.json();
-          if (qData.active) {
-            setDownloadStatus(prev => ({
-              ...prev,
-              message: `Downloading: ${qData.active.title} (${Math.round(qData.active.progress)}%)`,
-              percent: qData.active.progress,
-            }));
-          } else if (qData.queued.length === 0) {
-            clearInterval(pollId);
-            setDownloadStatus(prev => ({ ...prev, message: 'Album download complete!', percent: 100 }));
-            setTimeout(() => { setDownloading(null); refreshLibrary(); }, 2000);
-          }
-        } catch { clearInterval(pollId); }
-      }, 2000);
-    } catch (err) {
-      setDownloadStatus(prev => ({ ...prev, message: `Error: ${err.message}`, error: true }));
-      setDownloading(null);
-    }
-  }
-
-  // Cancel yt-dlp download
-  async function handleYtCancel() {
-    try { await fetch('/api/download/yt', { method: 'DELETE' }); } catch {}
   }
 
   // -------------------------------------------------------------------------
@@ -1446,1109 +512,54 @@ function App() {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Renders
-  // -------------------------------------------------------------------------
+  // Play all MB tracks via YouTube (first track immediate, rest queued)
+  // Also triggers auto-download of the album
+  async function playAllFromYouTube(tracks, albumArtist, albumName, coverArt) {
+    if (!tracks.length) return;
+    // Play first track — pass track-specific artist for VA/compilation albums
+    await playFromYouTube(tracks[0].title, albumArtist, albumName, coverArt, tracks[0].artist);
+    // Queue remaining tracks as YT lookups (lazy — resolved when played)
+    const queueTracks = tracks.slice(1).map(t => ({
+      id: `yt-pending-${t.position}`,
+      title: t.title,
+      artist: t.artist || albumArtist,
+      trackArtist: t.artist, // preserve per-track artist for YT search
+      album: albumName,
+      coverArt,
+      isYtPreview: true,
+      ytPending: true, // needs YT search when it's time to play
+    }));
+    setQueue(queueTracks);
 
-  // Search view
-  function renderSearch() {
-    // Determine if the query is primarily an artist name
-    const topArtist = searchArtistResults[0];
-    const qLower = query.trim().toLowerCase();
-    const isArtistQuery = topArtist && topArtist.score >= 95 &&
-      topArtist.name.toLowerCase() === qLower;
-
-    // Pick top result: prefer artist's album when query matches an artist
-    let topResult = null;
-    if (isArtistQuery && searchAlbums.length > 0) {
-      // Find the newest album by the matched artist
-      topResult = searchAlbums
-        .filter(a => a.artist.toLowerCase() === topArtist.name.toLowerCase() && a.coverArt)
-        .sort((a, b) => (b.year || 0) - (a.year || 0))[0]
-        || searchAlbums.find(a => a.mbid && a.coverArt) || searchAlbums[0] || null;
-    } else {
-      topResult = searchAlbums.find(a => a.mbid && a.coverArt) || searchAlbums[0] || null;
-    }
-
-    // Sort remaining albums: newest first
-    const restAlbums = searchAlbums
-      .filter(a => a !== topResult)
-      .sort((a, b) => (b.year || 0) - (a.year || 0));
-
-    return (
-      <div>
-        {/* Search bar */}
-        <form onSubmit={handleSearch} style={{ marginBottom: isMobile ? 20 : 32 }}>
-          <div style={{ display: 'flex', gap: 10 }}>
-            <div style={{ flex: 1, position: 'relative' }}>
-              <input
-                type="text"
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                placeholder="Search for artists, albums..."
-                style={{
-                  width: '100%', padding: isMobile ? '12px 14px' : '14px 18px',
-                  paddingRight: query ? 40 : undefined,
-                  borderRadius: 8,
-                  border: `1px solid ${COLORS.border}`, background: COLORS.hover,
-                  color: COLORS.textPrimary, fontSize: 16, outline: 'none',
-                  boxSizing: 'border-box',
-                }}
-                onFocus={e => e.target.style.borderColor = COLORS.accent}
-                onBlur={e => e.target.style.borderColor = COLORS.border}
-                aria-label="Search"
-              />
-              {query && (
-                <button
-                  type="button"
-                  onClick={() => { setQuery(''); }}
-                  aria-label="Clear search"
-                  style={{
-                    position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
-                    background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '50%',
-                    width: 24, height: 24, cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    padding: 0,
-                  }}
-                >
-                  {Icon.close(14, COLORS.textSecondary)}
-                </button>
-              )}
-            </div>
-            <button
-              type="submit"
-              style={{
-                padding: isMobile ? '12px 16px' : '14px 24px', borderRadius: 8, border: 'none',
-                background: COLORS.accent, color: '#fff', fontSize: 15,
-                fontWeight: 600, cursor: 'pointer',
-              }}
-            >
-              Search
-            </button>
-          </div>
-        </form>
-
-        {/* Loading skeletons */}
-        {searching && (
-          <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${isMobile ? 140 : 180}px, 1fr))`, gap: 20 }}>
-            {Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} />)}
-          </div>
-        )}
-
-        {/* No album results at all — show streaming results or empty state */}
-        {!searching && searchDone && searchAlbums.length === 0 && (
-          streamingResults.length > 0 ? (
-            <div>
-              {/* Top row: Top Result + Artists/Songs — same layout as torrent results */}
-              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : (searchArtistResults.length > 0 ? '1fr 1fr' : '1fr'), gap: isMobile ? 16 : 24, marginBottom: isMobile ? 20 : 32 }}>
-                {/* Top Result */}
-                <div>
-                  <SectionHeader>Top Result</SectionHeader>
-                  {(() => {
-                    const top = streamingResults[0];
-                    return (
-                      <StreamingTopResult
-                        result={top}
-                        onPlay={() => playStreamingResult(top)}
-                        onDownload={() => startYtDownload(top)}
-                        isDownloading={!!downloading}
-                        compact={isMobile}
-                      />
-                    );
-                  })()}
-                </div>
-
-                {/* Artists (from MusicBrainz) */}
-                {searchArtistResults.length > 0 && (
-                  <div>
-                    <SectionHeader>Artists</SectionHeader>
-                    <div style={{ background: COLORS.card, borderRadius: 8, padding: 8 }}>
-                      {searchArtistResults.slice(0, 5).map(a => (
-                        <ArtistPill
-                          key={a.mbid}
-                          name={a.name}
-                          type={a.type}
-                          onClick={() => openArtistPage(a.mbid, a.name, a.type)}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Songs list */}
-              <div style={{ marginBottom: 32 }}>
-                <SectionHeader>Songs</SectionHeader>
-                <div style={{ background: COLORS.card, borderRadius: 8, padding: '4px 0' }}>
-                  {streamingResults.slice(0, 8).map(r => (
-                    <StreamingSongRow
-                      key={`${r.source}-${r.id}`}
-                      result={r}
-                      isActive={currentTrack?.id === `yt-${r.id}`}
-                      onPlay={() => playStreamingResult(r)}
-                      onDownload={() => startYtDownload(r)}
-                      isDownloading={!!downloading}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              {/* More songs list */}
-              {streamingResults.length > 8 && (
-                <div>
-                  <SectionHeader>More Songs</SectionHeader>
-                  <div style={{ background: COLORS.card, borderRadius: 8, padding: '4px 0' }}>
-                    {streamingResults.slice(8).map(r => (
-                      <StreamingSongRow
-                        key={`${r.source}-${r.id}`}
-                        result={r}
-                        isActive={currentTrack?.id === `yt-${r.id}`}
-                        onPlay={() => playStreamingResult(r)}
-                        onDownload={() => startYtDownload(r)}
-                        isDownloading={!!downloading}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div style={{ textAlign: 'center', color: COLORS.textSecondary, marginTop: 80, fontSize: 15 }}>
-              No results found. Try a different search.
-            </div>
-          )
-        )}
-
-        {/* Home state — search history, recently played, top artists */}
-        {!searching && !searchDone && (
-          <div>
-            {/* Recent searches */}
-            {searchHistory.length > 0 && (
-              <div style={{ marginBottom: 28 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: COLORS.textSecondary, marginBottom: 10 }}>Recent Searches</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                  {searchHistory.map((q, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 0, background: COLORS.hover, borderRadius: 16, overflow: 'hidden' }}>
-                      <button
-                        onClick={() => handleSearch(null, q)}
-                        style={{
-                          background: 'none', border: 'none', cursor: 'pointer',
-                          padding: '6px 4px 6px 14px', fontSize: 13, color: COLORS.textPrimary,
-                        }}
-                      >{q}</button>
-                      <button
-                        onClick={() => removeFromSearchHistory(q)}
-                        style={{
-                          background: 'none', border: 'none', cursor: 'pointer',
-                          padding: '6px 10px 6px 4px', display: 'flex', alignItems: 'center',
-                          opacity: 0.4,
-                        }}
-                        onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-                        onMouseLeave={e => e.currentTarget.style.opacity = '0.4'}
-                        title="Remove"
-                      >{Icon.close(10, COLORS.textSecondary)}</button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Recently played */}
-            {recentlyPlayed.length > 0 && (
-              <div style={{ marginBottom: 32 }}>
-                <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>Recently Played</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 16 }}>
-                  {recentlyPlayed.map((r, i) => {
-                    const libAlbum = libraryAlbums().find(la =>
-                      la.artist.toLowerCase() === r.artist.toLowerCase() && la.album.toLowerCase() === r.album.toLowerCase()
-                    );
-                    return (
-                      <div key={i}
-                        style={{ background: COLORS.card, borderRadius: 8, padding: 12, cursor: 'pointer', transition: 'background 0.15s' }}
-                        onClick={() => {
-                          if (libAlbum) openAlbumFromLibrary(libAlbum.artist, libAlbum.album, libAlbum.tracks, libAlbum.coverArt, libAlbum.mbid);
-                          else handleSearch(null, `${r.artist} ${r.album}`);
-                        }}
-                        onMouseEnter={e => e.currentTarget.style.background = COLORS.hover}
-                        onMouseLeave={e => e.currentTarget.style.background = COLORS.card}
-                      >
-                        <div style={{ width: '100%', paddingBottom: '100%', borderRadius: 4, overflow: 'hidden', position: 'relative', marginBottom: 10, background: COLORS.hover }}>
-                          {(() => {
-                            const coverUrl = r.coverArt || `/api/cover/search?artist=${encodeURIComponent(r.artist)}&album=${encodeURIComponent(r.album)}`;
-                            return <img src={coverUrl} alt="" loading="lazy" onError={e => e.target.style.display = 'none'}
-                              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />;
-                          })()}
-                        </div>
-                        <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.album}</div>
-                        <div style={{ fontSize: 11, color: COLORS.textSecondary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.artist}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Last.fm top artists */}
-            {lastfmTopArtists.length > 0 && (
-              <div style={{ marginBottom: 32 }}>
-                <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>Your Top Artists</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 16 }}>
-                  {lastfmTopArtists.map((a, i) => (
-                    <div key={i} style={{ background: COLORS.card, borderRadius: 8, padding: 12, cursor: 'pointer', transition: 'background 0.15s' }}
-                      onClick={() => handleSearch(null, a.name)}
-                      onMouseEnter={e => e.currentTarget.style.background = COLORS.hover}
-                      onMouseLeave={e => e.currentTarget.style.background = COLORS.card}>
-                      <div style={{ width: '100%', paddingBottom: '100%', borderRadius: '50%', overflow: 'hidden', position: 'relative', marginBottom: 10, background: COLORS.hover }}>
-                        <img src={`/api/artist/image?name=${encodeURIComponent(a.name)}`} alt="" loading="lazy"
-                          onError={e => e.target.style.display = 'none'}
-                          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
-                      </div>
-                      <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.name}</div>
-                      <div style={{ fontSize: 11, color: COLORS.textSecondary }}>{parseInt(a.playcount).toLocaleString()} plays</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Fallback empty state when no history at all */}
-            {searchHistory.length === 0 && recentlyPlayed.length === 0 && lastfmTopArtists.length === 0 && (
-              <div style={{ textAlign: 'center', marginTop: 80 }}>
-                <div style={{ fontSize: 56, marginBottom: 16 }}>🎵</div>
-                <div style={{ fontSize: 22, fontWeight: 700, color: COLORS.textPrimary, marginBottom: 8 }}>Discover music</div>
-                <div style={{ fontSize: 15, color: COLORS.textSecondary }}>Search for your favorite artists and albums</div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Categorized results */}
-        {!searching && searchAlbums.length > 0 && (
-          <div>
-            {/* Top row: Top Result + Artists */}
-            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : (searchArtistResults.length > 0 ? '1fr 1fr' : '1fr'), gap: isMobile ? 16 : 24, marginBottom: isMobile ? 20 : 32 }}>
-              {/* Top Result */}
-              {topResult && (
-                <div>
-                  <SectionHeader>Top Result</SectionHeader>
-                  <TopResultCard
-                    album={topResult}
-                    isDownloading={!!downloading}
-                    inLibrary={isInLibrary(topResult.artist, topResult.album)}
-                    compact={isMobile}
-                    onPlay={() => {
-                      const best = topResult.sources?.[0];
-                      if (best) startDownload(best, topResult, true);
-                      else openAlbumFromSearch(topResult); // MB-only: open detail for YT playback
-                    }}
-                    onClick={() => openAlbumFromSearch(topResult)}
-                  />
-                </div>
-              )}
-
-              {/* Artists */}
-              {searchArtistResults.length > 0 && (
-                <div>
-                  <SectionHeader>Artists</SectionHeader>
-                  <div style={{ background: COLORS.card, borderRadius: 8, padding: 8 }}>
-                    {searchArtistResults.slice(0, 5).map(a => (
-                      <ArtistPill
-                        key={a.mbid}
-                        name={a.name}
-                        type={a.type}
-                        onClick={() => openArtistPage(a.mbid, a.name, a.type)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Albums grid */}
-            {restAlbums.length > 0 && (
-              <div>
-                <SectionHeader>Albums</SectionHeader>
-                <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${isMobile ? 140 : 180}px, 1fr))`, gap: 20 }}>
-                  {restAlbums.map(album => (
-                    <AlbumCard
-                      key={album.id}
-                      album={album}
-                      isDownloading={!!downloading}
-                      inLibrary={isInLibrary(album.artist, album.album)}
-                      onPlay={() => {
-                        const best = album.sources?.[0];
-                        if (best) startDownload(best, album, true);
-                        else openAlbumFromSearch(album);
-                      }}
-                      onClick={() => openAlbumFromSearch(album)}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Other Results — unmatched torrents that passed filters */}
-            {otherResults.length > 0 && (
-              <div style={{ marginTop: 32 }}>
-                <SectionHeader>Other Results</SectionHeader>
-                <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${isMobile ? 140 : 180}px, 1fr))`, gap: 20 }}>
-                  {otherResults.map(album => (
-                    <AlbumCard
-                      key={album.id}
-                      album={album}
-                      isDownloading={!!downloading}
-                      inLibrary={isInLibrary(album.artist, album.album)}
-                      onPlay={() => {
-                        const best = album.sources?.[0];
-                        if (best) startDownload(best, album, true);
-                        else openAlbumFromSearch(album);
-                      }}
-                      onClick={() => openAlbumFromSearch(album)}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // Album detail view
-  function renderAlbum() {
-    if (!selectedAlbum) return null;
-    const { artist, album, year, coverArt, tracks, sources, fromSearch, trackCount } = selectedAlbum;
-
-    const isLib = !fromSearch && tracks.length > 0;
-    const pl = tracks;
-
-    const primarySrc = sources?.[0];
-    const qualityLabel = primarySrc?.quality ? `${primarySrc.quality} · ${primarySrc.sizeFormatted}` : primarySrc?.sizeFormatted || '';
-
-    const gradBg = albumColor
-      ? `linear-gradient(to bottom, rgba(${albumColor.join(',')},0.55) 0%, rgba(${albumColor.join(',')},0.15) 60%, ${COLORS.bg} 100%)`
-      : `linear-gradient(to bottom, ${COLORS.surface} 0%, ${COLORS.bg} 100%)`;
-
-    const stickyBg = albumColor
-      ? `rgba(${albumColor.join(',')},0.3)`
-      : COLORS.surface;
-
-    return (
-      <div>
-        {/* Sticky header (shown when main header scrolls out) */}
-        {showStickyHeader && (
-          <div style={{
-            position: 'sticky', top: 0, zIndex: 10,
-            background: stickyBg, backdropFilter: 'blur(12px)',
-            padding: isMobile ? '10px 12px' : '10px 28px', margin: isMobile ? '-12px -12px 0' : '-28px -28px 0',
-            display: 'flex', alignItems: 'center', gap: 12,
-            borderBottom: `1px solid rgba(255,255,255,0.06)`,
-          }}>
-            <AlbumArt src={coverArt} size={40} radius={4} artist={artist} album={album} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: COLORS.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{album}</div>
-              <div style={{ fontSize: 11, color: COLORS.textSecondary }}>{artist}</div>
-            </div>
-            {(isLib ? pl.length > 0 : mbTracks.length > 0) && (() => {
-              const isThisPlaying = isPlaying && currentAlbumInfo?.artist === artist && currentAlbumInfo?.album === album;
-              return (
-                <button
-                  onClick={() => {
-                    if (isThisPlaying) { togglePlay(); return; }
-                    if (isLib) playTrack(pl[0], pl, 0, { artist, album, coverArt });
-                    else playAllFromYouTube(mbTracks, artist, album, coverArt);
-                  }}
-                  style={{ width: 32, height: 32, borderRadius: '50%', border: 'none', background: COLORS.accent, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
-                >{isThisPlaying ? Icon.pause(14, '#fff') : Icon.play(14, '#fff')}</button>
-              );
-            })()}
-          </div>
-        )}
-
-        {/* Gradient header */}
-        <div ref={albumHeaderRef} style={{ margin: isMobile ? '-12px -12px 0' : '-28px -28px 0', padding: isMobile ? '12px 12px 20px' : '20px 28px 32px', background: gradBg }}>
-          <button
-            onClick={() => setView(prevViewRef.current === 'album' ? 'search' : (prevViewRef.current || 'search'))}
-            style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.7)', fontSize: 14, cursor: 'pointer', padding: '0 0 16px', display: 'flex', alignItems: 'center', gap: 4 }}
-          >
-            {Icon.back(16, 'rgba(255,255,255,0.7)')} Back
-          </button>
-
-          <div style={{ display: 'flex', gap: isMobile ? 14 : 24, alignItems: 'flex-end' }}>
-            <AlbumArt src={coverArt} size={isMobile ? 120 : 200} radius={6} style={{ boxShadow: '0 8px 32px rgba(0,0,0,0.5)', flexShrink: 0 }} artist={artist} album={album} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>Album</div>
-              <h1 style={{ fontSize: isMobile ? 20 : 32, fontWeight: 800, color: COLORS.textPrimary, margin: '0 0 8px', lineHeight: 1.15 }}>{album}</h1>
-              <div style={{ fontSize: 15, color: 'rgba(255,255,255,0.7)', marginBottom: 8 }}>
-                <span
-                  style={{ cursor: 'pointer', transition: 'color 0.15s' }}
-                  onClick={async () => {
-                    const match = searchArtistResults.find(a => a.name.toLowerCase() === artist.toLowerCase());
-                    if (match) { openArtistPage(match.mbid, match.name, match.type); return; }
-                    // Search MB for artist MBID
-                    try {
-                      const res = await fetch(`/api/search?q=${encodeURIComponent(artist)}`);
-                      const data = await res.json();
-                      const mbArtist = data.artists?.find(a => a.name.toLowerCase() === artist.toLowerCase()) || data.artists?.[0];
-                      if (mbArtist?.mbid) { openArtistPage(mbArtist.mbid, mbArtist.name, mbArtist.type); return; }
-                    } catch {}
-                    handleSearch(null, artist);
-                  }}
-                  onMouseEnter={e => e.target.style.color = COLORS.textPrimary}
-                  onMouseLeave={e => e.target.style.color = 'rgba(255,255,255,0.7)'}
-                >{artist}</span>{year ? ` · ${year}` : ''}{(mbTracks.length || trackCount || pl.length) ? ` · ${mbTracks.length || trackCount || pl.length} tracks` : ''}
-              </div>
-
-              {(selectedAlbum.inLibrary || isInLibrary(artist, album)) && (
-                <div style={{ fontSize: 12, color: COLORS.success, fontWeight: 600, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: COLORS.success, display: 'inline-block' }} />
-                  In Your Library
-                </div>
-              )}
-
-              {fromSearch && sources.length === 0 && mbTracks.length === 0 && (
-                <div style={{ fontSize: 12, color: COLORS.textSecondary, opacity: 0.6, marginTop: 4 }}>No sources available</div>
-              )}
-
-              {/* Play/Pause button — inline with album info */}
-              {(isLib ? pl.length > 0 : mbTracks.length > 0) && (() => {
-                const isThisAlbumPlaying = isPlaying && currentAlbumInfo?.artist === artist && currentAlbumInfo?.album === album;
-                return (
-                  <button
-                    onClick={() => {
-                      if (isThisAlbumPlaying) { togglePlay(); return; }
-                      if (ytSearching) return;
-                      if (isLib) playTrack(pl[0], pl, 0, { artist, album, coverArt });
-                      else playAllFromYouTube(mbTracks, artist, album, coverArt);
-                    }}
-                    style={{
-                      width: 48, height: 48, borderRadius: '50%', border: 'none',
-                      background: ytSearching && !isLib && !isThisAlbumPlaying ? COLORS.hover : COLORS.accent,
-                      cursor: ytSearching && !isLib && !isThisAlbumPlaying ? 'default' : 'pointer',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-                      transition: 'transform 0.1s ease, background 0.15s',
-                      marginTop: 12,
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.06)'; e.currentTarget.style.background = COLORS.accentHover; }}
-                    onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.background = COLORS.accent; }}
-                    title={isThisAlbumPlaying ? 'Pause' : 'Play'}
-                  >
-                    {isThisAlbumPlaying ? Icon.pause(22, '#fff') : Icon.play(22, '#fff')}
-                  </button>
-                );
-              })()}
-            </div>
-          </div>
-        </div>
-
-        {/* Track list (library) */}
-        {isLib && (
-          <div role="list" style={{ marginTop: 24 }}>
-            <div style={{ display: 'flex', padding: isMobile ? '6px 8px' : '6px 16px', borderBottom: `1px solid ${COLORS.border}`, marginBottom: 4 }}>
-              <span style={{ width: isMobile ? 24 : 32, fontSize: 12, color: COLORS.textSecondary, textAlign: 'right', marginRight: isMobile ? 10 : 16 }}>#</span>
-              <span style={{ flex: 1, fontSize: 12, color: COLORS.textSecondary }}>Title</span>
-              {!isMobile && <span style={{ width: 56, fontSize: 12, color: COLORS.textSecondary, textAlign: 'right' }}>Format</span>}
-              {!isMobile && <span style={{ width: 50, fontSize: 12, color: COLORS.textSecondary, textAlign: 'right', marginLeft: 12 }}>Time</span>}
-            </div>
-            {pl.map((track, idx) => {
-              // Match by ID (library-to-library) or by title when a YouTube
-              // preview of the same song is playing. Title-only is safe here
-              // because we're inside one specific album's track list.
-              const isActive = currentTrack?.id === track.id
-                || (currentTrack?.isYtPreview && currentTrack?.title === track.title);
-              const isHovered = hoveredTrack === track.id;
-              return (
-                <div
-                  key={track.id}
-                  role="listitem"
-                  style={trackRowStyle(isActive, isHovered, isMobile)}
-                  onClick={() => playTrack(track, pl, idx, { artist, album, coverArt })}
-                  onMouseEnter={() => setHoveredTrack(track.id)}
-                  onMouseLeave={() => setHoveredTrack(null)}
-                  {...contextMenuProps(e => showContextMenu(e, [
-                    { label: 'Play', action: () => playTrack(track, pl, idx, { artist, album, coverArt }) },
-                    { label: 'Play Next', action: () => { setQueue(prev => [track, ...prev]); } },
-                    { label: 'Add to Queue', action: () => addToQueue(track) },
-                    { divider: true },
-                    { label: 'Remove Track', danger: true, action: () => removeTrackFromLibrary(track.id) },
-                  ]))}
-                >
-                  <span style={{ width: isMobile ? 24 : 32, textAlign: 'right', marginRight: isMobile ? 10 : 16, fontSize: 13, color: isActive ? COLORS.accent : isHovered ? COLORS.accent : COLORS.textSecondary, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-                    {isActive ? Icon.music(14, COLORS.accent) : isHovered ? Icon.play(12, COLORS.accent) : idx + 1}
-                  </span>
-                  <span style={{ flex: 1, fontSize: 14, color: isActive ? COLORS.accent : COLORS.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {track.title}
-                    {artist === 'Various Artists' && track.artist && (
-                      <span style={{ fontSize: 12, color: COLORS.textSecondary, marginLeft: 6 }}>{track.artist}</span>
-                    )}
-                  </span>
-                  {/* Add to queue button (hover — desktop only) */}
-                  {!isMobile && <button
-                    onClick={e => { e.stopPropagation(); addToQueue(track); }}
-                    title="Add to queue"
-                    style={{
-                      background: 'none', border: 'none',
-                      cursor: 'pointer', padding: '2px 8px', opacity: isHovered ? 0.7 : 0,
-                      transition: 'opacity 0.15s', flexShrink: 0,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    }}
-                  >{Icon.plus(14, COLORS.textSecondary)}</button>}
-                  {!isMobile && <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-                    <span style={{ fontSize: 11, color: COLORS.textSecondary, textAlign: 'right', width: 36 }}>
-                      {track.format?.toUpperCase()}
-                    </span>
-                    <span style={{ opacity: 0.45, display: 'flex', alignItems: 'center' }} title={['flac', 'wav'].includes(track.format?.toLowerCase()) ? 'Lossless' : 'Downloaded'}>
-                      {Icon.checkCircle(13, ['flac', 'wav'].includes(track.format?.toLowerCase()) ? COLORS.success : COLORS.textSecondary)}
-                    </span>
-                  </span>}
-                  {!isMobile && (
-                    <span style={{ width: 50, textAlign: 'right', fontSize: 12, color: COLORS.textSecondary, flexShrink: 0, marginLeft: 12 }}>
-                      {trackDurations[track.id] ? formatTime(trackDurations[track.id]) : ''}
-                    </span>
-                  )}
-                  {isMobile && (
-                    <span style={{ opacity: 0.45, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                      {Icon.checkCircle(13, ['flac', 'wav'].includes(track.format?.toLowerCase()) ? COLORS.success : COLORS.textSecondary)}
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* MusicBrainz track listing preview (search view) — now playable via YouTube */}
-        {fromSearch && mbTracks.length > 0 && (
-          <div style={{ marginTop: 24 }}>
-            <div style={{ display: 'flex', padding: isMobile ? '6px 8px' : '6px 12px', borderBottom: `1px solid ${COLORS.border}`, marginBottom: 4 }}>
-              <span style={{ width: isMobile ? 24 : 32, fontSize: 12, color: COLORS.textSecondary, textAlign: 'right', marginRight: isMobile ? 10 : 16 }}>#</span>
-              <span style={{ flex: 1, fontSize: 12, color: COLORS.textSecondary }}>Title</span>
-              {!isMobile && <span style={{ width: 50, fontSize: 12, color: COLORS.textSecondary, textAlign: 'right' }}>Duration</span>}
-            </div>
-            {mbTracks.map((t, i) => {
-              const isHovered = hoveredMbTrack === i;
-              // Match YouTube previews by title+artist, OR library tracks by title
-              // (handles navigating to MB view while a library track is playing)
-              const isActive = (currentTrack?.isYtPreview
-                  && currentTrack?.title === t.title
-                  && currentTrack?.artist === artist)
-                || (!currentTrack?.isYtPreview
-                    && currentTrack?.title === t.title
-                    && (currentAlbumInfo?.album === album || currentTrack?.album === album));
-              const isPending = ytPendingTrack === t.title;
-              return (
-                <div
-                  key={i}
-                  style={{ ...trackRowStyle(isActive, isHovered, isMobile), opacity: (ytSearching && !isPending && !isActive) ? 0.5 : 1 }}
-                  onMouseEnter={() => setHoveredMbTrack(i)}
-                  onMouseLeave={() => setHoveredMbTrack(null)}
-                  onClick={() => {
-                    if (ytSearching) return; // Block while resolving
-                    const remaining = mbTracks.slice(i);
-                    playAllFromYouTube(remaining, artist, album, coverArt);
-                  }}
-                  {...contextMenuProps(e => showContextMenu(e, [
-                    { label: 'Play', action: () => { const remaining = mbTracks.slice(i); playAllFromYouTube(remaining, artist, album, coverArt); } },
-                    { label: 'Play Next', action: () => { setQueue(prev => [{ id: `yt-pending-${t.position}`, title: t.title, artist: t.artist || artist, trackArtist: t.artist, album, coverArt, isYtPreview: true, ytPending: true }, ...prev]); } },
-                    { label: 'Add to Queue', action: () => { setQueue(prev => [...prev, { id: `yt-pending-${t.position}`, title: t.title, artist: t.artist || artist, trackArtist: t.artist, album, coverArt, isYtPreview: true, ytPending: true }]); } },
-                  ]))}
-                >
-                  <span style={{ width: isMobile ? 24 : 32, textAlign: 'right', marginRight: isMobile ? 10 : 16, flexShrink: 0, fontSize: 13, color: isActive ? COLORS.accent : isPending ? COLORS.accent : isHovered ? COLORS.accent : COLORS.textSecondary, cursor: ytSearching ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-                    {isPending ? <span className="spin-slow">{Icon.music(14, COLORS.accent)}</span> : isActive ? Icon.music(14, COLORS.accent) : isHovered ? Icon.play(12, COLORS.accent) : t.position}
-                  </span>
-                  <span style={{ flex: 1, minWidth: 0, fontSize: 14, color: isActive ? COLORS.accent : isPending ? COLORS.accent : COLORS.textPrimary }}>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
-                      {t.title}
-                      {t.artist && (
-                        <span
-                          style={{ fontSize: 12, color: COLORS.textSecondary, marginLeft: 6, cursor: 'pointer' }}
-                          onClick={e => {
-                            e.stopPropagation();
-                            if (t.artistMbid) {
-                              openArtistPage(t.artistMbid, t.artist);
-                            } else {
-                              handleSearch(null, t.artist);
-                            }
-                          }}
-                          onMouseEnter={e => e.target.style.color = COLORS.textPrimary}
-                          onMouseLeave={e => e.target.style.color = COLORS.textSecondary}
-                        >{t.artist}</span>
-                      )}
-                    </span>
-                  </span>
-                  <TrackStatusIcon status={getTrackDlStatus(artist, t.title, t.artist)} />
-                  {!isMobile && t.lengthMs && (
-                    <span style={{ width: 50, textAlign: 'right', flexShrink: 0, fontSize: 13, color: COLORS.textSecondary, opacity: 0.5 }}>{formatTime(t.lengthMs / 1000)}</span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Other versions (collapsed) */}
-        {sources.length > 1 && (
-          <details style={{ marginTop: 24 }}>
-            <summary style={{ fontSize: 13, color: COLORS.textSecondary, cursor: 'pointer', userSelect: 'none', marginBottom: 8 }}>
-              Other versions ({sources.length - 1})
-            </summary>
-            <div style={{ marginTop: 8 }}>
-              {sources.slice(1).map((src) => (
-                <div key={src.id} style={{
-                  display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px',
-                  borderRadius: 6, marginBottom: 4, border: `1px solid ${COLORS.border}`,
-                }}>
-                  <button
-                    onClick={() => startDownload(src, selectedAlbum, true)}
-                    disabled={!!downloading}
-                    style={{
-                      padding: '5px 14px', borderRadius: 20, border: `1px solid ${COLORS.border}`,
-                      background: 'transparent',
-                      color: downloading ? COLORS.textSecondary : COLORS.textPrimary,
-                      fontSize: 12, fontWeight: 500, cursor: downloading ? 'not-allowed' : 'pointer',
-                      flexShrink: 0,
-                    }}
-                  ><span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>{Icon.plus(12, downloading ? COLORS.textSecondary : COLORS.textPrimary)} Add</span></button>
-                  <div style={{ fontSize: 12, color: COLORS.textSecondary }}>
-                    {[src.quality, src.sizeFormatted].filter(Boolean).join(' · ')}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </details>
-        )}
-
-        {/* More by Artist */}
-        {moreByArtist.length > 0 && (
-          <div style={{ marginTop: 36 }}>
-            <h3 style={{ fontSize: 18, fontWeight: 700, color: COLORS.textPrimary, marginBottom: 14 }}>More by {artist}</h3>
-            <div style={{ display: 'flex', gap: 16, overflowX: 'auto', paddingBottom: 8, WebkitOverflowScrolling: 'touch' }}>
-              {moreByArtist.map(rel => {
-                const a = {
-                  id: `mb:${rel.rgid || rel.mbid}`,
-                  artist: artist,
-                  album: rel.album,
-                  year: rel.year || '',
-                  coverArt: rel.coverArt,
-                  mbid: rel.mbid,
-                  rgid: rel.rgid,
-                  trackCount: rel.trackCount,
-                  sources: [],
-                };
-                return (
-                  <div key={a.id} style={{ flexShrink: 0, width: isMobile ? 130 : 160 }}>
-                    <AlbumCard
-                      album={a}
-                      isDownloading={false}
-                      inLibrary={isInLibrary(artist, rel.album)}
-                      onPlay={() => openAlbumFromSearch(a)}
-                      onClick={() => openAlbumFromSearch(a)}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-      </div>
-    );
-  }
-
-  // Artist page view
-  function renderArtist() {
-    if (!selectedArtist) return null;
-    const { mbid, name, type } = selectedArtist;
-    const imageUrl = `/api/artist/image?name=${encodeURIComponent(name)}`;
-    const det = artistDetails;
-    const typeLabel = det?.type === 'Group' ? 'Band' : det?.type === 'Person' ? 'Artist' : type === 'Group' ? 'Band' : 'Artist';
-
-    // Build info line parts
-    const infoParts = [];
-    if (det?.area) infoParts.push(det.area);
-    else if (det?.country) infoParts.push(det.country);
-    if (det?.activeYears?.begin) {
-      const beginYear = det.activeYears.begin.slice(0, 4);
-      infoParts.push(det.activeYears.ended && det.activeYears.end
-        ? `${beginYear}–${det.activeYears.end.slice(0, 4)}`
-        : `Active since ${beginYear}`);
-    }
-    const activeMembers = det?.members?.filter(m => m.active) || [];
-    if (activeMembers.length > 0) infoParts.push(`${activeMembers.length} member${activeMembers.length > 1 ? 's' : ''}`);
-
-    // Categorize links for display
-    const linkItems = [];
-    if (det?.links?.wikipedia) linkItems.push({ label: 'Wikipedia', url: det.links.wikipedia });
-    else if (det?.links?.wikidata) linkItems.push({ label: 'Wikipedia', url: det.links.wikidata });
-    if (det?.links?.official) linkItems.push({ label: 'Official Site', url: det.links.official });
-    if (det?.links?.bandcamp) linkItems.push({ label: 'Bandcamp', url: det.links.bandcamp });
-    if (det?.links?.youtube) linkItems.push({ label: 'YouTube', url: det.links.youtube });
-    for (const s of (det?.links?.social || []).slice(0, 4)) {
-      const domain = (() => { try { return new URL(s).hostname.replace('www.', ''); } catch { return null; } })();
-      if (!domain) continue;
-      // Skip defunct services
-      if (domain.includes('plus.google') || domain.includes('myspace.com')) continue;
-      const label = domain.includes('instagram') ? 'Instagram' : domain.includes('twitter') || domain.includes('x.com') ? 'X' : domain.includes('facebook') ? 'Facebook' : domain.includes('tiktok') ? 'TikTok' : domain.includes('soundcloud') ? 'SoundCloud' : domain.split('.')[0];
-      linkItems.push({ label, url: s });
-    }
-
-    return (
-      <div>
-        {/* Artist header */}
-        <div style={{ margin: isMobile ? '-12px -12px 0' : '-28px -28px 0', padding: isMobile ? '12px 12px 20px' : '40px 28px 32px', background: `linear-gradient(to bottom, ${COLORS.surface} 0%, ${COLORS.bg} 100%)`, display: 'flex', alignItems: 'flex-end', gap: isMobile ? 14 : 24 }}>
-          <button
-            onClick={() => setView(prevViewRef.current === 'artist' ? 'search' : (prevViewRef.current || 'search'))}
-            style={{ position: 'absolute', top: isMobile ? 8 : 20, left: isMobile ? 12 : 28, background: 'none', border: 'none', color: 'rgba(255,255,255,0.7)', fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
-          >
-            {Icon.back(16, 'rgba(255,255,255,0.7)')} Back
-          </button>
-          <img
-            src={imageUrl}
-            alt={name}
-            style={{ width: isMobile ? 100 : 200, height: isMobile ? 100 : 200, borderRadius: '50%', objectFit: 'cover', boxShadow: '0 8px 32px rgba(0,0,0,0.5)', flexShrink: 0 }}
-            onError={e => { e.target.style.display = 'none'; }}
-          />
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 12, color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>{typeLabel}</div>
-            <h1 style={{ fontSize: isMobile ? 24 : 48, fontWeight: 800, color: COLORS.textPrimary, margin: 0, lineHeight: 1.1 }}>{name}</h1>
-            {infoParts.length > 0 && (
-              <div style={{ fontSize: 13, color: COLORS.textSecondary, marginTop: 6 }}>
-                {infoParts.join(' · ')}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Genre tags */}
-        {det?.genres?.length > 0 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 20 }}>
-            {det.genres.map(g => (
-              <span key={g} style={{ fontSize: 12, padding: '4px 12px', borderRadius: 20, background: COLORS.surface, color: COLORS.textSecondary, border: `1px solid ${COLORS.hover}` }}>{g}</span>
-            ))}
-          </div>
-        )}
-
-        {/* Top Songs (from Last.fm) */}
-        {artistTopTracks.length > 0 && (
-          <div style={{ marginTop: 32 }}>
-            <h2 style={{ fontSize: 22, fontWeight: 700, color: COLORS.textPrimary, marginBottom: 4 }}>Top Songs</h2>
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {artistTopTracks.map((t, i) => {
-                const isPending = ytPendingTrack === t.name;
-                const isActive = currentTrack && currentTrack.title === t.name && currentAlbumInfo?.artist?.toLowerCase() === name.toLowerCase();
-                const highlight = isPending || isActive;
-                return (
-                  <div
-                    key={t.name}
-                    onClick={async () => {
-                      if (ytSearching) return;
-                      // Look up which album this track belongs to
-                      let albumName = null, albumCover = artistReleases[0]?.coverArt || null, rgid = null, albumMbid = null;
-                      try {
-                        const lr = await fetch(`/api/recording/lookup?artist=${encodeURIComponent(name)}&track=${encodeURIComponent(t.name)}`);
-                        const info = await lr.json();
-                        if (info) {
-                          albumName = info.album || null;
-                          rgid = info.rgid || null;
-                          albumMbid = info.mbid || null;
-                          if (info.coverArt) albumCover = info.coverArt;
-                        }
-                      } catch {}
-                      playFromYouTube(t.name, name, albumName, albumCover, null, mbid, rgid, albumMbid);
-                    }}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 16,
-                      padding: isActive ? '10px 8px 10px 5px' : '10px 8px',
-                      borderRadius: 6, transition: 'background 0.15s, border-color 0.15s',
-                      cursor: ytSearching ? 'default' : 'pointer',
-                      opacity: (ytSearching && !isPending) ? 0.5 : 1,
-                      background: isActive ? `rgba(${COLORS.accentRgb},0.12)` : 'transparent',
-                      borderLeft: isActive ? `3px solid ${COLORS.accent}` : '3px solid transparent',
-                    }}
-                    onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = COLORS.hover; }}
-                    onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
-                  >
-                    <span style={{ width: 20, textAlign: 'right', fontSize: 13, color: highlight ? COLORS.accent : COLORS.textSecondary, flexShrink: 0 }}>
-                      {isActive ? '♫' : isPending ? '▶' : i + 1}
-                    </span>
-                    <span style={{ flex: 1, fontSize: 14, color: highlight ? COLORS.accent : COLORS.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: isActive ? 600 : 400 }}>{t.name}</span>
-                    {t.listeners && (
-                      <span style={{ fontSize: 12, color: COLORS.textSecondary, flexShrink: 0 }}>
-                        {parseInt(t.listeners).toLocaleString()} listeners
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Discography */}
-        {artistReleases.length > 0 && (
-          <div style={{ marginTop: 32 }}>
-            <h2 style={{ fontSize: 22, fontWeight: 700, color: COLORS.textPrimary, marginBottom: 16 }}>Discography</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${isMobile ? 140 : 180}px, 1fr))`, gap: 20 }}>
-              {artistReleases.map(rel => {
-                const album = {
-                  id: `mb:${rel.rgid || rel.mbid}`,
-                  artist: name,
-                  album: rel.album,
-                  year: rel.year || '',
-                  coverArt: rel.coverArt,
-                  mbid: rel.mbid,
-                  rgid: rel.rgid,
-                  trackCount: rel.trackCount,
-                  sources: [],
-                };
-                return (
-                  <AlbumCard
-                    key={album.id}
-                    album={album}
-                    isDownloading={false}
-                    inLibrary={isInLibrary(name, rel.album)}
-                    onPlay={() => openAlbumFromSearch(album)}
-                    onClick={() => openAlbumFromSearch(album)}
-                  />
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {artistReleases.length === 0 && (
-          <div style={{ textAlign: 'center', color: COLORS.textSecondary, marginTop: 60, fontSize: 15 }}>
-            Loading discography...
-          </div>
-        )}
-
-        {/* Band members */}
-        {det?.type === 'Group' && det?.members?.length > 0 && (
-          <div style={{ marginTop: 32 }}>
-            <h3 style={{ fontSize: 15, fontWeight: 700, color: COLORS.textPrimary, marginBottom: 8 }}>Members</h3>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, fontSize: 14 }}>
-              {det.members.map((m, i) => (
-                <span key={m.mbid || m.name}>
-                  <span
-                    style={{ color: m.active ? COLORS.textPrimary : COLORS.textSecondary, cursor: m.mbid ? 'pointer' : 'default', opacity: m.active ? 1 : 0.6 }}
-                    onClick={() => { if (m.mbid) openArtistPage(m.mbid, m.name); }}
-                    onMouseEnter={e => { if (m.mbid) e.target.style.textDecoration = 'underline'; }}
-                    onMouseLeave={e => { e.target.style.textDecoration = 'none'; }}
-                  >
-                    {m.name}
-                  </span>
-                  {i < det.members.length - 1 && <span style={{ color: COLORS.textSecondary }}>{' · '}</span>}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* External links */}
-        {linkItems.length > 0 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginTop: 24, paddingBottom: 4 }}>
-            {linkItems.map(l => (
-              <a
-                key={l.url}
-                href={l.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ fontSize: 13, color: COLORS.textSecondary, textDecoration: 'none', padding: '4px 0', borderBottom: '1px solid transparent', transition: 'color 0.15s, border-color 0.15s' }}
-                onMouseEnter={e => { e.target.style.color = COLORS.textPrimary; e.target.style.borderBottomColor = COLORS.textPrimary; }}
-                onMouseLeave={e => { e.target.style.color = COLORS.textSecondary; e.target.style.borderBottomColor = 'transparent'; }}
-              >
-                {l.label}
-              </a>
-            ))}
-          </div>
-        )}
-
-        {/* About / Wikipedia bio — shown at the bottom */}
-        {artistBio?.extract && (
-          <div style={{ marginTop: 32, paddingTop: 32, borderTop: `1px solid ${COLORS.hover}` }}>
-            <h2 style={{ fontSize: 22, fontWeight: 700, color: COLORS.textPrimary, marginBottom: 12 }}>About</h2>
-            <p style={{ fontSize: 14, lineHeight: 1.7, color: COLORS.textSecondary, margin: 0, maxWidth: 700 }}>
-              {artistBio.extract.length > 600 ? artistBio.extract.slice(0, 600).replace(/\s\S*$/, '') + '...' : artistBio.extract}
-            </p>
-            {(det?.links?.wikipedia || det?.links?.wikidata) && (
-              <a
-                href={det.links.wikipedia || `https://en.wikipedia.org/wiki/${name.replace(/\s/g, '_')}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ fontSize: 13, color: COLORS.accent, textDecoration: 'none', marginTop: 10, display: 'inline-block' }}
-              >
-                Read more on Wikipedia &rarr;
-              </a>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // -------------------------------------------------------------------------
-  // Last.fm settings + auth
-  // -------------------------------------------------------------------------
-  async function lastfmSaveConfig() {
-    setLastfmError('');
-    try {
-      const res = await fetch('/api/lastfm/config', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey: lastfmApiKey, apiSecret: lastfmApiSecret }),
+    // Auto-acquire the FULL album in background (not just the tracks from click position)
+    // Use mbTracks (full tracklist from state) rather than `tracks` (which may be a subset)
+    const fullTrackList = mbTracks.length > tracks.length ? mbTracks : tracks;
+    // Filter out tracks already in the library (check per-track artist for VA albums)
+    const missingTracks = fullTrackList.filter(t => {
+      const trackArtist = t.artist || albumArtist;
+      return !library.some(lt =>
+        lt.title?.toLowerCase() === t.title?.toLowerCase() &&
+        (lt.artist?.toLowerCase() === trackArtist.toLowerCase() ||
+         lt.artist?.toLowerCase() === albumArtist.toLowerCase()) &&
+        lt.album?.toLowerCase() === albumName.toLowerCase()
+      );
+    });
+    if (missingTracks.length > 0) {
+      autoAcquireAlbum({
+        artist: albumArtist,
+        album: albumName,
+        coverArt,
+        sources: selectedAlbum?.sources || [],
+        mbid: selectedAlbum?.mbid,
+        rgid: selectedAlbum?.rgid,
+        year: selectedAlbum?.year,
+        mbTracks: missingTracks,
       });
-      if (!res.ok) throw new Error('Failed to save');
-      setLastfmStatus(s => ({ ...s, configured: true }));
-      // Get auth token
-      const tokenRes = await fetch('/api/lastfm/auth/token');
-      const tokenData = await tokenRes.json();
-      if (tokenData.error) throw new Error(tokenData.error);
-      setLastfmAuthToken(tokenData.token);
-      setLastfmAuthUrl(tokenData.authUrl);
-      setLastfmAuthStep(1);
-    } catch (err) {
-      setLastfmError(err.message);
     }
-  }
-
-  async function lastfmCompleteAuth() {
-    setLastfmError('');
-    try {
-      const res = await fetch('/api/lastfm/auth/session', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: lastfmAuthToken }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setLastfmStatus({ configured: true, authenticated: true, username: data.username });
-      setLastfmAuthStep(2);
-      // Load top artists
-      fetch('/api/lastfm/top/artists?period=overall&limit=8').then(r => r.json()).then(a => setLastfmTopArtists(a || [])).catch(() => {});
-    } catch (err) {
-      setLastfmError(err.message);
-    }
-  }
-
-  async function lastfmDisconnect() {
-    await fetch('/api/lastfm/disconnect', { method: 'POST' });
-    setLastfmStatus({ configured: true, authenticated: false, username: null });
-    setLastfmTopArtists([]);
-    setLastfmAuthStep(0);
-  }
-
-  function renderSettingsModal() {
-    if (!showSettings) return null;
-    const inputStyle = {
-      width: '100%', padding: '10px 12px', borderRadius: 6,
-      border: `1px solid ${COLORS.border}`, background: COLORS.hover,
-      color: COLORS.textPrimary, fontSize: 14, outline: 'none', boxSizing: 'border-box',
-    };
-    return (
-      <div style={{ position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-        onClick={() => setShowSettings(false)}>
-        <div style={{ background: COLORS.surface, borderRadius: 12, padding: 28, width: 420, maxWidth: '90vw', boxShadow: '0 12px 40px rgba(0,0,0,0.6)' }}
-          onClick={e => e.stopPropagation()}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-            <span style={{ fontSize: 18, fontWeight: 700 }}>Settings</span>
-            <button onClick={() => setShowSettings(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
-              {Icon.close(18, COLORS.textSecondary)}
-            </button>
-          </div>
-
-          {/* Playback section */}
-          <div style={{ marginBottom: 24 }}>
-            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Playback</div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-              <div>
-                <div style={{ fontSize: 13, color: COLORS.textPrimary }}>Crossfade</div>
-                <div style={{ fontSize: 11, color: COLORS.textSecondary }}>Smooth transition between tracks</div>
-              </div>
-              <select
-                value={crossfadeDuration}
-                onChange={e => setCrossfadeDuration(parseInt(e.target.value, 10))}
-                style={{
-                  padding: '6px 10px', borderRadius: 6, border: `1px solid ${COLORS.border}`,
-                  background: COLORS.hover, color: COLORS.textPrimary, fontSize: 13, cursor: 'pointer',
-                }}
-              >
-                <option value={0}>Off (gapless)</option>
-                <option value={3}>3 seconds</option>
-                <option value={5}>5 seconds</option>
-                <option value={8}>8 seconds</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Last.fm section */}
-          <div style={{ marginBottom: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-              <span style={{ fontSize: 15, fontWeight: 600 }}>Last.fm</span>
-              {lastfmStatus.authenticated && (
-                <span style={{ fontSize: 12, color: COLORS.success, display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: COLORS.success, display: 'inline-block' }} />
-                  {lastfmStatus.username}
-                </span>
-              )}
-            </div>
-
-            {lastfmStatus.authenticated ? (
-              <div>
-                <div style={{ fontSize: 13, color: COLORS.textSecondary, marginBottom: 12 }}>
-                  Connected as <strong style={{ color: COLORS.textPrimary }}>{lastfmStatus.username}</strong>. Scrobbling is active.
-                </div>
-                <button onClick={lastfmDisconnect} style={{
-                  padding: '8px 16px', borderRadius: 6, border: `1px solid ${COLORS.error}`,
-                  background: 'transparent', color: COLORS.error, fontSize: 13, cursor: 'pointer',
-                }}>Disconnect</button>
-              </div>
-            ) : lastfmAuthStep === 1 ? (
-              <div>
-                <div style={{ fontSize: 13, color: COLORS.textSecondary, marginBottom: 12 }}>
-                  Step 2: Authorize Not-ify on Last.fm, then click the button below.
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <a href={lastfmAuthUrl} target="_blank" rel="noopener noreferrer" style={{
-                    padding: '8px 16px', borderRadius: 6, border: 'none', textDecoration: 'none',
-                    background: '#d51007', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                  }}>Open Last.fm</a>
-                  <button onClick={lastfmCompleteAuth} style={{
-                    padding: '8px 16px', borderRadius: 6, border: `1px solid ${COLORS.border}`,
-                    background: COLORS.hover, color: COLORS.textPrimary, fontSize: 13, cursor: 'pointer',
-                  }}>I've Authorized</button>
-                </div>
-                {lastfmError && <div style={{ color: COLORS.error, fontSize: 12, marginTop: 8 }}>{lastfmError}</div>}
-              </div>
-            ) : (
-              <div>
-                <div style={{ fontSize: 13, color: COLORS.textSecondary, marginBottom: 12 }}>
-                  Enter your Last.fm API credentials.{' '}
-                  <a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener noreferrer"
-                    style={{ color: COLORS.accent }}>Get API key</a>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12 }}>
-                  <input type="text" placeholder="API Key" value={lastfmApiKey} onChange={e => setLastfmApiKey(e.target.value)}
-                    style={inputStyle} />
-                  <input type="text" placeholder="Shared Secret" value={lastfmApiSecret} onChange={e => setLastfmApiSecret(e.target.value)}
-                    style={inputStyle} />
-                </div>
-                <button onClick={lastfmSaveConfig} disabled={!lastfmApiKey || !lastfmApiSecret} style={{
-                  padding: '8px 20px', borderRadius: 6, border: 'none',
-                  background: lastfmApiKey && lastfmApiSecret ? COLORS.accent : COLORS.hover,
-                  color: lastfmApiKey && lastfmApiSecret ? '#fff' : COLORS.textSecondary,
-                  fontSize: 13, fontWeight: 600, cursor: lastfmApiKey && lastfmApiSecret ? 'pointer' : 'default',
-                }}>Connect</button>
-                {lastfmError && <div style={{ color: COLORS.error, fontSize: 12, marginTop: 8 }}>{lastfmError}</div>}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
   }
 
   // -------------------------------------------------------------------------
-  // Context menu
+  // Context menu + library remove
   // -------------------------------------------------------------------------
   function showContextMenu(e, items) {
     e.preventDefault();
@@ -2558,11 +569,7 @@ function App() {
 
   async function removeAlbumFromLibrary(artist, album) {
     try {
-      await fetch('/api/library/album', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ artist, album }),
-      });
+      await api.removeAlbum(artist, album);
       loadLibrary();
       // If viewing this album, go back
       if (view === 'album' && selectedAlbum?.artist === artist && selectedAlbum?.album === album) {
@@ -2575,593 +582,11 @@ function App() {
 
   async function removeTrackFromLibrary(trackId) {
     try {
-      await fetch(`/api/library/track/${trackId}`, { method: 'DELETE' });
+      await api.removeTrack(trackId);
       loadLibrary();
     } catch (err) {
       console.error('Failed to remove track:', err);
     }
-  }
-
-  function renderContextMenu() {
-    if (!contextMenu) return null;
-
-    if (isMobile) {
-      // Bottom sheet on mobile
-      return (
-        <div
-          style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.5)' }}
-          onClick={() => setContextMenu(null)}
-        >
-          <div
-            style={{
-              position: 'absolute', bottom: 0, left: 0, right: 0,
-              background: '#282828', borderRadius: '14px 14px 0 0',
-              paddingTop: 8, paddingBottom: `calc(8px + env(safe-area-inset-bottom))`,
-              boxShadow: '0 -4px 24px rgba(0,0,0,0.5)',
-            }}
-            onClick={e => e.stopPropagation()}
-          >
-            <div style={{ width: 36, height: 4, borderRadius: 2, background: COLORS.border, margin: '0 auto 8px' }} />
-            {contextMenu.items.map((item, i) => item.divider ? (
-              <div key={i} style={{ height: 1, background: COLORS.border, margin: '4px 0' }} />
-            ) : (
-              <div
-                key={i}
-                onClick={() => { setContextMenu(null); item.action(); }}
-                style={{
-                  padding: '12px 16px', fontSize: 15, cursor: 'pointer',
-                  color: item.danger ? '#e74c3c' : COLORS.textPrimary,
-                  minHeight: 48, display: 'flex', alignItems: 'center',
-                }}
-              >
-                {item.label}
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-    }
-
-    // Desktop: positioned dropdown
-    const menuW = 200, menuH = contextMenu.items.length * 36 + 8;
-    const x = Math.min(contextMenu.x, window.innerWidth - menuW - 8);
-    const y = Math.min(contextMenu.y, window.innerHeight - menuH - 8);
-    return (
-      <div
-        style={{ position: 'fixed', inset: 0, zIndex: 9999 }}
-        onClick={() => setContextMenu(null)}
-        onContextMenu={e => { e.preventDefault(); setContextMenu(null); }}
-      >
-        <div style={{
-          position: 'absolute', left: x, top: y, width: menuW,
-          background: '#282828', borderRadius: 6, padding: '4px 0',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.5)', border: `1px solid ${COLORS.border}`,
-        }}>
-          {contextMenu.items.map((item, i) => item.divider ? (
-            <div key={i} style={{ height: 1, background: COLORS.border, margin: '4px 0' }} />
-          ) : (
-            <div
-              key={i}
-              onClick={e => { e.stopPropagation(); setContextMenu(null); item.action(); }}
-              style={{
-                padding: '8px 14px', fontSize: 13, cursor: 'pointer',
-                color: item.danger ? '#e74c3c' : COLORS.textPrimary,
-                transition: 'background 0.1s',
-              }}
-              onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-            >
-              {item.label}
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  // Background download indicator (discrete)
-  function renderBgDownloadIndicator() {
-    if (!bgDownloadStatus) return null;
-    return (
-      <div style={{
-        padding: '6px 12px', fontSize: 11, color: bgDownloadStatus.done ? COLORS.success : COLORS.accent,
-        background: COLORS.hover, borderTop: `1px solid ${COLORS.border}`,
-        display: 'flex', alignItems: 'center', gap: 6, cursor: 'default',
-      }}>
-        {!bgDownloadStatus.done && (
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: COLORS.accent, animation: 'pulse 1.5s ease-in-out infinite' }} />
-        )}
-        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {bgDownloadStatus.message}
-        </span>
-        {bgDownloadStatus.done && (
-          <button onClick={() => setBgDownloadStatus(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-            {Icon.close(12, COLORS.textSecondary)}
-          </button>
-        )}
-      </div>
-    );
-  }
-
-  // Download indicator in sidebar
-  function renderDownloadIndicator() {
-    if (!downloadStatus && !downloading) return null;
-    const isDone = downloadStatus?.complete || downloadStatus?.error || downloadStatus?.cancelled;
-    const dots = [1, 2, 3, 4].map(s => {
-      if (!downloadStatus?.step) return COLORS.border;
-      if (s < downloadStatus.step) return COLORS.success;
-      if (s === downloadStatus.step) return COLORS.accent;
-      return COLORS.border;
-    });
-
-    return (
-      <div style={{ marginTop: 'auto', padding: 12 }}>
-        <div style={{ background: COLORS.hover, borderRadius: 8, padding: '10px 12px', border: `1px solid ${COLORS.border}`, fontSize: 12 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
-                {dots.map((c, i) => <div key={i} style={{ width: 8, height: 8, borderRadius: '50%', background: c }} />)}
-              </div>
-              {downloadStatus?.albumName && (
-                <div style={{ fontSize: 11, color: COLORS.accentHover, marginBottom: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {downloadStatus.artist ? `${downloadStatus.artist} — ${downloadStatus.albumName}` : downloadStatus.albumName}
-                </div>
-              )}
-              <div style={{ fontSize: 11, color: COLORS.textSecondary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {downloadStatus?.message || 'Starting...'}
-              </div>
-              {downloadStatus?.percent != null && downloadStatus?.step === 3 && (
-                <div style={{ height: 3, background: COLORS.border, borderRadius: 2, marginTop: 6, overflow: 'hidden' }}>
-                  <div style={{ height: '100%', background: COLORS.accent, width: `${downloadStatus.percent}%`, transition: 'width 0.4s ease' }} />
-                </div>
-              )}
-            </div>
-            <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-              {downloading && !isDone && (
-                <button onClick={() => { handleCancel(); handleYtCancel(); }} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, border: `1px solid ${COLORS.accent}`, background: 'transparent', color: COLORS.accent, cursor: 'pointer' }}>
-                  Cancel
-                </button>
-              )}
-              {isDone && (
-                <button
-                  onClick={() => { setDownloadStatus(null); if (downloadStatus?.complete) { loadLibrary(); } }}
-                  style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, border: 'none', background: downloadStatus?.complete ? COLORS.success : COLORS.error, color: '#fff', cursor: 'pointer' }}
-                >
-                  {downloadStatus?.complete ? 'View' : 'OK'}
-                </button>
-              )}
-              <button
-                onClick={() => setDlExpanded(v => !v)}
-                style={{ padding: '3px 6px', borderRadius: 4, border: `1px solid ${COLORS.border}`, background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              >
-                {dlExpanded ? Icon.chevronUp(12, COLORS.textSecondary) : Icon.chevronDown(12, COLORS.textSecondary)}
-              </button>
-            </div>
-          </div>
-
-          {dlExpanded && downloadStatus?.logs?.length > 0 && (
-            <div style={{ marginTop: 8, maxHeight: 140, overflowY: 'auto', fontSize: 10, color: COLORS.textSecondary, fontFamily: 'monospace', background: COLORS.bg, borderRadius: 4, padding: 6 }}>
-              {downloadStatus.logs.map((log, i) => <div key={i} style={{ marginBottom: 2 }}>{log}</div>)}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // Queue panel
-  function renderQueuePanel() {
-    const upcomingPlaylist = playlist.length > 0
-      ? playlist.slice(playlistIdx + 1).concat(playlist.slice(0, playlistIdx))
-      : [];
-
-    return (
-      <div style={{
-        ...(isMobile ? {
-          position: 'fixed', inset: 0, zIndex: 50,
-          background: COLORS.surface,
-          display: showQueue ? 'flex' : 'none', flexDirection: 'column',
-          overflowY: 'auto',
-        } : {
-          width: showQueue ? 320 : 0, minWidth: showQueue ? 320 : 0,
-          background: COLORS.surface,
-          borderLeft: showQueue ? `1px solid ${COLORS.border}` : 'none',
-          overflowY: 'auto', overflowX: 'hidden',
-          transition: 'width 0.2s ease, min-width 0.2s ease',
-          display: 'flex', flexDirection: 'column',
-          flexShrink: 0,
-        }),
-      }}>
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 16px 12px', borderBottom: `1px solid ${COLORS.border}` }}>
-          <span style={{ fontSize: 16, fontWeight: 700, color: COLORS.textPrimary }}>Queue</span>
-          <button onClick={() => setShowQueue(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{Icon.close(16, COLORS.textSecondary)}</button>
-        </div>
-
-        <div style={{ flex: 1, overflowY: 'auto', padding: '12px 0' }}>
-          {/* Now Playing */}
-          {currentTrack && (
-            <div style={{ padding: '0 16px', marginBottom: 16 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Now playing</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}>
-                <AlbumArt src={currentCoverArt} size={40} radius={4} artist={currentAlbumInfo?.artist} album={currentAlbumInfo?.album} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: COLORS.accent, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentTrack.title}</div>
-                  <div style={{ fontSize: 11, color: COLORS.textSecondary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentTrack.artist}</div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* User queue */}
-          {queue.length > 0 && (
-            <div style={{ padding: '0 16px', marginBottom: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <span style={{ fontSize: 11, fontWeight: 600, color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 1 }}>Next in queue</span>
-                <button onClick={clearQueue} style={{ background: 'none', border: 'none', color: COLORS.textSecondary, fontSize: 11, cursor: 'pointer', textDecoration: 'underline' }}>Clear</button>
-              </div>
-              {queue.map((track, idx) => (
-                <div
-                  key={`q-${idx}`}
-                  draggable
-                  onDragStart={e => { setDragIdx(idx); e.dataTransfer.effectAllowed = 'move'; }}
-                  onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOverIdx(idx); }}
-                  onDragLeave={() => setDragOverIdx(null)}
-                  onDrop={e => {
-                    e.preventDefault();
-                    if (dragIdx !== null && dragIdx !== idx) {
-                      setQueue(prev => {
-                        const updated = [...prev];
-                        const [moved] = updated.splice(dragIdx, 1);
-                        updated.splice(idx, 0, moved);
-                        return updated;
-                      });
-                    }
-                    setDragIdx(null);
-                    setDragOverIdx(null);
-                  }}
-                  onDragEnd={() => { setDragIdx(null); setDragOverIdx(null); }}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0',
-                    opacity: dragIdx === idx ? 0.4 : 1,
-                    borderTop: dragOverIdx === idx && dragIdx !== null && dragIdx !== idx ? `2px solid ${COLORS.accent}` : '2px solid transparent',
-                    cursor: 'grab', transition: 'opacity 0.15s',
-                  }}
-                >
-                  <span style={{ fontSize: 10, color: COLORS.textSecondary, cursor: 'grab', padding: '0 2px', userSelect: 'none' }}>⠿</span>
-                  <AlbumArt src={track.coverArt} size={32} radius={3} artist={track.artist} album={track.album} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, color: COLORS.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.title}</div>
-                    <div style={{ fontSize: 11, color: COLORS.textSecondary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.artist}</div>
-                  </div>
-                  <button onClick={() => removeFromQueue(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{Icon.close(12, COLORS.textSecondary)}</button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Upcoming from playlist */}
-          {upcomingPlaylist.length > 0 && (
-            <div style={{ padding: '0 16px' }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
-                Next from {currentAlbumInfo?.album || 'playlist'}
-              </div>
-              {upcomingPlaylist.slice(0, 20).map((track, idx) => (
-                <div key={`pl-${idx}`} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0' }}>
-                  <AlbumArt src={track.coverArt || currentCoverArt} size={32} radius={3} artist={track.artist || currentAlbumInfo?.artist} album={track.album || currentAlbumInfo?.album} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, color: COLORS.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.title}</div>
-                    <div style={{ fontSize: 11, color: COLORS.textSecondary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.artist}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Empty state */}
-          {!currentTrack && queue.length === 0 && (
-            <div style={{ textAlign: 'center', color: COLORS.textSecondary, fontSize: 13, padding: '40px 16px' }}>
-              Nothing in the queue yet
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // Player bar
-  function renderPlayer() {
-    const has = !!currentTrack;
-    const pct = duration ? (progress / duration) * 100 : 0;
-    const canGoToAlbum = has && currentAlbumInfo && (library.length > 0 || currentAlbumInfo.artistMbid);
-
-    return (
-      <footer style={{
-        height: isMobile ? 64 : 80, minHeight: isMobile ? 64 : 80, background: COLORS.surface,
-        borderTop: `1px solid ${COLORS.border}`,
-        display: 'flex', alignItems: 'center', padding: isMobile ? '0 8px' : '0 16px', gap: isMobile ? 8 : 12,
-        position: 'relative',
-      }} role="region" aria-label="Music player">
-
-        {/* Mobile seek bar — slim progress at top of footer */}
-        {isMobile && has && (
-          <div style={{ position: 'absolute', top: -2, left: 0, right: 0, height: 16, cursor: 'pointer', zIndex: 1 }}
-            onClick={(e) => { const rect = e.currentTarget.getBoundingClientRect(); const pctClick = (e.clientX - rect.left) / rect.width;
-              if (audioRef.current && duration) audioRef.current.currentTime = pctClick * duration; }}>
-            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: COLORS.border }}>
-              <div style={{ height: '100%', width: `${pct}%`, background: COLORS.accent, transition: 'width 0.1s linear' }} />
-            </div>
-          </div>
-        )}
-
-        {/* Album art + info */}
-        <div
-          style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 12, width: isMobile ? undefined : 220, minWidth: 0, flexShrink: isMobile ? 1 : 0, flex: isMobile ? 1 : undefined, overflow: 'hidden', cursor: canGoToAlbum ? 'pointer' : 'default' }}
-          onClick={canGoToAlbum ? goToCurrentAlbum : undefined}
-          title={canGoToAlbum ? 'Go to album' : undefined}
-        >
-          <AlbumArt src={currentCoverArt} size={isMobile ? 40 : 52} radius={4} artist={currentAlbumInfo?.artist} album={currentAlbumInfo?.album} />
-          <div
-            style={{ minWidth: 0 }}
-          >
-            {has ? (
-              <>
-                <div style={{ fontSize: 13, fontWeight: 500, color: COLORS.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {currentTrack.title}
-                  {currentTrack.isYtPreview && (
-                    <span style={{ fontSize: 9, fontWeight: 700, color: COLORS.accent, background: 'rgba(233,69,96,0.15)', padding: '1px 5px', borderRadius: 3, flexShrink: 0 }}>YT</span>
-                  )}
-                </div>
-                <div style={{ fontSize: 11, color: canGoToAlbum ? COLORS.textSecondary : COLORS.textSecondary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>
-                  {[currentTrack.artist, currentTrack.album].filter(Boolean).join(' — ') || 'Unknown'}
-                </div>
-              </>
-            ) : (
-              <div style={{ fontSize: 13, color: COLORS.textSecondary }}>No track playing</div>
-            )}
-          </div>
-        </div>
-
-        {/* Controls + seek */}
-        <div style={{ flex: isMobile ? undefined : 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: isMobile ? 0 : 6, flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 4 : 12 }}>
-            <button onClick={playPrev} disabled={!has} aria-label="Previous"
-              style={{ width: isMobile ? 32 : 36, height: isMobile ? 32 : 36, borderRadius: '50%', border: 'none', background: 'transparent', cursor: has ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {Icon.skipPrev(isMobile ? 16 : 18, has ? COLORS.textPrimary : COLORS.border)}
-            </button>
-            <button onClick={togglePlay} disabled={!has} aria-label={isPlaying ? 'Pause' : 'Play'}
-              style={{ width: isMobile ? 36 : 44, height: isMobile ? 36 : 44, borderRadius: '50%', border: 'none', background: has ? COLORS.accent : COLORS.hover, cursor: has ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              {isPlaying ? Icon.pause(isMobile ? 16 : 18, has ? '#fff' : COLORS.textSecondary) : Icon.play(isMobile ? 16 : 18, has ? '#fff' : COLORS.textSecondary)}
-            </button>
-            <button onClick={playNext} disabled={!has} aria-label="Next"
-              style={{ width: isMobile ? 32 : 36, height: isMobile ? 32 : 36, borderRadius: '50%', border: 'none', background: 'transparent', cursor: has ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {Icon.skipNext(isMobile ? 16 : 18, has ? COLORS.textPrimary : COLORS.border)}
-            </button>
-          </div>
-
-          {/* Seek — hidden on mobile */}
-          {!isMobile && <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', maxWidth: 480 }}>
-            <span style={{ fontSize: 11, color: COLORS.textSecondary, flexShrink: 0 }}>{formatTime(progress)}</span>
-            <div
-              style={{ flex: 1, height: 12, cursor: has ? 'pointer' : 'default', position: 'relative', display: 'flex', alignItems: 'center' }}
-              onClick={has ? handleSeekClick : undefined}
-              onMouseEnter={e => { const t = e.currentTarget.querySelector('.seek-thumb'); if (t) t.style.opacity = '1'; }}
-              onMouseLeave={e => { const t = e.currentTarget.querySelector('.seek-thumb'); if (t) t.style.opacity = '0'; }}
-              role="slider" tabIndex={has ? 0 : -1}
-              aria-label="Seek" aria-valuemin={0} aria-valuemax={Math.round(duration)} aria-valuenow={Math.round(progress)}
-              onKeyDown={e => {
-                if (!audioRef.current || !duration) return;
-                if (e.key === 'ArrowRight') audioRef.current.currentTime = Math.min(duration, audioRef.current.currentTime + 5);
-                if (e.key === 'ArrowLeft') audioRef.current.currentTime = Math.max(0, audioRef.current.currentTime - 5);
-              }}
-            >
-              <div style={{ position: 'absolute', width: '100%', height: 4, background: COLORS.border, borderRadius: 2 }} />
-              <div style={{ position: 'absolute', height: 4, background: has ? COLORS.accent : COLORS.border, borderRadius: 2, width: `${pct}%`, transition: 'width 0.1s linear' }} />
-              {has && <div className="seek-thumb" style={{ position: 'absolute', left: `calc(${pct}% - 6px)`, width: 12, height: 12, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 4px rgba(0,0,0,0.4)', opacity: 0, transition: 'opacity 0.15s', pointerEvents: 'none' }} />}
-            </div>
-            <span style={{ fontSize: 11, color: COLORS.textSecondary, flexShrink: 0 }}>{formatTime(duration)}</span>
-          </div>}
-        </div>
-
-        {/* Mobile queue button */}
-        {isMobile && (
-          <button onClick={() => setShowQueue(v => !v)} style={{ position: 'relative', background: 'none', border: 'none', cursor: 'pointer', padding: 6, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-            {Icon.queue(18, showQueue ? COLORS.accent : COLORS.textSecondary)}
-            {queue.length > 0 && (
-              <span style={{ position: 'absolute', top: 0, right: 0, width: 12, height: 12, borderRadius: '50%', background: COLORS.accent, color: '#fff', fontSize: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>{queue.length}</span>
-            )}
-          </button>
-        )}
-
-        {/* Volume + Queue toggle — desktop only */}
-        {!isMobile && <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-          <button
-            onClick={() => setVolume(v => v === 0 ? 0.7 : 0)}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-            aria-label={volume === 0 ? 'Unmute' : 'Mute'}
-          >
-            {volume === 0 ? Icon.volumeMute(16, COLORS.textSecondary) : volume < 0.5 ? Icon.volumeLow(16, COLORS.textSecondary) : Icon.volumeHigh(16, COLORS.textSecondary)}
-          </button>
-          <div
-            style={{ width: 90, height: 12, display: 'flex', alignItems: 'center', position: 'relative', cursor: 'pointer' }}
-            onMouseEnter={e => { const thumb = e.currentTarget.querySelector('.vol-thumb'); if (thumb) thumb.style.opacity = '1'; const bar = e.currentTarget.querySelector('.vol-fill'); if (bar) bar.style.background = COLORS.accent; }}
-            onMouseLeave={e => { const thumb = e.currentTarget.querySelector('.vol-thumb'); if (thumb) thumb.style.opacity = '0'; const bar = e.currentTarget.querySelector('.vol-fill'); if (bar) bar.style.background = COLORS.textPrimary; }}
-          >
-            <div style={{ position: 'absolute', width: '100%', height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.15)' }} />
-            <div className="vol-fill" style={{ position: 'absolute', width: `${volume * 100}%`, height: 4, borderRadius: 2, background: COLORS.textPrimary, transition: 'background 0.15s' }} />
-            <div className="vol-thumb" style={{ position: 'absolute', left: `calc(${volume * 100}% - 6px)`, width: 12, height: 12, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 4px rgba(0,0,0,0.4)', opacity: 0, transition: 'opacity 0.15s' }} />
-            <input type="range" min={0} max={1} step={0.01} value={volume}
-              onChange={e => setVolume(parseFloat(e.target.value))}
-              style={{ position: 'absolute', width: '100%', height: '100%', opacity: 0, cursor: 'pointer', margin: 0 }}
-              aria-label="Volume" />
-          </div>
-          <button
-            onClick={() => setShowQueue(v => !v)}
-            title="Queue"
-            style={{
-              position: 'relative', background: showQueue ? COLORS.hover : 'transparent', border: 'none',
-              cursor: 'pointer', padding: '6px 8px', borderRadius: 4, marginLeft: 4,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}
-          >
-            {Icon.queue(18, showQueue ? COLORS.accent : COLORS.textSecondary)}
-            {queue.length > 0 && (
-              <span style={{
-                position: 'absolute', top: 0, right: 0,
-                width: 14, height: 14, borderRadius: '50%',
-                background: COLORS.accent, color: '#fff', fontSize: 9,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontWeight: 700,
-              }}>{queue.length}</span>
-            )}
-          </button>
-        </div>}
-      </footer>
-    );
-  }
-
-  // -------------------------------------------------------------------------
-  // Mobile library view (replaces sidebar on mobile)
-  // -------------------------------------------------------------------------
-  function renderMobileLibrary() {
-    const albums = sidebarAlbums();
-    return (
-      <div style={{ padding: 12 }}>
-        {/* Recently Played — horizontal scroll */}
-        {recentlyPlayed.length > 0 && (
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Recently Played</div>
-            <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 4, WebkitOverflowScrolling: 'touch' }}>
-              {recentlyPlayed.slice(0, 8).map((r, i) => (
-                <div key={`mrp-${i}`} style={{ flexShrink: 0, width: 100, cursor: 'pointer' }}
-                  onClick={() => {
-                    const libMatch = libraryAlbums().find(la =>
-                      la.artist.toLowerCase() === r.artist.toLowerCase() &&
-                      la.album.toLowerCase() === r.album.toLowerCase()
-                    );
-                    if (libMatch) openAlbumFromLibrary(libMatch.artist, libMatch.album, libMatch.tracks, libMatch.coverArt, libMatch.mbid);
-                    else handleSearch(null, `${r.artist} ${r.album}`);
-                  }}>
-                  <AlbumArt src={r.coverArt} size={100} radius={6} artist={r.artist} album={r.album} />
-                  <div style={{ fontSize: 11, fontWeight: 600, color: COLORS.textPrimary, marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.album}</div>
-                  <div style={{ fontSize: 10, color: COLORS.textSecondary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.artist}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 20, fontWeight: 700, color: COLORS.textPrimary }}>Your Library</span>
-            {albums.length > 0 && (
-              <span style={{ fontSize: 12, color: COLORS.textSecondary, background: COLORS.hover, borderRadius: 10, padding: '2px 8px' }}>{albums.length}</span>
-            )}
-          </div>
-          <div style={{ display: 'flex', gap: 4 }}>
-            <button onClick={() => setShowLibraryFilter(v => !v)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 6, borderRadius: 4, display: 'flex', alignItems: 'center' }}>
-              {Icon.search(16, showLibraryFilter ? COLORS.accent : COLORS.textSecondary)}
-            </button>
-            <button onClick={() => setShowSettings(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 6, borderRadius: 4, display: 'flex', alignItems: 'center' }}>
-              {Icon.gear(16, COLORS.textSecondary)}
-            </button>
-          </div>
-        </div>
-
-        {/* Filter */}
-        {showLibraryFilter && (
-          <input type="text" placeholder="Filter albums..." value={libraryFilter} onChange={e => setLibraryFilter(e.target.value)} autoFocus
-            style={{ width: '100%', padding: '8px 12px', marginBottom: 10, background: COLORS.hover, border: `1px solid ${COLORS.border}`, borderRadius: 6, color: COLORS.textPrimary, fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
-        )}
-
-        {/* Sort controls */}
-        <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
-          {[{ key: 'recents', label: 'Recents' }, { key: 'alpha', label: 'A-Z' }, { key: 'artist', label: 'Artist' }].map(s => (
-            <button key={s.key} onClick={() => setLibrarySortBy(s.key)}
-              style={{ padding: '5px 12px', borderRadius: 16, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600,
-                background: librarySortBy === s.key ? COLORS.textPrimary : COLORS.hover,
-                color: librarySortBy === s.key ? COLORS.bg : COLORS.textSecondary }} >
-              {s.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Album list */}
-        {albums.length === 0 ? (
-          <div style={{ textAlign: 'center', color: COLORS.textSecondary, fontSize: 14, padding: '32px 12px' }}>
-            {libraryFilter ? 'No matches' : 'No music yet. Search and add some!'}
-          </div>
-        ) : albums.map(({ artist, album, tracks, coverArt, mbid }) => {
-          const isPlaying_ = currentAlbumInfo?.artist === artist && currentAlbumInfo?.album === album;
-          return (
-            <div key={`${artist}::${album}`}
-              onClick={() => { openAlbumFromLibrary(artist, album, tracks, coverArt, mbid); }}
-              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 8px', borderRadius: 8, cursor: 'pointer', minHeight: 56 }}
-              {...contextMenuProps(e => showContextMenu(e, [
-                { label: 'Play', action: () => playTrack(tracks[0], tracks, 0, { artist, album, coverArt }) },
-                { label: 'Add to Queue', action: () => tracks.forEach(t => addToQueue(t)) },
-                { label: 'Go to Artist', action: async () => {
-                  try { const res = await fetch(`/api/search?q=${encodeURIComponent(artist)}`); const data = await res.json();
-                    const a = data.artists?.find(x => x.name.toLowerCase() === artist.toLowerCase()) || data.artists?.[0];
-                    if (a?.mbid) openArtistPage(a.mbid, a.name, a.type); } catch {} }},
-                { divider: true },
-                { label: 'Remove from Library', danger: true, action: () => removeAlbumFromLibrary(artist, album) },
-              ]))}
-            >
-              <AlbumArt src={coverArt} size={52} radius={4} artist={artist} album={album} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 15, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: isPlaying_ ? COLORS.accent : COLORS.textPrimary }}>{album}</div>
-                <div style={{ fontSize: 13, color: COLORS.textSecondary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>{artist}</div>
-              </div>
-              {isPlaying_ && <span style={{ flexShrink: 0 }}>{Icon.volumeHigh(16, COLORS.accent)}</span>}
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
-  // -------------------------------------------------------------------------
-  // Bottom tab bar (mobile only)
-  // -------------------------------------------------------------------------
-  function renderBottomTabBar() {
-    if (!isMobile) return null;
-    const tabs = [
-      { key: 'search', label: 'Search', icon: Icon.search },
-      { key: 'library', label: 'Library', icon: Icon.libraryIcon },
-    ];
-    return (
-      <nav style={{
-        height: 56, minHeight: 56, background: COLORS.surface,
-        borderTop: `1px solid ${COLORS.border}`,
-        display: 'flex', alignItems: 'center', justifyContent: 'space-around',
-        paddingBottom: 'env(safe-area-inset-bottom)',
-      }}>
-        {tabs.map(t => {
-          const active = mobileTab === t.key && !['album', 'artist'].includes(view);
-          const isInSubView = (t.key === 'search' && mobileTab === 'search' && ['album', 'artist'].includes(view))
-            || (t.key === 'library' && mobileTab === 'library' && ['album', 'artist'].includes(view));
-          const highlighted = active || isInSubView;
-          return (
-            <button key={t.key}
-              onClick={() => {
-                setMobileTab(t.key);
-                if (t.key === 'search') setView('search');
-                if (t.key === 'library') setView('search'); // triggers mobileShowLibrary via mobileTab
-              }}
-              style={{
-                flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-                background: 'none', border: 'none', cursor: 'pointer', padding: '8px 0',
-                color: highlighted ? COLORS.accent : COLORS.textSecondary,
-              }}>
-              {t.icon(22, highlighted ? COLORS.accent : COLORS.textSecondary)}
-              <span style={{ fontSize: 10, fontWeight: 600 }}>{t.label}</span>
-            </button>
-          );
-        })}
-      </nav>
-    );
   }
 
   // -------------------------------------------------------------------------
@@ -3289,7 +714,7 @@ function App() {
                         { label: 'Play', action: () => playTrack(tracks[0], tracks, 0, { artist, album, coverArt }) },
                         { label: 'Add to Queue', action: () => tracks.forEach(t => addToQueue(t)) },
                         { label: 'Go to Artist', action: async () => {
-                          try { const res = await fetch(`/api/search?q=${encodeURIComponent(artist)}`); const data = await res.json();
+                          try { const data = await api.search(artist);
                             const a = data.artists?.find(x => x.name.toLowerCase() === artist.toLowerCase()) || data.artists?.[0];
                             if (a?.mbid) openArtistPage(a.mbid, a.name, a.type); } catch {} }},
                         { divider: true },
@@ -3306,19 +731,121 @@ function App() {
                 })}
               </div>
             </div>
-            {renderBgDownloadIndicator()}
-            {renderDownloadIndicator()}
+            <BgDownloadIndicator bgDownloadStatus={bgDownloadStatus} setBgDownloadStatus={setBgDownloadStatus} />
+            <DownloadIndicator
+              downloadStatus={downloadStatus} setDownloadStatus={setDownloadStatus}
+              downloading={downloading}
+              dlExpanded={dlExpanded} setDlExpanded={setDlExpanded}
+              handleCancel={handleCancel} handleYtCancel={handleYtCancel}
+              loadLibrary={loadLibrary}
+            />
           </aside>
         )}
 
         {/* Main content */}
         <main style={{ flex: 1, position: 'relative', overflow: 'hidden', display: 'flex' }}>
           <div ref={mainContentRef} style={{ flex: 1, overflowY: 'auto', padding: isMobile ? 12 : 28, paddingBottom: isMobile ? 8 : 28 }}>
-            {mobileShowLibrary ? renderMobileLibrary() : (
+            {mobileShowLibrary ? (
+              <MobileLibrary
+                sidebarAlbums={sidebarAlbums}
+                recentlyPlayed={recentlyPlayed}
+                libraryAlbums={libraryAlbums}
+                libraryFilter={libraryFilter} setLibraryFilter={setLibraryFilter}
+                showLibraryFilter={showLibraryFilter} setShowLibraryFilter={setShowLibraryFilter}
+                librarySortBy={librarySortBy} setLibrarySortBy={setLibrarySortBy}
+                currentAlbumInfo={currentAlbumInfo}
+                isMobile={isMobile}
+                setShowSettings={setShowSettings}
+                openAlbumFromLibrary={openAlbumFromLibrary}
+                openAlbumFromSearch={openAlbumFromSearch}
+                openArtistPage={openArtistPage}
+                handleSearch={handleSearch}
+                playTrack={playTrack}
+                addToQueue={addToQueue}
+                showContextMenu={showContextMenu}
+                removeAlbumFromLibrary={removeAlbumFromLibrary}
+              />
+            ) : (
               <>
-                {view === 'search' && renderSearch()}
-                {view === 'album' && renderAlbum()}
-                {view === 'artist' && renderArtist()}
+                {view === 'search' && (
+                  <SearchView
+                    query={query} setQuery={setQuery}
+                    handleSearch={handleSearch} searching={searching}
+                    searchAlbums={searchAlbums} searchDone={searchDone}
+                    searchArtistResults={searchArtistResults}
+                    streamingResults={streamingResults} otherResults={otherResults}
+                    searchHistory={searchHistory}
+                    removeFromSearchHistory={removeFromSearchHistory}
+                    recentlyPlayed={recentlyPlayed}
+                    lastfmTopArtists={lastfmTopArtists}
+                    libraryAlbums={libraryAlbums}
+                    openAlbumFromLibrary={openAlbumFromLibrary}
+                    openAlbumFromSearch={openAlbumFromSearch}
+                    openArtistPage={openArtistPage}
+                    startDownload={startDownload}
+                    startYtDownload={startYtDownload}
+                    playStreamingResult={playStreamingResult}
+                    isInLibrary={isInLibrary}
+                    downloading={downloading}
+                    isMobile={isMobile}
+                    currentTrack={currentTrack}
+                  />
+                )}
+                {view === 'album' && (
+                  <AlbumView
+                    selectedAlbum={selectedAlbum}
+                    mbTracks={mbTracks}
+                    albumColor={albumColor}
+                    showStickyHeader={showStickyHeader}
+                    albumHeaderRef={albumHeaderRef}
+                    moreByArtist={moreByArtist}
+                    trackDurations={trackDurations}
+                    isMobile={isMobile}
+                    isPlaying={isPlaying}
+                    currentTrack={currentTrack}
+                    currentAlbumInfo={currentAlbumInfo}
+                    hoveredTrack={hoveredTrack} setHoveredTrack={setHoveredTrack}
+                    hoveredMbTrack={hoveredMbTrack} setHoveredMbTrack={setHoveredMbTrack}
+                    ytSearching={ytSearching} ytPendingTrack={ytPendingTrack}
+                    downloading={downloading}
+                    searchArtistResults={searchArtistResults}
+                    isInLibrary={isInLibrary}
+                    prevViewRef={prevViewRef}
+                    setView={setView}
+                    playTrack={playTrack}
+                    togglePlay={togglePlay}
+                    playAllFromYouTube={playAllFromYouTube}
+                    openAlbumFromSearch={openAlbumFromSearch}
+                    openArtistPage={openArtistPage}
+                    handleSearch={handleSearch}
+                    startDownload={startDownload}
+                    showContextMenu={showContextMenu}
+                    addToQueue={addToQueue}
+                    setQueue={setQueue}
+                    removeTrackFromLibrary={removeTrackFromLibrary}
+                    getTrackDlStatus={getTrackDlStatus}
+                  />
+                )}
+                {view === 'artist' && (
+                  <ArtistView
+                    selectedArtist={selectedArtist}
+                    artistDetails={artistDetails}
+                    artistBio={artistBio}
+                    artistTopTracks={artistTopTracks}
+                    artistReleases={artistReleases}
+                    isMobile={isMobile}
+                    isPlaying={isPlaying}
+                    currentTrack={currentTrack}
+                    currentAlbumInfo={currentAlbumInfo}
+                    ytSearching={ytSearching} ytPendingTrack={ytPendingTrack}
+                    isInLibrary={isInLibrary}
+                    prevViewRef={prevViewRef}
+                    setView={setView}
+                    openAlbumFromSearch={openAlbumFromSearch}
+                    openArtistPage={openArtistPage}
+                    playFromYouTube={playFromYouTube}
+                  />
+                )}
                 {!isMobile && !['search', 'album', 'artist'].includes(view) && (
                   <div style={{ textAlign: 'center', color: COLORS.textSecondary, marginTop: 80, fontSize: 15 }}>
                     Select an album from your library, or search for new music.
@@ -3327,103 +854,61 @@ function App() {
               </>
             )}
           </div>
-          {renderQueuePanel()}
+          <QueuePanel
+            queue={queue} setQueue={setQueue}
+            showQueue={showQueue} setShowQueue={setShowQueue}
+            dragIdx={dragIdx} setDragIdx={setDragIdx}
+            dragOverIdx={dragOverIdx} setDragOverIdx={setDragOverIdx}
+            clearQueue={clearQueue} removeFromQueue={removeFromQueue}
+            playlist={playlist} playlistIdx={playlistIdx}
+            currentTrack={currentTrack} currentCoverArt={currentCoverArt} currentAlbumInfo={currentAlbumInfo}
+            isMobile={isMobile}
+          />
         </main>
       </div>
 
-      {renderPlayer()}
-      {renderBottomTabBar()}
-      {renderContextMenu()}
-      {renderSettingsModal()}
+      <PlayerBar
+        currentTrack={currentTrack} currentAlbumInfo={currentAlbumInfo} currentCoverArt={currentCoverArt}
+        isPlaying={isPlaying} volume={volume} setVolume={setVolume}
+        progress={progress} duration={duration}
+        queue={queue} showQueue={showQueue} setShowQueue={setShowQueue}
+        isMobile={isMobile}
+        audioRef={audioRef}
+        goToCurrentAlbum={goToCurrentAlbum}
+        togglePlay={togglePlay} playNext={playNext} playPrev={playPrev}
+        handleSeekClick={handleSeekClick}
+        library={library}
+      />
+      <BottomTabBar isMobile={isMobile} mobileTab={mobileTab} setMobileTab={setMobileTab} view={view} setView={setView} />
+      <ContextMenu contextMenu={contextMenu} setContextMenu={setContextMenu} isMobile={isMobile} />
+      <SettingsModal
+        showSettings={showSettings} setShowSettings={setShowSettings}
+        crossfadeDuration={crossfadeDuration} setCrossfadeDuration={setCrossfadeDuration}
+        lastfmStatus={lastfmStatus}
+        lastfmApiKey={lastfmApiKey} setLastfmApiKey={setLastfmApiKey}
+        lastfmApiSecret={lastfmApiSecret} setLastfmApiSecret={setLastfmApiSecret}
+        lastfmAuthStep={lastfmAuthStep}
+        lastfmAuthUrl={lastfmAuthUrl}
+        lastfmError={lastfmError}
+        lastfmSaveConfig={lastfmSaveConfig}
+        lastfmCompleteAuth={lastfmCompleteAuth}
+        lastfmDisconnect={lastfmDisconnect}
+      />
 
       <audio
         ref={audioRef}
         onLoadedMetadata={() => {
-          // Capture duration for the current track as soon as metadata is available
           if (!audioRef.current || !currentTrack?.id) return;
           const dur = audioRef.current.duration;
           if (dur && isFinite(dur)) {
             setTrackDurations(prev => prev[currentTrack.id] === dur ? prev : { ...prev, [currentTrack.id]: dur });
           }
         }}
-        onTimeUpdate={() => {
-          if (!audioRef.current) return;
-          const ct = audioRef.current.currentTime;
-          const dur = audioRef.current.duration || 0;
-          setProgress(ct); setDuration(dur);
-          // Add to recently played after 2 seconds of playback
-          if (!recentlyPlayedAddedRef.current && ct >= 2 && currentAlbumInfo) {
-            recentlyPlayedAddedRef.current = true;
-            addToRecentlyPlayed({
-              artist: currentAlbumInfo.artist || currentTrack?.artist || '',
-              album: currentAlbumInfo.album || currentTrack?.album || '',
-              coverArt: currentAlbumInfo.coverArt || currentTrack?.coverArt || null,
-              mbid: currentAlbumInfo.mbid || null,
-              rgid: currentAlbumInfo.rgid || null,
-            });
-          }
-          // Last.fm scrobble check
-          const sr = scrobbleRef.current;
-          if (sr.duration === 0 && dur > 0) sr.duration = dur;
-          if (!sr.scrobbled && sr.artist && sr.track && lastfmStatusRef.current.authenticated && dur > 30 && (ct > dur * 0.5 || ct > 240)) {
-            sr.scrobbled = true;
-            fetch('/api/lastfm/scrobble', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ artist: sr.artist, track: sr.track, album: sr.album, timestamp: sr.startTime, duration: Math.round(dur) }),
-            }).catch(() => {});
-          }
-          // Gapless / Crossfade: pre-buffer next track when within threshold
-          if (dur > 0 && !crossfadeAnimRef.current) {
-            const remaining = dur - ct;
-            const fadeTime = crossfadeDuration || 0;
-            // Pre-buffer at 10s or fadeTime+2s (whichever is larger)
-            const preBufferThreshold = Math.max(10, fadeTime + 2);
-            if (remaining <= preBufferThreshold && remaining > 0) {
-              preBufferNext();
-            }
-            // Start crossfade if enabled and within fade window
-            if (fadeTime > 0 && remaining <= fadeTime && remaining > 0.5) {
-              const nextTrack = peekNextTrack();
-              if (nextTrack && !nextTrack.ytPending) {
-                startCrossfade(nextTrack, remaining);
-              }
-            }
-          }
-        }}
-        onEnded={() => {
-          // If crossfade is in progress, it handles the transition — ignore onEnded
-          if (crossfadeAnimRef.current) return;
-          // Gapless: if next track is pre-buffered, switch audioRef src directly
-          // (keeps React event handlers on audioRef — no ref swapping needed)
-          const nextTrack = peekNextTrack();
-          if (nextTrack && !nextTrack.ytPending && preBufferedTrackRef.current?.id === nextTrack.id && nextAudioRef.current) {
-            const nextSrc = nextAudioRef.current.src;
-            // Clear secondary element
-            nextAudioRef.current.pause();
-            nextAudioRef.current.removeAttribute('src');
-            nextAudioRef.current.load();
-            preBufferedTrackRef.current = null;
-            // Switch primary element to next track — browser serves from cache
-            if (audioRef.current) {
-              audioRef.current.src = nextSrc;
-              audioRef.current.volume = volume;
-              audioRef.current.play().catch(() => {});
-            }
-            _applyTrackState(nextTrack);
-          } else {
-            playNext();
-          }
-        }}
-        onPlay={() => setIsPlaying(true)}
-        onPause={() => setIsPlaying(false)}
-        onError={() => {
-          // Track unavailable (deleted, stream expired) — clear it
-          if (currentTrack) {
-            console.warn('Audio load failed for:', currentTrack.title);
-            setCurrentTrack(null);
-            setIsPlaying(false);
-          }
-        }}
+        onTimeUpdate={audioHandlers.onTimeUpdate}
+        onEnded={audioHandlers.onEnded}
+        onPlay={audioHandlers.onPlay}
+        onPause={audioHandlers.onPause}
+        onError={audioHandlers.onError}
       />
       {/* Hidden secondary audio element for gapless pre-buffering and crossfade */}
       <audio ref={nextAudioRef} preload="auto" style={{ display: 'none' }} />
