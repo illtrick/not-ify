@@ -9,6 +9,8 @@ const streamAuth = require('../services/stream-auth');
 const { getLanIp } = require('../services/lan-ip');
 const { getTrackMap, MIME_TYPES } = require('./library');
 
+const log = (...args) => console.log('[cast]', ...args);
+
 const PORT = process.env.PORT || 3000;
 
 function getLanBase() {
@@ -45,17 +47,20 @@ router.post('/cast/play', async (req, res) => {
     ? (albumInfo.coverArt.startsWith('http') ? albumInfo.coverArt : `${base}${albumInfo.coverArt}`)
     : '';
 
-  const metadata = dlna.buildDidlLite({
+  const metadata = {
     title: track?.title || 'Unknown',
     artist: track?.artist || albumInfo?.artist || 'Unknown',
+    creator: track?.artist || albumInfo?.artist || 'Unknown',
     album: track?.album || albumInfo?.album || '',
-    albumArtUrl: coverBase,
-    streamUrl,
-    mimeType,
-  });
+    albumArtURI: coverBase,
+    type: 'audio',
+    protocolInfo: `http-get:*:${mimeType}:*`,
+  };
 
   try {
-    await dlna.play(deviceUsn, streamUrl, metadata);
+    log(`play: "${metadata.title}" by ${metadata.artist} → ${dlna.getDevices().find(d => d.usn === deviceUsn)?.friendlyName || deviceUsn}`);
+    log(`play: streamUrl=${streamUrl}`);
+    await dlna.play(deviceUsn, streamUrl, { metadata, contentType: mimeType });
     const userId = req.userId || 'default';
     castSession.setSession(userId, {
       deviceUsn,
@@ -63,8 +68,10 @@ router.post('/cast/play', async (req, res) => {
       queueIndex: 0,
     });
     const device = dlna.getDevices().find(d => d.usn === deviceUsn);
+    log('play: success');
     res.json({ status: 'playing', device: device?.friendlyName || deviceUsn });
   } catch (err) {
+    log(`play: FAILED — ${err.message}`);
     res.status(500).json({ error: err.message });
   }
 });
@@ -78,17 +85,20 @@ router.post('/cast/play/yt', async (req, res) => {
   const base = getLanBase();
   const streamUrl = streamAuth.generateSignedYtUrl(videoId, base, 7200);
 
-  const metadata = dlna.buildDidlLite({
+  const metadata = {
     title: title || 'Unknown',
     artist: artist || 'Unknown',
+    creator: artist || 'Unknown',
     album: album || '',
-    albumArtUrl: coverArt || '',
-    streamUrl,
-    mimeType: 'audio/mpeg',
-  });
+    albumArtURI: coverArt || '',
+    type: 'audio',
+    protocolInfo: 'http-get:*:audio/mpeg:*',
+  };
 
   try {
-    await dlna.play(deviceUsn, streamUrl, metadata);
+    log(`play/yt: "${title}" by ${artist} → ${dlna.getDevices().find(d => d.usn === deviceUsn)?.friendlyName || deviceUsn}`);
+    log(`play/yt: streamUrl=${streamUrl}`);
+    await dlna.play(deviceUsn, streamUrl, { metadata, contentType: 'audio/mpeg' });
     const userId = req.userId || 'default';
     castSession.setSession(userId, {
       deviceUsn,
@@ -96,8 +106,10 @@ router.post('/cast/play/yt', async (req, res) => {
       queueIndex: 0,
     });
     const device = dlna.getDevices().find(d => d.usn === deviceUsn);
+    log('play/yt: success');
     res.json({ status: 'playing', device: device?.friendlyName || deviceUsn });
   } catch (err) {
+    log(`play/yt: FAILED — ${err.message}`);
     res.status(500).json({ error: err.message });
   }
 });
@@ -228,15 +240,15 @@ router.post('/cast/next', async (req, res) => {
   try {
     if (next.isYt) {
       const streamUrl = streamAuth.generateSignedYtUrl(next.ytVideoId, base, 7200);
-      const metadata = dlna.buildDidlLite({ title: next.title, artist: next.artist, album: '', streamUrl, mimeType: 'audio/mpeg' });
-      await dlna.play(session.deviceUsn, streamUrl, metadata);
+      const metadata = { title: next.title, artist: next.artist, creator: next.artist, album: '', type: 'audio', protocolInfo: 'http-get:*:audio/mpeg:*' };
+      await dlna.play(session.deviceUsn, streamUrl, { metadata, contentType: 'audio/mpeg' });
     } else {
       const { map, tracks } = getTrackMap();
       const track = tracks.find(t => t.id === next.id);
       const streamUrl = streamAuth.generateSignedUrl(next.id, base, 7200);
       const mimeType = trackMimeType(track?.format);
-      const metadata = dlna.buildDidlLite({ title: next.title || 'Unknown', artist: next.artist || 'Unknown', album: '', streamUrl, mimeType });
-      await dlna.play(session.deviceUsn, streamUrl, metadata);
+      const metadata = { title: next.title || 'Unknown', artist: next.artist || 'Unknown', creator: next.artist || 'Unknown', album: '', type: 'audio', protocolInfo: `http-get:*:${mimeType}:*` };
+      await dlna.play(session.deviceUsn, streamUrl, { metadata, contentType: mimeType });
     }
     res.json({ status: 'playing', track: next });
   } catch (err) {
@@ -258,15 +270,15 @@ router.post('/cast/prev', async (req, res) => {
   try {
     if (prev.isYt) {
       const streamUrl = streamAuth.generateSignedYtUrl(prev.ytVideoId, base, 7200);
-      const metadata = dlna.buildDidlLite({ title: prev.title, artist: prev.artist, album: '', streamUrl, mimeType: 'audio/mpeg' });
-      await dlna.play(session.deviceUsn, streamUrl, metadata);
+      const metadata = { title: prev.title, artist: prev.artist, creator: prev.artist, album: '', type: 'audio', protocolInfo: 'http-get:*:audio/mpeg:*' };
+      await dlna.play(session.deviceUsn, streamUrl, { metadata, contentType: 'audio/mpeg' });
     } else {
       const { map, tracks } = getTrackMap();
       const track = tracks.find(t => t.id === prev.id);
       const streamUrl = streamAuth.generateSignedUrl(prev.id, base, 7200);
       const mimeType = trackMimeType(track?.format);
-      const metadata = dlna.buildDidlLite({ title: prev.title || 'Unknown', artist: prev.artist || 'Unknown', album: '', streamUrl, mimeType });
-      await dlna.play(session.deviceUsn, streamUrl, metadata);
+      const metadata = { title: prev.title || 'Unknown', artist: prev.artist || 'Unknown', creator: prev.artist || 'Unknown', album: '', type: 'audio', protocolInfo: `http-get:*:${mimeType}:*` };
+      await dlna.play(session.deviceUsn, streamUrl, { metadata, contentType: mimeType });
     }
     res.json({ status: 'playing', track: prev });
   } catch (err) {

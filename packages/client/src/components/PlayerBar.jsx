@@ -175,13 +175,27 @@ export function PlayerBar({
           />
         )}
       </div>}
-      {/* Cast status + log */}
+      {/* Cast status bar — shown above main footer content when casting or has log */}
       {cast && (cast.isCasting || cast.castLog?.length > 0) && (
-        <div style={{ position: 'absolute', bottom: -20, left: '50%', transform: 'translateX(-50%)', fontSize: 11, color: COLORS.accent, whiteSpace: 'nowrap', textAlign: 'center' }}>
-          {cast.isCasting
-            ? `Casting to ${cast.devices.find(d => d.usn === cast.activeDevice)?.friendlyName || 'device'}`
-            : cast.castLog?.[0]?.message || ''
-          }
+        <div style={{
+          position: 'absolute', top: -28, left: 0, right: 0, height: 24,
+          background: COLORS.hover, borderTop: `1px solid ${COLORS.border}`,
+          display: 'flex', alignItems: 'center', padding: '0 16px', gap: 6,
+        }}>
+          {cast.isCasting && (
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: COLORS.accent, animation: 'pulse 1.5s ease-in-out infinite', flexShrink: 0 }} />
+          )}
+          <span style={{ fontSize: 11, color: cast.isCasting ? COLORS.accent : COLORS.textSecondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+            {cast.isCasting
+              ? `Casting to ${cast.devices.find(d => d.usn === cast.activeDevice)?.friendlyName || 'device'}`
+              : cast.castLog?.[0]?.message || ''
+            }
+          </span>
+          {cast.castLog?.[0] && (
+            <span style={{ fontSize: 10, color: COLORS.textSecondary, opacity: 0.5, flexShrink: 0 }}>
+              {cast.castLog[0].timestamp}
+            </span>
+          )}
         </div>
       )}
     </footer>

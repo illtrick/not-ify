@@ -40,9 +40,9 @@ export function Sidebar({
       {/* Top nav */}
       <div style={{ padding: '16px 12px 8px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-            <span style={{ fontSize: 22, fontWeight: 800, color: COLORS.accent, letterSpacing: '-0.5px' }}>Not-ify</span>
-            {serverVersion && <span style={{ fontSize: 10, fontWeight: 500, color: COLORS.textSecondary, opacity: 0.5 }}>v{serverVersion}</span>}
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <span style={{ fontSize: 22, fontWeight: 800, color: COLORS.accent, letterSpacing: '-0.5px', lineHeight: 1 }}>Not-ify</span>
+            {serverVersion && <span style={{ fontSize: 9, fontWeight: 500, color: COLORS.textSecondary, opacity: 0.4, marginTop: 2 }}>v{serverVersion}</span>}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             {currentUser && (

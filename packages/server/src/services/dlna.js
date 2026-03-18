@@ -8,6 +8,8 @@ const MEDIA_RENDERER_ST = 'urn:schemas-upnp-org:device:MediaRenderer:1';
 const DEVICE_TTL_MS = 3 * 60 * 1000;  // 3 minutes
 const SCAN_INTERVAL_MS = 60 * 1000;    // re-scan every 60s
 
+const log = (...args) => console.log('[dlna]', ...args);
+
 // Map<usn, { usn, friendlyName, location, ip, lastSeen }>
 const _devices = new Map();
 let _ssdp = null;
@@ -89,7 +91,11 @@ async function startDiscovery() {
     }
 
     const { friendlyName, playable } = await _fetchDeviceInfo(location);
-    if (!playable) return; // skip non-audio devices (Hue Bridge, Sub, etc.)
+    if (!playable) {
+      log(`skipped non-playable device: ${friendlyName} (${rinfo.address})`);
+      return;
+    }
+    log(`discovered: ${friendlyName} (${rinfo.address})`);
     _devices.set(usn, {
       usn,
       friendlyName,
@@ -101,6 +107,7 @@ async function startDiscovery() {
   });
 
   // Initial scan
+  log('starting SSDP discovery...');
   _ssdp.search(MEDIA_RENDERER_ST);
 
   // Periodic re-scan + expiry
@@ -152,10 +159,17 @@ function hmsToSeconds(hms) {
   return (parts[0] || 0) * 3600 + (parts[1] || 0) * 60 + (parts[2] || 0);
 }
 
-async function play(deviceUsn, streamUrl, metadata) {
+async function play(deviceUsn, streamUrl, metadataOrOptions) {
+  const device = _devices.get(deviceUsn);
+  log(`play: loading "${metadataOrOptions?.metadata?.title || '?'}" on ${device?.friendlyName || deviceUsn}`);
+  log(`play: location=${device?.location}, streamUrl=${streamUrl}`);
   const client = _getClient(deviceUsn);
-  await client.load(streamUrl, { metadata });
-  await client.play();
+  const options = typeof metadataOrOptions === 'string'
+    ? { metadata: undefined, autoplay: true }
+    : { ...(metadataOrOptions || {}), autoplay: true };
+  log('play: calling client.load()...');
+  const result = await client.load(streamUrl, options);
+  log('play: load complete', JSON.stringify(result));
 }
 
 async function pause(deviceUsn) {
@@ -170,7 +184,7 @@ async function stop(deviceUsn) {
 
 async function seek(deviceUsn, seconds) {
   const client = _getClient(deviceUsn);
-  await client.seek(secondsToHms(seconds));
+  await client.seek(Number(seconds));
 }
 
 async function setVolume(deviceUsn, level) {
