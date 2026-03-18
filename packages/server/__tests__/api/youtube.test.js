@@ -17,6 +17,29 @@ jest.mock('../../src/services/llm', () => ({
 }));
 jest.mock('../../src/services/realdebrid', () => ({}));
 jest.mock('../../src/services/lastfm', () => ({}));
+jest.mock('../../src/services/migrate', () => ({ migrate: jest.fn() }));
+jest.mock('../../src/services/db', () => ({
+  getDb: jest.fn(), isValidUser: jest.fn().mockReturnValue(true),
+  getUsers: jest.fn().mockReturnValue([]),
+  getRecentlyPlayed: jest.fn().mockReturnValue([]),
+  addRecentlyPlayed: jest.fn().mockReturnValue([]),
+  bulkSetRecentlyPlayed: jest.fn().mockReturnValue([]),
+  getLastfmConfig: jest.fn().mockReturnValue({}),
+  saveLastfmConfig: jest.fn(), clearLastfmConfig: jest.fn(),
+  getScrobbleQueue: jest.fn().mockReturnValue([]),
+  addToScrobbleQueue: jest.fn(), removeFromScrobbleQueue: jest.fn(),
+  getAllUsersWithScrobbleQueue: jest.fn().mockReturnValue([]),
+  getGlobalSetting: jest.fn(), setGlobalSetting: jest.fn(),
+  getUserSetting: jest.fn(), setUserSetting: jest.fn(),
+  getAllUserSettings: jest.fn().mockReturnValue({}),
+  getSearchHistory: jest.fn().mockReturnValue([]),
+  addSearchHistory: jest.fn(), removeSearchHistory: jest.fn(), clearSearchHistory: jest.fn(),
+  getFavorites: jest.fn().mockReturnValue([]),
+  addFavorite: jest.fn(), removeFavorite: jest.fn(),
+  isFavorite: jest.fn().mockReturnValue(false),
+  getUserSession: jest.fn().mockReturnValue({ queue: [], state: {} }),
+  saveUserSession: jest.fn(),
+}));
 
 // Mock youtube service so searches work without yt-dlp
 jest.mock('../../src/services/youtube', () => ({

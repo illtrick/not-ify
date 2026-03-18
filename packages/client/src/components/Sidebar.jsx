@@ -10,6 +10,7 @@ import { DownloadIndicator } from './DownloadIndicator';
 export function Sidebar({
   view, setView,
   showSettings, setShowSettings,
+  currentUser, switchUser,
   recentlyPlayed,
   currentAlbumInfo,
   libraryAlbums,
@@ -40,11 +41,23 @@ export function Sidebar({
       <div style={{ padding: '16px 12px 8px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
           <div style={{ fontSize: 22, fontWeight: 800, color: COLORS.accent, letterSpacing: '-0.5px' }}>Not-ify</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {currentUser && (
+              <button onClick={switchUser} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 8px', borderRadius: 12, fontSize: 11, color: COLORS.textSecondary, opacity: 0.7, display: 'flex', alignItems: 'center', gap: 4 }}
+                onMouseEnter={e => e.currentTarget.style.opacity = '1'} onMouseLeave={e => e.currentTarget.style.opacity = '0.7'}
+                title="Switch user">
+                <span style={{ width: 16, height: 16, borderRadius: '50%', background: currentUser === 'nathan' ? '#1DB954' : '#E91E63', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, color: '#fff' }}>
+                  {currentUser === 'nathan' ? 'N' : 'S'}
+                </span>
+                {currentUser === 'nathan' ? 'Nathan' : 'Sarah'}
+              </button>
+            )}
           <button onClick={() => setShowSettings(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, borderRadius: 4, display: 'flex', alignItems: 'center', opacity: 0.6 }}
             onMouseEnter={e => e.currentTarget.style.opacity = '1'} onMouseLeave={e => e.currentTarget.style.opacity = '0.6'}
             title="Settings">
             {Icon.gear(18, COLORS.textSecondary)}
           </button>
+          </div>
         </div>
         <div
           style={{

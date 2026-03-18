@@ -8,6 +8,7 @@
 const enc = encodeURIComponent;
 
 let _baseUrl = '';
+let _userId = null;
 
 // The API version this client expects — bump when making breaking API changes
 const CLIENT_API_VERSION = 1;
@@ -17,6 +18,14 @@ let _versionMismatchCallback = null;
 export function configure({ baseUrl, onVersionMismatch }) {
   _baseUrl = (baseUrl || '').replace(/\/$/, '');
   if (onVersionMismatch) _versionMismatchCallback = onVersionMismatch;
+}
+
+export function setUser(userId) {
+  _userId = userId;
+}
+
+export function getUser() {
+  return _userId;
 }
 
 export function getBaseUrl() {
@@ -53,9 +62,8 @@ export async function request(path, options = {}) {
   const url = `${_baseUrl}${path}`;
   const headers = { ...options.headers };
 
-  // Future: inject JWT auth header here
-  // const token = getToken();
-  // if (token) headers['Authorization'] = `Bearer ${token}`;
+  // Inject user identification header
+  if (_userId) headers['X-User-Id'] = _userId;
 
   const response = await fetch(url, { ...options, headers });
 
@@ -108,9 +116,11 @@ export function put(path, body, options = {}) {
 
 export async function rawPost(path, body, options = {}) {
   const url = `${_baseUrl}${path}`;
+  const headers = { 'Content-Type': 'application/json' };
+  if (_userId) headers['X-User-Id'] = _userId;
   return fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(body),
     ...options,
   });
@@ -118,7 +128,9 @@ export async function rawPost(path, body, options = {}) {
 
 export async function rawGet(path, options = {}) {
   const url = `${_baseUrl}${path}`;
-  return fetch(url, options);
+  const headers = {};
+  if (_userId) headers['X-User-Id'] = _userId;
+  return fetch(url, { ...options, headers: { ...headers, ...options.headers } });
 }
 
 // ---------------------------------------------------------------------------
@@ -314,5 +326,75 @@ export function setRecentlyPlayed(list) {
 }
 
 export function recentlyPlayedStreamUrl() {
-  return `${_baseUrl}/api/recently-played/stream`;
+  const base = `${_baseUrl}/api/recently-played/stream`;
+  // SSE doesn't support custom headers, so pass userId as query param
+  return _userId ? `${base}?userId=${_userId}` : base;
+}
+
+// ---------------------------------------------------------------------------
+// Users
+// ---------------------------------------------------------------------------
+
+export function getAvailableUsers() {
+  return get('/api/users');
+}
+
+// ---------------------------------------------------------------------------
+// Search History (per-user, server-side)
+// ---------------------------------------------------------------------------
+
+export function getSearchHistory() {
+  return get('/api/search-history');
+}
+
+export function addSearchHistoryEntry(query) {
+  return post('/api/search-history', { query });
+}
+
+export function removeSearchHistoryEntry(query) {
+  return request('/api/search-history', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Favorites (per-user)
+// ---------------------------------------------------------------------------
+
+export function getFavorites() {
+  return get('/api/favorites');
+}
+
+export function addFavoriteTrack({ trackId, artist, album, title }) {
+  return post('/api/favorites', { trackId, artist, album, title });
+}
+
+export function removeFavoriteTrack(trackId) {
+  return del(`/api/favorites/${trackId}`);
+}
+
+// ---------------------------------------------------------------------------
+// Session (per-user, server-side)
+// ---------------------------------------------------------------------------
+
+export function getUserSession() {
+  return get('/api/session');
+}
+
+export function saveUserSession({ queue, state }) {
+  return put('/api/session', { queue, state });
+}
+
+// ---------------------------------------------------------------------------
+// Settings (per-user)
+// ---------------------------------------------------------------------------
+
+export function getUserSettings() {
+  return get('/api/settings');
+}
+
+export function saveUserSettings(settings) {
+  return put('/api/settings', settings);
 }

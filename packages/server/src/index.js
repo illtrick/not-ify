@@ -5,6 +5,9 @@ const fs = require('fs');
 const crypto = require('crypto');
 
 const rd = require('./services/realdebrid');
+const db = require('./services/db');
+const { migrate } = require('./services/migrate');
+const userMiddleware = require('./middleware/user');
 const searchRouter = require('./api/search');
 const pipelineRouter = require('./api/pipeline');
 const libraryRouter = require('./api/library');
@@ -17,6 +20,9 @@ const COVERS_DIR = path.join(CONFIG_DIR, 'covers');
 
 app.use(cors());
 app.use(express.json());
+
+// User identification middleware — sets req.userId on every request
+app.use(userMiddleware);
 
 // Serve static client build
 app.use(express.static(path.join(__dirname, '../../client/dist')));
@@ -357,6 +363,70 @@ app.use('/api', lastfmRouter);
 const importRouter = require('./api/import');
 app.use('/api', importRouter);
 
+// --- Per-user API endpoints ---
+
+// GET /api/users — list available users (for user picker)
+app.get('/api/users', (req, res) => {
+  res.json(db.getUsers());
+});
+
+// Search history
+app.get('/api/search-history', (req, res) => {
+  res.json(db.getSearchHistory(req.userId));
+});
+app.post('/api/search-history', (req, res) => {
+  const { query } = req.body;
+  if (!query) return res.status(400).json({ error: 'Missing query' });
+  db.addSearchHistory(req.userId, query);
+  res.json(db.getSearchHistory(req.userId));
+});
+app.delete('/api/search-history', (req, res) => {
+  const { query } = req.body || {};
+  if (query) {
+    db.removeSearchHistory(req.userId, query);
+  } else {
+    db.clearSearchHistory(req.userId);
+  }
+  res.json(db.getSearchHistory(req.userId));
+});
+
+// Favorites
+app.get('/api/favorites', (req, res) => {
+  res.json(db.getFavorites(req.userId));
+});
+app.post('/api/favorites', (req, res) => {
+  const { trackId, artist, album, title } = req.body;
+  if (!trackId || !artist || !title) return res.status(400).json({ error: 'Missing required fields' });
+  db.addFavorite(req.userId, { trackId, artist, album: album || '', title });
+  res.json({ success: true });
+});
+app.delete('/api/favorites/:trackId', (req, res) => {
+  db.removeFavorite(req.userId, req.params.trackId);
+  res.json({ success: true });
+});
+
+// User session (server-side persistence)
+app.get('/api/session', (req, res) => {
+  res.json(db.getUserSession(req.userId));
+});
+app.put('/api/session', (req, res) => {
+  const { queue, state } = req.body;
+  db.saveUserSession(req.userId, { queue, state });
+  res.json({ success: true });
+});
+
+// User settings
+app.get('/api/settings', (req, res) => {
+  res.json(db.getAllUserSettings(req.userId));
+});
+app.put('/api/settings', (req, res) => {
+  const settings = req.body;
+  for (const [key, value] of Object.entries(settings)) {
+    db.setUserSetting(req.userId, key, value);
+  }
+  res.json({ success: true });
+});
+
 // SPA fallback — serve index.html for non-API routes
 app.get('*', (req, res) => {
   const indexPath = path.join(__dirname, '../../client/dist/index.html');
@@ -374,6 +444,8 @@ process.on('unhandledRejection', (reason) => {
 
 // Only bind to a port when run directly (not when required by tests)
 if (require.main === module) {
+  // Run migration before starting server
+  migrate();
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Not-ify server running on port ${PORT}`);
   });

@@ -2,6 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const db = require('../services/db');
 
 // Clean folder-derived names: decode HTML entities and strip torrent artifacts
 function cleanFolderName(s) {
@@ -20,27 +21,20 @@ function cleanFolderName(s) {
 
 const router = express.Router();
 const MUSIC_DIR = process.env.MUSIC_DIR || '/app/music';
-const CONFIG_DIR = process.env.CONFIG_DIR || '/app/config';
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.flac', '.ogg', '.m4a', '.aac', '.wav', '.opus']);
 
 // ---------------------------------------------------------------------------
-// Recently Played — server-side canonical store + SSE broadcast
+// Recently Played — per-user SSE broadcast via SQLite
 // ---------------------------------------------------------------------------
-const RP_PATH = path.join(CONFIG_DIR, 'recently-played.json');
-const MAX_RP = 50;
-const sseClients = new Set();
+// Map of userId -> Set<res> for per-user SSE
+const sseClients = new Map();
 
-function loadRecentlyPlayed() {
-  try { return JSON.parse(fs.readFileSync(RP_PATH, 'utf8')); } catch { return []; }
-}
-function saveRecentlyPlayed(list) {
-  fs.mkdirSync(path.dirname(RP_PATH), { recursive: true });
-  fs.writeFileSync(RP_PATH, JSON.stringify(list, null, 2));
-}
-function broadcastRecentlyPlayed(list) {
+function broadcastRecentlyPlayed(userId, list) {
+  const clients = sseClients.get(userId);
+  if (!clients || clients.size === 0) return;
   const msg = `data: ${JSON.stringify(list)}\n\n`;
-  for (const client of sseClients) {
-    try { client.write(msg); } catch { sseClients.delete(client); }
+  for (const client of clients) {
+    try { client.write(msg); } catch { clients.delete(client); }
   }
 }
 
@@ -289,49 +283,53 @@ router.delete('/library/track/:id', (req, res) => {
 // Recently Played endpoints
 // ---------------------------------------------------------------------------
 
-// SSE stream — keeps connection open, pushes updates to all connected clients
+// SSE stream — per-user, keeps connection open, pushes updates
 router.get('/recently-played/stream', (req, res) => {
+  const userId = req.userId;
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
   });
-  // Send current list immediately so client has data on connect
-  res.write(`data: ${JSON.stringify(loadRecentlyPlayed())}\n\n`);
-  sseClients.add(res);
-  console.log(`[recently-played] SSE client connected (${sseClients.size} total)`);
+  // Send current list immediately
+  res.write(`data: ${JSON.stringify(db.getRecentlyPlayed(userId))}\n\n`);
+  if (!sseClients.has(userId)) sseClients.set(userId, new Set());
+  sseClients.get(userId).add(res);
+  const totalClients = Array.from(sseClients.values()).reduce((sum, s) => sum + s.size, 0);
+  console.log(`[recently-played] SSE client connected for ${userId} (${totalClients} total)`);
   req.on('close', () => {
-    sseClients.delete(res);
-    console.log(`[recently-played] SSE client disconnected (${sseClients.size} remaining)`);
+    const clients = sseClients.get(userId);
+    if (clients) {
+      clients.delete(res);
+      if (clients.size === 0) sseClients.delete(userId);
+    }
+    const remaining = Array.from(sseClients.values()).reduce((sum, s) => sum + s.size, 0);
+    console.log(`[recently-played] SSE client disconnected (${remaining} remaining)`);
   });
 });
 
-// Simple GET fallback (used for initial migration check)
+// Simple GET fallback
 router.get('/recently-played', (req, res) => {
-  res.json(loadRecentlyPlayed());
+  res.json(db.getRecentlyPlayed(req.userId));
 });
 
 // POST — report a single play event
 router.post('/recently-played', express.json(), (req, res) => {
   const { artist, album, coverArt, mbid, rgid } = req.body;
   if (!artist || !album) return res.status(400).json({ error: 'Missing artist or album' });
-  const list = loadRecentlyPlayed();
-  const key = (artist + '::' + album).toLowerCase();
-  const filtered = list.filter(r => (r.artist + '::' + r.album).toLowerCase() !== key);
-  const next = [{ artist, album, coverArt: coverArt || null, mbid: mbid || null, rgid: rgid || null, playedAt: Date.now() }, ...filtered].slice(0, MAX_RP);
-  saveRecentlyPlayed(next);
-  broadcastRecentlyPlayed(next);
-  res.json(next);
+  const list = db.addRecentlyPlayed(req.userId, { artist, album, coverArt, mbid, rgid });
+  broadcastRecentlyPlayed(req.userId, list);
+  res.json(list);
 });
 
 // PUT — bulk replace (one-time migration from localStorage)
 router.put('/recently-played', express.json(), (req, res) => {
   const list = req.body;
   if (!Array.isArray(list)) return res.status(400).json({ error: 'Expected array' });
-  const cleaned = list.filter(r => r.artist && r.album).slice(0, MAX_RP);
-  saveRecentlyPlayed(cleaned);
-  broadcastRecentlyPlayed(cleaned);
-  res.json(cleaned);
+  const cleaned = list.filter(r => r.artist && r.album);
+  const result = db.bulkSetRecentlyPlayed(req.userId, cleaned);
+  broadcastRecentlyPlayed(req.userId, result);
+  res.json(result);
 });
 
 module.exports = router;

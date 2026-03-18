@@ -16,6 +16,7 @@ import { QueuePanel } from './components/QueuePanel';
 import { PlayerBar } from './components/PlayerBar';
 import { MobileLibrary } from './components/MobileLibrary';
 import { BottomTabBar } from './components/BottomTabBar';
+import { UserPicker, getCurrentUser, clearCurrentUser } from './components/UserPicker';
 import { useQueue } from './hooks/useQueue';
 import { useRecentlyPlayed } from './hooks/useRecentlyPlayed';
 import { useSearch } from './hooks/useSearch';
@@ -35,6 +36,23 @@ import { useArtistPage } from './hooks/useArtistPage';
 // Main App
 // ---------------------------------------------------------------------------
 function App() {
+  // User selection
+  const [currentUser, setCurrentUser] = useState(() => {
+    const saved = getCurrentUser();
+    if (saved) api.setUser(saved);
+    return saved;
+  });
+
+  function switchUser() {
+    clearCurrentUser();
+    api.setUser(null);
+    setCurrentUser(null);
+  }
+
+  // Show user picker if no user selected
+  if (!currentUser) {
+    return <UserPicker onUserSelected={(userId) => setCurrentUser(userId)} />;
+  }
   // Navigation (stays in App)
   const [view, setView] = useState('search');
   const [selectedAlbum, setSelectedAlbum] = useState(null);
@@ -457,6 +475,7 @@ function App() {
           <Sidebar
             view={view} setView={setView}
             showSettings={showSettings} setShowSettings={setShowSettings}
+            currentUser={currentUser} switchUser={switchUser}
             recentlyPlayed={recentlyPlayed}
             currentAlbumInfo={currentAlbumInfo}
             libraryAlbums={libraryAlbums}

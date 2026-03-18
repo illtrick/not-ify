@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "adm-zip": "^0.5.16",
+    "better-sqlite3": "^12.8.0",
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "node-unrar-js": "^2.0.2",

@@ -1,10 +1,6 @@
-const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
+const db = require('./db');
 
-const CONFIG_DIR = process.env.CONFIG_DIR || '/app/config';
-const CONFIG_PATH = path.join(CONFIG_DIR, 'settings.json');
-const QUEUE_PATH = path.join(CONFIG_DIR, 'lastfm-queue.json');
 const LFM_BASE = 'https://ws.audioscrobbler.com/2.0/';
 const LFM_AUTH_URL = 'https://www.last.fm/api/auth/';
 
@@ -14,33 +10,20 @@ let lastRequestTime = 0;
 // In-memory cache
 const cache = new Map();
 
-// Failed scrobble queue (persisted to disk)
-let scrobbleQueue = [];
-try {
-  if (fs.existsSync(QUEUE_PATH)) {
-    scrobbleQueue = JSON.parse(fs.readFileSync(QUEUE_PATH, 'utf8'));
+// Auto-flush every 5 minutes for all users with queued scrobbles
+setInterval(() => {
+  const users = db.getAllUsersWithScrobbleQueue();
+  for (const userId of users) {
+    flushScrobbleQueue(userId).catch(() => {});
   }
-} catch { scrobbleQueue = []; }
+}, 5 * 60 * 1000);
 
-function saveQueue() {
-  try { fs.writeFileSync(QUEUE_PATH, JSON.stringify(scrobbleQueue, null, 2)); } catch {}
+function getConfig(userId = 'default') {
+  return db.getLastfmConfig(userId);
 }
 
-// Auto-flush every 5 minutes
-setInterval(() => { if (scrobbleQueue.length > 0) flushScrobbleQueue().catch(() => {}); }, 5 * 60 * 1000);
-
-function getConfig() {
-  try {
-    const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
-    return config.lastfm || {};
-  } catch { return {}; }
-}
-
-function saveConfig(updates) {
-  let config = {};
-  try { config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8')); } catch {}
-  config.lastfm = { ...(config.lastfm || {}), ...updates };
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+function saveConfig(userId = 'default', updates) {
+  db.saveLastfmConfig(userId, updates);
 }
 
 function generateApiSig(params, secret) {
@@ -53,18 +36,17 @@ function generateApiSig(params, secret) {
   return crypto.createHash('md5').update(str, 'utf8').digest('hex');
 }
 
-async function lfmFetch(params, method = 'GET') {
+async function lfmFetch(params, method = 'GET', userId = 'default') {
   const now = Date.now();
   const wait = 200 - (now - lastRequestTime);
   if (wait > 0) await new Promise(r => setTimeout(r, wait));
   lastRequestTime = Date.now();
 
-  const cfg = getConfig();
+  const cfg = getConfig(userId);
   const allParams = { ...params, api_key: cfg.apiKey, format: 'json' };
 
   // Add signature if we have a secret
   if (cfg.apiSecret) {
-    // Exclude 'format' from signature
     const sigParams = { ...allParams };
     delete sigParams.format;
     allParams.api_sig = generateApiSig(sigParams, cfg.apiSecret);
@@ -107,18 +89,17 @@ function cached(key, ttlMs, fn) {
 
 // --- Auth ---
 
-async function getAuthToken() {
-  const cfg = getConfig();
+async function getAuthToken(userId = 'default') {
+  const cfg = getConfig(userId);
   if (!cfg.apiKey) throw new Error('Last.fm API key not configured');
-  const data = await lfmFetch({ method: 'auth.getToken' });
+  const data = await lfmFetch({ method: 'auth.getToken' }, 'GET', userId);
   const token = data.token;
   return { token, authUrl: `${LFM_AUTH_URL}?api_key=${cfg.apiKey}&token=${token}` };
 }
 
-async function getSession(token) {
-  const cfg = getConfig();
+async function getSession(token, userId = 'default') {
+  const cfg = getConfig(userId);
   if (!cfg.apiKey || !cfg.apiSecret) throw new Error('Last.fm API key/secret not configured');
-  // auth.getSession needs signed request
   const params = { method: 'auth.getSession', token, api_key: cfg.apiKey };
   params.api_sig = generateApiSig(params, cfg.apiSecret);
   params.format = 'json';
@@ -132,14 +113,14 @@ async function getSession(token) {
   if (data.error) throw new Error(`Last.fm auth error: ${data.message}`);
 
   const session = data.session;
-  saveConfig({ sessionKey: session.key, username: session.name });
+  saveConfig(userId, { sessionKey: session.key, username: session.name });
   return { name: session.name, key: session.key };
 }
 
 // --- Scrobbling ---
 
-async function updateNowPlaying({ artist, track, album, duration }) {
-  const cfg = getConfig();
+async function updateNowPlaying({ artist, track, album, duration }, userId = 'default') {
+  const cfg = getConfig(userId);
   if (!cfg.sessionKey) return;
 
   const params = { method: 'track.updateNowPlaying', artist, track, sk: cfg.sessionKey };
@@ -147,18 +128,17 @@ async function updateNowPlaying({ artist, track, album, duration }) {
   if (duration) params.duration = String(Math.round(duration));
 
   try {
-    await lfmFetch(params, 'POST');
-    console.log(`[lastfm] Now playing: ${artist} - ${track}`);
+    await lfmFetch(params, 'POST', userId);
+    console.log(`[lastfm] Now playing (${userId}): ${artist} - ${track}`);
   } catch (err) {
-    console.warn(`[lastfm] Now playing failed: ${err.message}`);
+    console.warn(`[lastfm] Now playing failed (${userId}): ${err.message}`);
   }
 }
 
-async function scrobble({ artist, track, album, timestamp, duration }) {
-  const cfg = getConfig();
+async function scrobble({ artist, track, album, timestamp, duration }, userId = 'default') {
+  const cfg = getConfig(userId);
   if (!cfg.sessionKey) {
-    scrobbleQueue.push({ artist, track, album, timestamp, duration });
-    saveQueue();
+    db.addToScrobbleQueue(userId, { artist, track, album, timestamp, duration });
     return;
   }
 
@@ -173,23 +153,22 @@ async function scrobble({ artist, track, album, timestamp, duration }) {
   if (duration) params['duration[0]'] = String(Math.round(duration));
 
   try {
-    await lfmFetch(params, 'POST');
-    console.log(`[lastfm] Scrobbled: ${artist} - ${track}`);
-    // Try flushing queue on success
-    if (scrobbleQueue.length > 0) flushScrobbleQueue().catch(() => {});
+    await lfmFetch(params, 'POST', userId);
+    console.log(`[lastfm] Scrobbled (${userId}): ${artist} - ${track}`);
+    if (db.getScrobbleQueue(userId).length > 0) flushScrobbleQueue(userId).catch(() => {});
   } catch (err) {
-    console.warn(`[lastfm] Scrobble failed, queued: ${err.message}`);
-    scrobbleQueue.push({ artist, track, album, timestamp, duration });
-    saveQueue();
+    console.warn(`[lastfm] Scrobble failed, queued (${userId}): ${err.message}`);
+    db.addToScrobbleQueue(userId, { artist, track, album, timestamp, duration });
   }
 }
 
-async function flushScrobbleQueue() {
-  if (scrobbleQueue.length === 0) return { flushed: 0 };
-  const cfg = getConfig();
+async function flushScrobbleQueue(userId = 'default') {
+  const queue = db.getScrobbleQueue(userId);
+  if (queue.length === 0) return { flushed: 0 };
+  const cfg = getConfig(userId);
   if (!cfg.sessionKey) return { flushed: 0 };
 
-  const batch = scrobbleQueue.splice(0, 50);
+  const batch = queue.slice(0, 50);
   const params = { method: 'track.scrobble', sk: cfg.sessionKey };
   batch.forEach((s, i) => {
     params[`artist[${i}]`] = s.artist;
@@ -200,15 +179,12 @@ async function flushScrobbleQueue() {
   });
 
   try {
-    await lfmFetch(params, 'POST');
-    console.log(`[lastfm] Flushed ${batch.length} queued scrobbles`);
-    saveQueue();
+    await lfmFetch(params, 'POST', userId);
+    console.log(`[lastfm] Flushed ${batch.length} queued scrobbles for ${userId}`);
+    db.removeFromScrobbleQueue(batch.map(s => s.id));
     return { flushed: batch.length };
   } catch (err) {
-    // Put them back
-    scrobbleQueue.unshift(...batch);
-    saveQueue();
-    console.warn(`[lastfm] Queue flush failed: ${err.message}`);
+    console.warn(`[lastfm] Queue flush failed (${userId}): ${err.message}`);
     return { flushed: 0 };
   }
 }
@@ -255,7 +231,7 @@ module.exports = {
   updateNowPlaying,
   scrobble,
   flushScrobbleQueue,
-  getScrobbleQueue: () => scrobbleQueue,
+  getScrobbleQueue: (userId = 'default') => db.getScrobbleQueue(userId),
   getRecentTracks,
   getTopArtists,
   getTopAlbums,

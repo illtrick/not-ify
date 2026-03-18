@@ -2,8 +2,11 @@
 # Not-ify Production Dockerfile — Multi-stage build
 # =============================================================================
 
-# Stage 1: Build client + install all deps
+# Stage 1: Build client + install all deps (including native modules like better-sqlite3)
 FROM node:20-slim AS build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/server/package.json packages/server/

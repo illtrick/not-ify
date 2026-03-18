@@ -1,0 +1,408 @@
+const Database = require('better-sqlite3');
+const path = require('path');
+
+const CONFIG_DIR = process.env.CONFIG_DIR || '/app/config';
+const DB_PATH = path.join(CONFIG_DIR, 'notify.db');
+
+let _db = null;
+
+function getDb() {
+  if (_db) return _db;
+
+  const fs = require('fs');
+  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+
+  _db = new Database(DB_PATH);
+  _db.pragma('journal_mode = WAL');
+  _db.pragma('foreign_keys = ON');
+
+  // Create tables
+  _db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL,
+      created_at INTEGER DEFAULT (unixepoch())
+    );
+
+    CREATE TABLE IF NOT EXISTS user_settings (
+      user_id TEXT NOT NULL REFERENCES users(id),
+      key TEXT NOT NULL,
+      value TEXT,
+      PRIMARY KEY (user_id, key)
+    );
+
+    CREATE TABLE IF NOT EXISTS lastfm_config (
+      user_id TEXT PRIMARY KEY REFERENCES users(id),
+      api_key TEXT,
+      api_secret TEXT,
+      session_key TEXT,
+      username TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS recently_played (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      artist TEXT NOT NULL,
+      album TEXT NOT NULL,
+      cover_art TEXT,
+      mbid TEXT,
+      rgid TEXT,
+      played_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS search_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      query TEXT NOT NULL,
+      searched_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS favorites (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      track_id TEXT NOT NULL,
+      artist TEXT NOT NULL,
+      album TEXT NOT NULL,
+      title TEXT NOT NULL,
+      added_at INTEGER NOT NULL,
+      UNIQUE(user_id, track_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS playlists (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      name TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS playlist_tracks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+      track_id TEXT NOT NULL,
+      artist TEXT NOT NULL,
+      album TEXT NOT NULL,
+      title TEXT NOT NULL,
+      position INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS user_session (
+      user_id TEXT PRIMARY KEY REFERENCES users(id),
+      queue TEXT NOT NULL DEFAULT '[]',
+      state TEXT NOT NULL DEFAULT '{}'
+    );
+
+    CREATE TABLE IF NOT EXISTS lastfm_scrobble_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      artist TEXT NOT NULL,
+      track TEXT NOT NULL,
+      album TEXT,
+      timestamp INTEGER NOT NULL,
+      duration INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS global_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
+  `);
+
+  // Create indexes
+  _db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_rp_user_time ON recently_played(user_id, played_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_sh_user_time ON search_history(user_id, searched_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_pt_playlist ON playlist_tracks(playlist_id, position);
+  `);
+
+  // Seed default users if they don't exist
+  const upsertUser = _db.prepare('INSERT OR IGNORE INTO users (id, display_name) VALUES (?, ?)');
+  upsertUser.run('default', 'Default');
+  upsertUser.run('nathan', 'Nathan');
+  upsertUser.run('sarah', 'Sarah');
+
+  return _db;
+}
+
+// --- Recently Played ---
+
+const MAX_RP = 50;
+
+function getRecentlyPlayed(userId) {
+  const db = getDb();
+  return db.prepare(
+    'SELECT artist, album, cover_art as coverArt, mbid, rgid, played_at as playedAt FROM recently_played WHERE user_id = ? ORDER BY played_at DESC LIMIT ?'
+  ).all(userId, MAX_RP);
+}
+
+function addRecentlyPlayed(userId, { artist, album, coverArt, mbid, rgid }) {
+  const db = getDb();
+  const now = Date.now();
+  // Remove existing entry for same album (dedup)
+  db.prepare(
+    'DELETE FROM recently_played WHERE user_id = ? AND LOWER(artist || \':\' || album) = LOWER(? || \':\' || ?)'
+  ).run(userId, artist, album);
+  // Insert new
+  db.prepare(
+    'INSERT INTO recently_played (user_id, artist, album, cover_art, mbid, rgid, played_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(userId, artist, album, coverArt || null, mbid || null, rgid || null, now);
+  // Trim to MAX_RP
+  db.prepare(
+    'DELETE FROM recently_played WHERE user_id = ? AND id NOT IN (SELECT id FROM recently_played WHERE user_id = ? ORDER BY played_at DESC LIMIT ?)'
+  ).run(userId, userId, MAX_RP);
+  return getRecentlyPlayed(userId);
+}
+
+function bulkSetRecentlyPlayed(userId, list) {
+  const db = getDb();
+  const del = db.prepare('DELETE FROM recently_played WHERE user_id = ?');
+  const ins = db.prepare(
+    'INSERT INTO recently_played (user_id, artist, album, cover_art, mbid, rgid, played_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  );
+  db.transaction(() => {
+    del.run(userId);
+    for (const r of list.slice(0, MAX_RP)) {
+      ins.run(userId, r.artist, r.album, r.coverArt || r.cover_art || null, r.mbid || null, r.rgid || null, r.playedAt || r.played_at || Date.now());
+    }
+  })();
+  return getRecentlyPlayed(userId);
+}
+
+// --- Last.fm Config ---
+
+function getLastfmConfig(userId) {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM lastfm_config WHERE user_id = ?').get(userId);
+  if (!row) return {};
+  return {
+    apiKey: row.api_key,
+    apiSecret: row.api_secret,
+    sessionKey: row.session_key,
+    username: row.username,
+  };
+}
+
+function saveLastfmConfig(userId, updates) {
+  const db = getDb();
+  const existing = getLastfmConfig(userId);
+  const merged = { ...existing, ...updates };
+  db.prepare(`
+    INSERT INTO lastfm_config (user_id, api_key, api_secret, session_key, username)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET
+      api_key = excluded.api_key,
+      api_secret = excluded.api_secret,
+      session_key = excluded.session_key,
+      username = excluded.username
+  `).run(userId, merged.apiKey || null, merged.apiSecret || null, merged.sessionKey || null, merged.username || null);
+}
+
+function clearLastfmConfig(userId) {
+  const db = getDb();
+  db.prepare('DELETE FROM lastfm_config WHERE user_id = ?').run(userId);
+}
+
+// --- Last.fm Scrobble Queue ---
+
+function getScrobbleQueue(userId) {
+  const db = getDb();
+  return db.prepare('SELECT * FROM lastfm_scrobble_queue WHERE user_id = ? ORDER BY timestamp').all(userId);
+}
+
+function addToScrobbleQueue(userId, { artist, track, album, timestamp, duration }) {
+  const db = getDb();
+  db.prepare(
+    'INSERT INTO lastfm_scrobble_queue (user_id, artist, track, album, timestamp, duration) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(userId, artist, track, album || null, timestamp, duration || null);
+}
+
+function removeFromScrobbleQueue(ids) {
+  if (!ids.length) return;
+  const db = getDb();
+  const placeholders = ids.map(() => '?').join(',');
+  db.prepare(`DELETE FROM lastfm_scrobble_queue WHERE id IN (${placeholders})`).run(...ids);
+}
+
+function getAllUsersWithScrobbleQueue() {
+  const db = getDb();
+  return db.prepare('SELECT DISTINCT user_id FROM lastfm_scrobble_queue').all().map(r => r.user_id);
+}
+
+// --- Global Settings ---
+
+function getGlobalSetting(key) {
+  const db = getDb();
+  const row = db.prepare('SELECT value FROM global_settings WHERE key = ?').get(key);
+  return row ? JSON.parse(row.value) : null;
+}
+
+function setGlobalSetting(key, value) {
+  const db = getDb();
+  db.prepare('INSERT OR REPLACE INTO global_settings (key, value) VALUES (?, ?)').run(key, JSON.stringify(value));
+}
+
+// --- User Settings ---
+
+function getUserSetting(userId, key) {
+  const db = getDb();
+  const row = db.prepare('SELECT value FROM user_settings WHERE user_id = ? AND key = ?').get(userId, key);
+  return row ? JSON.parse(row.value) : null;
+}
+
+function setUserSetting(userId, key, value) {
+  const db = getDb();
+  db.prepare('INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, ?, ?)').run(userId, key, JSON.stringify(value));
+}
+
+function getAllUserSettings(userId) {
+  const db = getDb();
+  const rows = db.prepare('SELECT key, value FROM user_settings WHERE user_id = ?').all(userId);
+  const settings = {};
+  for (const r of rows) {
+    settings[r.key] = JSON.parse(r.value);
+  }
+  return settings;
+}
+
+// --- Search History ---
+
+const MAX_SEARCH_HISTORY = 20;
+
+function getSearchHistory(userId) {
+  const db = getDb();
+  return db.prepare(
+    'SELECT query, searched_at as searchedAt FROM search_history WHERE user_id = ? ORDER BY searched_at DESC LIMIT ?'
+  ).all(userId, MAX_SEARCH_HISTORY);
+}
+
+function addSearchHistory(userId, query) {
+  const db = getDb();
+  // Remove duplicate
+  db.prepare('DELETE FROM search_history WHERE user_id = ? AND LOWER(query) = LOWER(?)').run(userId, query);
+  db.prepare('INSERT INTO search_history (user_id, query, searched_at) VALUES (?, ?, ?)').run(userId, query, Date.now());
+  // Trim
+  db.prepare(
+    'DELETE FROM search_history WHERE user_id = ? AND id NOT IN (SELECT id FROM search_history WHERE user_id = ? ORDER BY searched_at DESC LIMIT ?)'
+  ).run(userId, userId, MAX_SEARCH_HISTORY);
+}
+
+function removeSearchHistory(userId, query) {
+  const db = getDb();
+  db.prepare('DELETE FROM search_history WHERE user_id = ? AND query = ?').run(userId, query);
+}
+
+function clearSearchHistory(userId) {
+  const db = getDb();
+  db.prepare('DELETE FROM search_history WHERE user_id = ?').run(userId);
+}
+
+// --- Favorites ---
+
+function getFavorites(userId) {
+  const db = getDb();
+  return db.prepare(
+    'SELECT track_id as trackId, artist, album, title, added_at as addedAt FROM favorites WHERE user_id = ? ORDER BY added_at DESC'
+  ).all(userId);
+}
+
+function addFavorite(userId, { trackId, artist, album, title }) {
+  const db = getDb();
+  db.prepare(
+    'INSERT OR IGNORE INTO favorites (user_id, track_id, artist, album, title, added_at) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(userId, trackId, artist, album, title, Date.now());
+}
+
+function removeFavorite(userId, trackId) {
+  const db = getDb();
+  db.prepare('DELETE FROM favorites WHERE user_id = ? AND track_id = ?').run(userId, trackId);
+}
+
+function isFavorite(userId, trackId) {
+  const db = getDb();
+  return !!db.prepare('SELECT 1 FROM favorites WHERE user_id = ? AND track_id = ?').get(userId, trackId);
+}
+
+// --- User Session ---
+
+function getUserSession(userId) {
+  const db = getDb();
+  const row = db.prepare('SELECT queue, state FROM user_session WHERE user_id = ?').get(userId);
+  if (!row) return { queue: [], state: {} };
+  return {
+    queue: JSON.parse(row.queue),
+    state: JSON.parse(row.state),
+  };
+}
+
+function saveUserSession(userId, { queue, state }) {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO user_session (user_id, queue, state)
+    VALUES (?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET
+      queue = excluded.queue,
+      state = excluded.state
+  `).run(userId, JSON.stringify(queue || []), JSON.stringify(state || {}));
+}
+
+// --- Users ---
+
+function getUsers() {
+  const db = getDb();
+  return db.prepare("SELECT id, display_name as displayName FROM users WHERE id != 'default' ORDER BY display_name").all();
+}
+
+function isValidUser(userId) {
+  const db = getDb();
+  return !!db.prepare('SELECT 1 FROM users WHERE id = ?').get(userId);
+}
+
+// --- Cleanup ---
+
+function close() {
+  if (_db) {
+    _db.close();
+    _db = null;
+  }
+}
+
+module.exports = {
+  getDb,
+  close,
+  // Users
+  getUsers,
+  isValidUser,
+  // Recently played
+  getRecentlyPlayed,
+  addRecentlyPlayed,
+  bulkSetRecentlyPlayed,
+  // Last.fm config
+  getLastfmConfig,
+  saveLastfmConfig,
+  clearLastfmConfig,
+  // Last.fm scrobble queue
+  getScrobbleQueue,
+  addToScrobbleQueue,
+  removeFromScrobbleQueue,
+  getAllUsersWithScrobbleQueue,
+  // Global settings
+  getGlobalSetting,
+  setGlobalSetting,
+  // User settings
+  getUserSetting,
+  setUserSetting,
+  getAllUserSettings,
+  // Search history
+  getSearchHistory,
+  addSearchHistory,
+  removeSearchHistory,
+  clearSearchHistory,
+  // Favorites
+  getFavorites,
+  addFavorite,
+  removeFavorite,
+  isFavorite,
+  // Session
+  getUserSession,
+  saveUserSession,
+};
