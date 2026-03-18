@@ -53,6 +53,7 @@ function App() {
   // UI state (stays in App)
   const [contextMenu, setContextMenu] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [versionWarning, setVersionWarning] = useState(null);
 
   // Album page hooks
   const mainContentRef = useRef(null);
@@ -216,10 +217,20 @@ function App() {
 
   // ===== EFFECTS =====
 
-  // Initial load: library + Last.fm + URL param search
+  // Initial load: library + Last.fm + URL param search + version check
   useEffect(() => {
     loadLibrary();
     lastfm.load();
+
+    // Check API version compatibility
+    api.checkHealth().then(result => {
+      if (result.error) {
+        console.warn('Health check failed:', result.error);
+      } else if (!result.compatible) {
+        setVersionWarning(`Server API v${result.serverApiVersion} is not compatible with this client (expects v${result.clientApiVersion}). Please update your app.`);
+      }
+    });
+
     const urlParams = new URLSearchParams(window.location.search);
     const urlQuery = urlParams.get('q');
     if (urlQuery) {
@@ -431,6 +442,13 @@ function App() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: COLORS.bg, color: COLORS.textPrimary, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', overflow: 'hidden' }}>
+
+      {versionWarning && (
+        <div style={{ background: '#f59e0b', color: '#000', padding: '8px 16px', fontSize: 13, fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>{versionWarning}</span>
+          <button onClick={() => setVersionWarning(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>✕</button>
+        </div>
+      )}
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
 

@@ -9,12 +9,44 @@ const enc = encodeURIComponent;
 
 let _baseUrl = '';
 
-export function configure({ baseUrl }) {
+// The API version this client expects — bump when making breaking API changes
+const CLIENT_API_VERSION = 1;
+
+let _versionMismatchCallback = null;
+
+export function configure({ baseUrl, onVersionMismatch }) {
   _baseUrl = (baseUrl || '').replace(/\/$/, '');
+  if (onVersionMismatch) _versionMismatchCallback = onVersionMismatch;
 }
 
 export function getBaseUrl() {
   return _baseUrl;
+}
+
+/**
+ * Check server health and API version compatibility.
+ * Returns { compatible, serverVersion, serverApiVersion, clientApiVersion }
+ */
+export async function checkHealth() {
+  try {
+    const data = await get('/api/health');
+    const compatible = data.apiVersion === CLIENT_API_VERSION;
+    if (!compatible && _versionMismatchCallback) {
+      _versionMismatchCallback({
+        serverVersion: data.version,
+        serverApiVersion: data.apiVersion,
+        clientApiVersion: CLIENT_API_VERSION,
+      });
+    }
+    return {
+      compatible,
+      serverVersion: data.version,
+      serverApiVersion: data.apiVersion,
+      clientApiVersion: CLIENT_API_VERSION,
+    };
+  } catch (err) {
+    return { compatible: false, error: err.message };
+  }
 }
 
 export async function request(path, options = {}) {

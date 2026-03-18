@@ -1,0 +1,76 @@
+# =============================================================================
+# Not-ify — QNAP Deployment (Staging + Production + Watchtower)
+# =============================================================================
+# Deploy: docker compose up -d
+# Update prod version: edit .env, then docker compose up -d
+#
+# Staging (:3001) — auto-updates via Watchtower when CI pushes to "latest"
+# Production (:3000) — pinned to a version tag, only updates when you change .env
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Production — pinned to a specific version tag
+  # ---------------------------------------------------------------------------
+  not-ify-prod:
+    image: ghcr.io/illtrick/not-ify:${PROD_VERSION:-v0.1.0}
+    container_name: not-ify-prod
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./prod/music:/app/music
+      - ./prod/config:/app/config
+    environment:
+      - NODE_ENV=production
+      - CONFIG_DIR=/app/config
+      - MUSIC_DIR=/app/music
+      - LOG_LEVEL=warn
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ---------------------------------------------------------------------------
+  # Staging — always runs "latest" (every CI push to main)
+  # ---------------------------------------------------------------------------
+  not-ify-staging:
+    image: ghcr.io/illtrick/not-ify:latest
+    container_name: not-ify-staging
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./staging/music:/app/music
+      - ./staging/config:/app/config
+    environment:
+      - NODE_ENV=staging
+      - CONFIG_DIR=/app/config
+      - MUSIC_DIR=/app/music
+      - LOG_LEVEL=info
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  # ---------------------------------------------------------------------------
+  # Watchtower — auto-updates staging container when "latest" tag changes
+  # Only watches containers with the watchtower label (staging, not prod)
+  # ---------------------------------------------------------------------------
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /root/.docker/config.json:/config.json:ro
+    environment:
+      - WATCHTOWER_LABEL_ENABLE=true
+      - WATCHTOWER_POLL_INTERVAL=300
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_INCLUDE_STOPPED=false
+      - WATCHTOWER_NO_STARTUP_MESSAGE=false
+    restart: unless-stopped
