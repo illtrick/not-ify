@@ -1,7 +1,31 @@
 node_modules/
-client/dist/
+dist/
 music/
 config/settings.json
 config/lastfm-queue.json
+config/lastfm-config.json
+config/recently-played.json
 config/covers/
+config/llm-cache.json
 *.log
+
+# Tauri build artifacts
+packages/desktop/src-tauri/target/
+packages/desktop/src-tauri/gen/
+
+# Temp/scratch files
+tmp_*.json
+spot-check*.json
+spot-check*.js
+lastfm-data.json
+
+# Streaming history (personal data)
+Spotify Extended Streaming History/
+
+# Architecture docs (local only, not versioned)
+SYSTEM_DIAGRAM.html
+SYSTEM_DIAGRAM_VIEW.html
+
+# Claude local settings
+.claude/settings.local.json
+.claude/plan.md
