@@ -345,3 +345,5 @@ module.exports = router;
 
 // Expose pure functions for unit testing
 module.exports._test = { cleanFolderName, fileId, scanMusicDir, QUALITY_RANK };
+module.exports.getTrackMap = getTrackMap;
+module.exports.MIME_TYPES = MIME_TYPES;

@@ -363,6 +363,10 @@ app.use('/api', lastfmRouter);
 const importRouter = require('./api/import');
 app.use('/api', importRouter);
 
+// DLNA/UPnP casting
+const castRouter = require('./api/cast');
+app.use('/api', castRouter);
+
 // --- Per-user API endpoints ---
 
 // GET /api/users — list available users (for user picker)
@@ -446,6 +450,11 @@ process.on('unhandledRejection', (reason) => {
 if (require.main === module) {
   // Run migration before starting server
   migrate();
+  // Start DLNA device discovery (disabled in CI/test via DLNA_ENABLED=false)
+  if (process.env.DLNA_ENABLED !== 'false') {
+    const dlna = require('./services/dlna');
+    dlna.startDiscovery();
+  }
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Not-ify server running on port ${PORT}`);
   });
