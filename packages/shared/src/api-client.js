@@ -398,3 +398,52 @@ export function getUserSettings() {
 export function saveUserSettings(settings) {
   return put('/api/settings', settings);
 }
+
+// ---------------------------------------------------------------------------
+// Cast (DLNA/UPnP)
+// ---------------------------------------------------------------------------
+
+export function getCastDevices() {
+  return get('/api/cast/devices');
+}
+
+export function castPlay(body) {
+  return post('/api/cast/play', body);
+}
+
+export function castPlayYt(body) {
+  return post('/api/cast/play/yt', body);
+}
+
+export function castPause(deviceUsn) {
+  return post('/api/cast/pause', { deviceUsn });
+}
+
+export function castStop(deviceUsn) {
+  return post('/api/cast/stop', { deviceUsn });
+}
+
+export function castSeek(deviceUsn, position) {
+  return post('/api/cast/seek', { deviceUsn, position });
+}
+
+export function castVolume(deviceUsn, level) {
+  return post('/api/cast/volume', { deviceUsn, level });
+}
+
+export function castStatus(deviceUsn) {
+  return get(`/api/cast/status?deviceUsn=${enc(deviceUsn)}`);
+}
+
+export function castNext(deviceUsn) {
+  return post('/api/cast/next', { deviceUsn });
+}
+
+export function castPrev(deviceUsn) {
+  return post('/api/cast/prev', { deviceUsn });
+}
+
+export function castStatusStreamUrl(deviceUsn) {
+  const base = `${_baseUrl}/api/cast/status/stream?deviceUsn=${enc(deviceUsn)}`;
+  return _userId ? `${base}&userId=${enc(_userId)}` : base;
+}
