@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import * as api from '@not-ify/shared/api-client';
+import * as api from '@not-ify/shared';
 
 const STORAGE_KEY = 'notify-cast-device';
 const POLL_INTERVAL = 10000; // refresh device list every 10s
