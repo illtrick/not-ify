@@ -5,6 +5,7 @@ const path = require('path');
 const crypto = require('crypto');
 const router = express.Router();
 const yt = require('../services/youtube');
+const streamAuth = require('../services/stream-auth');
 
 const MUSIC_DIR = process.env.MUSIC_DIR || '/app/music';
 
@@ -318,9 +319,15 @@ router.post('/download/yt/album', async (req, res) => {
 });
 
 // Stream audio proxy
+// Accepts either normal authenticated requests or HMAC-signed URLs (for DLNA devices)
 router.get('/yt/stream/:videoId', async (req, res) => {
   const { videoId } = req.params;
-  console.log(`[YT stream] Request for ${videoId}, range: ${req.headers.range || 'none'}`);
+  const { sig, exp } = req.query;
+  if (sig && exp) {
+    if (!streamAuth.verifySignature(videoId, sig, exp)) {
+      return res.status(403).json({ error: 'Invalid or expired signature' });
+    }
+  }
   if (!/^[a-zA-Z0-9_-]{11}$/.test(videoId)) return res.status(400).end();
 
   try {

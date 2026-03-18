@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const db = require('../services/db');
+const streamAuth = require('../services/stream-auth');
 
 // Clean folder-derived names: decode HTML entities and strip torrent artifacts
 function cleanFolderName(s) {
@@ -133,7 +134,15 @@ router.get('/library', (req, res) => {
 });
 
 // GET /api/stream/:id — serve audio with range request support
+// Accepts either normal authenticated requests or HMAC-signed URLs (for DLNA devices)
 router.get('/stream/:id', (req, res) => {
+  const { sig, exp } = req.query;
+  if (sig && exp) {
+    if (!streamAuth.verifySignature(req.params.id, sig, exp)) {
+      return res.status(403).json({ error: 'Invalid or expired signature' });
+    }
+  }
+
   const { map } = getTrackMap();
   const filePath = map[req.params.id];
 

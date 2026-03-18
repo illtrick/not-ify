@@ -12,7 +12,7 @@ const request = require('supertest');
 const app = require('../../src/index');
 
 const { searchMusic } = require('../../src/services/search');
-const { searchReleases, searchArtists, browseArtistReleases, getReleaseTracks, getReleaseGroupTracks } = require('../../src/services/musicbrainz');
+const { searchReleases, searchArtists, browseArtistReleases, getReleaseTracks, getReleaseGroupTracks, normalizeQuery, getArtistDetails } = require('../../src/services/musicbrainz');
 const { searchYouTube, searchSoundCloud } = require('../../src/services/youtube');
 const llm = require('../../src/services/llm');
 
@@ -65,6 +65,8 @@ beforeEach(() => {
   searchSoundCloud.mockResolvedValue([]);
   llm.getCachedParse.mockReturnValue(null);
   llm.parseTorrentNamesAsync.mockImplementation(() => {});
+  normalizeQuery.mockImplementation(q => q);
+  getArtistDetails.mockResolvedValue(null);
 });
 
 // ---------------------------------------------------------------------------
@@ -210,7 +212,7 @@ describe('GET /api/search — streaming fallback', () => {
   });
 
   test('mbAlbums populated when no torrent results', async () => {
-    const res = await request(app).get('/api/search?q=something+obscure');
+    const res = await request(app).get('/api/search?q=pink+floyd');
     expect(res.body.mbAlbums.length).toBeGreaterThan(0);
     expect(res.body.mbAlbums[0]).toHaveProperty('artist', 'Pink Floyd');
   });
