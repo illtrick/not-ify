@@ -73,6 +73,7 @@ function App() {
   const [contextMenu, setContextMenu] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [versionWarning, setVersionWarning] = useState(null);
+  const [serverVersion, setServerVersion] = useState(null);
 
   // Album page hooks
   const mainContentRef = useRef(null);
@@ -258,7 +259,9 @@ function App() {
     api.checkHealth().then(result => {
       if (result.error) {
         console.warn('Health check failed:', result.error);
-      } else if (!result.compatible) {
+      }
+      if (result.serverVersion) setServerVersion(result.serverVersion);
+      if (!result.error && !result.compatible) {
         setVersionWarning(`Server API v${result.serverApiVersion} is not compatible with this client (expects v${result.clientApiVersion}). Please update your app.`);
       }
     });
@@ -490,6 +493,7 @@ function App() {
             view={view} setView={setView}
             showSettings={showSettings} setShowSettings={setShowSettings}
             currentUser={currentUser} switchUser={switchUser}
+            serverVersion={serverVersion}
             recentlyPlayed={recentlyPlayed}
             currentAlbumInfo={currentAlbumInfo}
             libraryAlbums={libraryAlbums}

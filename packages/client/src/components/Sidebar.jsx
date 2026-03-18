@@ -10,7 +10,7 @@ import { DownloadIndicator } from './DownloadIndicator';
 export function Sidebar({
   view, setView,
   showSettings, setShowSettings,
-  currentUser, switchUser,
+  currentUser, switchUser, serverVersion,
   recentlyPlayed,
   currentAlbumInfo,
   libraryAlbums,
@@ -40,7 +40,10 @@ export function Sidebar({
       {/* Top nav */}
       <div style={{ padding: '16px 12px 8px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <div style={{ fontSize: 22, fontWeight: 800, color: COLORS.accent, letterSpacing: '-0.5px' }}>Not-ify</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+            <span style={{ fontSize: 22, fontWeight: 800, color: COLORS.accent, letterSpacing: '-0.5px' }}>Not-ify</span>
+            {serverVersion && <span style={{ fontSize: 10, fontWeight: 500, color: COLORS.textSecondary, opacity: 0.5 }}>v{serverVersion}</span>}
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             {currentUser && (
               <button onClick={switchUser} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 8px', borderRadius: 12, fontSize: 11, color: COLORS.textSecondary, opacity: 0.7, display: 'flex', alignItems: 'center', gap: 4 }}
