@@ -1,7 +1,7 @@
-const API_VERSION = 1;
-const API_PREFIX = '/api';
+export const API_VERSION = 1;
+export const API_PREFIX = '/api';
 
-const ROUTES = {
+export const ROUTES = {
   HEALTH: `${API_PREFIX}/health`,
   SEARCH: `${API_PREFIX}/search`,
   LIBRARY: `${API_PREFIX}/library`,
@@ -16,5 +16,3 @@ const ROUTES = {
   IMPORT: `${API_PREFIX}/import`,
   ARTIST: `${API_PREFIX}/artist`,
 };
-
-module.exports = { API_VERSION, API_PREFIX, ROUTES };
