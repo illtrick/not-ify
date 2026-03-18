@@ -6,6 +6,10 @@
 #
 # Staging (:3001) — auto-updates via Watchtower when CI pushes to "latest"
 # Production (:3000) — pinned to a version tag, only updates when you change .env
+#
+# Both services use network_mode: host so that the production instance can
+# discover DLNA/UPnP renderers (Sonos, WiiM) via SSDP multicast.
+# DLNA is only enabled on prod — staging has it disabled to avoid SSDP conflicts.
 # =============================================================================
 
 services:
@@ -15,16 +19,17 @@ services:
   not-ify-prod:
     image: ghcr.io/illtrick/not-ify:${PROD_VERSION:-v0.1.0}
     container_name: not-ify-prod
-    ports:
-      - "3000:3000"
+    network_mode: host
     volumes:
       - ./prod/music:/app/music
       - ./prod/config:/app/config
     environment:
       - NODE_ENV=production
+      - PORT=3000
       - CONFIG_DIR=/app/config
       - MUSIC_DIR=/app/music
       - LOG_LEVEL=warn
+      - DLNA_ENABLED=true
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
@@ -38,19 +43,20 @@ services:
   not-ify-staging:
     image: ghcr.io/illtrick/not-ify:latest
     container_name: not-ify-staging
-    ports:
-      - "3001:3000"
+    network_mode: host
     volumes:
       - ./staging/music:/app/music
       - ./staging/config:/app/config
     environment:
       - NODE_ENV=staging
+      - PORT=3001
       - CONFIG_DIR=/app/config
       - MUSIC_DIR=/app/music
       - LOG_LEVEL=info
+      - DLNA_ENABLED=false
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3

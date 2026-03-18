@@ -1,0 +1,15 @@
+# =============================================================================
+# DLNA override — enables host networking for SSDP multicast discovery
+#
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dlna.yml up -d
+#
+# Required for Sonos / WiiM casting. NOT needed for browser or Tauri playback.
+# SSDP requires UDP multicast (239.255.255.250:1900) — only works with host mode.
+# =============================================================================
+
+services:
+  not-ify:
+    network_mode: host
+    ports: []  # port mapping is ignored in host mode; container binds directly to HOST:PORT
+    environment:
+      - DLNA_ENABLED=true
