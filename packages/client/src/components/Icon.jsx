@@ -113,6 +113,21 @@ export const Icon = {
       <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
     </svg>
   ),
+  cast: (size = 16, color = 'currentColor') => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+      <path d="M2 8.5A6.5 6.5 0 018.5 2" /><path d="M2 12.5A10.5 10.5 0 0112.5 2" />
+      <path d="M2 16.5A14.5 14.5 0 0116.5 2" />
+      <rect x="2" y="18" width="4" height="4" rx="1" fill={color} stroke="none" />
+    </svg>
+  ),
+  castConnected: (size = 16, color = 'currentColor') => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={{ display: 'block' }}>
+      <path d="M2 8.5A6.5 6.5 0 018.5 2" stroke={color} strokeWidth="2" strokeLinecap="round" fill="none" />
+      <path d="M2 12.5A10.5 10.5 0 0112.5 2" stroke={color} strokeWidth="2" strokeLinecap="round" fill="none" />
+      <path d="M2 16.5A14.5 14.5 0 0116.5 2" stroke={color} strokeWidth="2" strokeLinecap="round" fill="none" />
+      <rect x="2" y="18" width="4" height="4" rx="1" />
+    </svg>
+  ),
 };
 
 export default Icon;

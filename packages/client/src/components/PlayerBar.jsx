@@ -3,6 +3,7 @@ import { COLORS } from '../constants';
 import { formatTime } from '../utils';
 import { Icon } from './Icon';
 import { AlbumArt } from './AlbumArt';
+import { CastButton } from './CastButton';
 
 export function PlayerBar({
   currentTrack, currentAlbumInfo, currentCoverArt,
@@ -15,6 +16,8 @@ export function PlayerBar({
   togglePlay, playNext, playPrev,
   handleSeekClick,
   library,
+  // Cast props (optional — casting feature)
+  cast,
 }) {
   const has = !!currentTrack;
   const pct = duration ? (progress / duration) * 100 : 0;
@@ -160,7 +163,23 @@ export function PlayerBar({
             }}>{queue.length}</span>
           )}
         </button>
+        {cast && (
+          <CastButton
+            devices={cast.devices}
+            activeDevice={cast.activeDevice}
+            isCasting={cast.isCasting}
+            showDevicePicker={cast.showDevicePicker}
+            setShowDevicePicker={cast.setShowDevicePicker}
+            selectDevice={cast.selectDevice}
+            castStop={cast.castStop}
+          />
+        )}
       </div>}
+      {cast?.isCasting && (
+        <div style={{ position: 'absolute', bottom: -18, left: '50%', transform: 'translateX(-50%)', fontSize: 11, color: COLORS.accent, whiteSpace: 'nowrap' }}>
+          Casting to {cast.devices.find(d => d.usn === cast.activeDevice)?.friendlyName || 'device'}
+        </div>
+      )}
     </footer>
   );
 }

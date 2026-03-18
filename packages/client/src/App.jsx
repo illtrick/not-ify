@@ -30,6 +30,7 @@ import { useAlbumColor } from './hooks/useAlbumColor';
 import { useMoreByArtist } from './hooks/useMoreByArtist';
 import { useTrackDurations } from './hooks/useTrackDurations';
 import { useArtistPage } from './hooks/useArtistPage';
+import { useCast } from './hooks/useCast';
 
 
 // ---------------------------------------------------------------------------
@@ -192,6 +193,7 @@ function App() {
   const albumColor = useAlbumColor(selectedAlbum);
   const moreByArtist = useMoreByArtist(selectedAlbum, view, searchArtistResults);
   const { trackDurations, setTrackDurations } = useTrackDurations(selectedAlbum);
+  const cast = useCast();
 
   // Bridge function: uses library + download state
   function getTrackDlStatus(artist, trackTitle, trackArtist) {
@@ -637,6 +639,7 @@ function App() {
         togglePlay={togglePlay} playNext={playNext} playPrev={playPrev}
         handleSeekClick={handleSeekClick}
         library={library}
+        cast={cast}
       />
       <BottomTabBar isMobile={isMobile} mobileTab={mobileTab} setMobileTab={setMobileTab} view={view} setView={setView} />
       <ContextMenu contextMenu={contextMenu} setContextMenu={setContextMenu} isMobile={isMobile} />
