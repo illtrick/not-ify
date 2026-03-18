@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
 
 jobs:
@@ -52,7 +53,7 @@ jobs:
 
   push-image:
     needs: build-and-e2e
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -67,6 +68,11 @@ jobs:
       - name: Build and push
         run: |
           IMAGE=ghcr.io/${{ github.repository }}
-          docker build -f docker/Dockerfile -t $IMAGE:latest -t $IMAGE:${{ github.sha }} .
-          docker push $IMAGE:latest
-          docker push $IMAGE:${{ github.sha }}
+          TAGS="-t $IMAGE:latest -t $IMAGE:${{ github.sha }}"
+          # Add semver tag if this is a version tag push
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+            TAGS="$TAGS -t $IMAGE:${VERSION}"
+          fi
+          docker build -f docker/Dockerfile $TAGS .
+          docker push $IMAGE --all-tags
