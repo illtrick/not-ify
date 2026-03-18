@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import * as api from '@not-ify/shared';
 import { COLORS } from '../constants';
 import { formatTime, contextMenuProps, trackRowStyle } from '../utils';
@@ -11,8 +11,7 @@ export function AlbumView({
   selectedAlbum,
   mbTracks,
   albumColor,
-  showStickyHeader,
-  albumHeaderRef,
+  mainContentRef,
   moreByArtist,
   trackDurations,
   isMobile,
@@ -40,6 +39,20 @@ export function AlbumView({
   removeTrackFromLibrary,
   getTrackDlStatus,
 }) {
+  const albumHeaderRef = useRef(null);
+  const [showStickyHeader, setShowStickyHeader] = useState(false);
+
+  useEffect(() => {
+    setShowStickyHeader(false);
+    if (!albumHeaderRef.current || !mainContentRef?.current) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setShowStickyHeader(!entry.isIntersecting),
+      { root: mainContentRef.current, threshold: 0 }
+    );
+    observer.observe(albumHeaderRef.current);
+    return () => observer.disconnect();
+  }, [selectedAlbum, mainContentRef]);
+
   if (!selectedAlbum) return null;
   const { artist, album, year, coverArt, tracks, sources, fromSearch, trackCount } = selectedAlbum;
 

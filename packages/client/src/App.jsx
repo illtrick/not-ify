@@ -1,17 +1,9 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import * as api from '@not-ify/shared';
-import { COLORS, SESSION_KEY, SEARCH_HISTORY_KEY, RECENTLY_PLAYED_KEY, MAX_SEARCH_HISTORY, MAX_RECENTLY_PLAYED } from './constants';
-import { formatTime, buildTrackPath, contextMenuProps, debounce, trackRowStyle, hashColor } from './utils';
+import { COLORS } from './constants';
+import { buildTrackPath, contextMenuProps } from './utils';
 import { Icon } from './components/Icon';
 import { AlbumArt } from './components/AlbumArt';
-import { SkeletonCard } from './components/SkeletonCard';
-import { TopResultCard } from './components/TopResultCard';
-import { ArtistPill } from './components/ArtistPill';
-import { AlbumCard } from './components/AlbumCard';
-import { SectionHeader } from './components/SectionHeader';
-import { StreamingTopResult } from './components/StreamingTopResult';
-import { StreamingSongRow } from './components/StreamingSongRow';
-import { TrackStatusIcon } from './components/TrackStatusIcon';
 import { SearchView } from './components/SearchView';
 import { AlbumView } from './components/AlbumView';
 import { ArtistView } from './components/ArtistView';
@@ -31,6 +23,10 @@ import { useLibrary } from './hooks/useLibrary';
 import { usePlayer } from './hooks/usePlayer';
 import { useDownload } from './hooks/useDownload';
 import { useSession } from './hooks/useSession';
+import { useMbTracks } from './hooks/useMbTracks';
+import { useAlbumColor } from './hooks/useAlbumColor';
+import { useMoreByArtist } from './hooks/useMoreByArtist';
+import { useTrackDurations } from './hooks/useTrackDurations';
 
 
 // ---------------------------------------------------------------------------
@@ -56,14 +52,8 @@ function App() {
   const [contextMenu, setContextMenu] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
 
-  // Album page state (stays in App)
-  const [mbTracks, setMbTracks] = useState([]);
-  const [albumColor, setAlbumColor] = useState(null);
-  const albumHeaderRef = useRef(null);
+  // Album page hooks
   const mainContentRef = useRef(null);
-  const [showStickyHeader, setShowStickyHeader] = useState(false);
-  const [moreByArtist, setMoreByArtist] = useState([]);
-  const [trackDurations, setTrackDurations] = useState({});
 
   // Artist page state (stays in App)
   const [selectedArtist, setSelectedArtist] = useState(null);
@@ -85,7 +75,7 @@ function App() {
 
   const lastfm = useLastFm();
   const {
-    status: lastfmStatus, setStatus: setLastfmStatus,
+    status: lastfmStatus,
     apiKey: lastfmApiKey, setApiKey: setLastfmApiKey,
     apiSecret: lastfmApiSecret, setApiSecret: setLastfmApiSecret,
     authStep: lastfmAuthStep, setAuthStep: setLastfmAuthStep,
@@ -93,8 +83,6 @@ function App() {
     authToken: lastfmAuthToken,
     error: lastfmError,
     topArtists: lastfmTopArtists,
-    statusRef: lastfmStatusRef,
-    scrobbleRef,
   } = lastfm;
   // Aliases so render functions stay unchanged
   const lastfmSaveConfig = lastfm.saveConfig;
@@ -111,7 +99,6 @@ function App() {
     otherResults,
     searchHistory,
     handleSearch,
-    addToSearchHistory,
     removeFromSearchHistory,
   } = useSearch({ setView });
 
@@ -122,7 +109,6 @@ function App() {
     showLibraryFilter, setShowLibraryFilter,
     loadLibrary,
     libraryAlbums,
-    libraryKeys,
     isInLibrary,
     sidebarAlbums,
   } = useLibrary({ recentlyPlayed });
@@ -141,10 +127,10 @@ function App() {
   const {
     currentTrack, setCurrentTrack,
     currentAlbumInfo, setCurrentAlbumInfo,
-    isPlaying, setIsPlaying,
+    isPlaying,
     volume, setVolume,
-    progress, setProgress,
-    duration, setDuration,
+    progress,
+    duration,
     playlist, setPlaylist,
     playlistIdx, setPlaylistIdx,
     currentCoverArt, setCurrentCoverArt,
@@ -154,11 +140,8 @@ function App() {
     hoveredTrack, setHoveredTrack,
     hoveredMbTrack, setHoveredMbTrack,
     audioRef, nextAudioRef,
-    recentlyPlayedAddedRef,
     playTrack, togglePlay, playNext, playPrev,
     handleSeekClick,
-    cancelCrossfade,
-    peekNextTrack,
     playFromYouTube,
     playStreamingResult,
     audioHandlers,
@@ -170,7 +153,7 @@ function App() {
     library,
   });
   const {
-    downloading, setDownloading,
+    downloading,
     downloadStatus, setDownloadStatus,
     dlExpanded, setDlExpanded,
     bgDownloadStatus, setBgDownloadStatus,
@@ -183,6 +166,12 @@ function App() {
     handleCancel,
     handleYtCancel,
   } = download;
+
+  // Album page hooks
+  const mbTracks = useMbTracks(selectedAlbum, setSelectedAlbum);
+  const albumColor = useAlbumColor(selectedAlbum);
+  const moreByArtist = useMoreByArtist(selectedAlbum, view, searchArtistResults);
+  const { trackDurations, setTrackDurations } = useTrackDurations(selectedAlbum);
 
   // Bridge function: uses library + download state
   function getTrackDlStatus(artist, trackTitle, trackArtist) {
@@ -237,129 +226,6 @@ function App() {
       setTimeout(() => handleSearch(null, urlQuery), 0);
     }
   }, []);
-
-  // MB track listing for album detail
-  useEffect(() => {
-    if (selectedAlbum?.fromSearch && (selectedAlbum?.mbid || selectedAlbum?.rgid)) {
-      setMbTracks([]);
-      if (selectedAlbum.mbid) {
-        api.getMbReleaseTracks(selectedAlbum.mbid)
-          .then(d => setMbTracks(d.tracks || []))
-          .catch(() => {});
-      } else if (selectedAlbum.rgid) {
-        api.getMbRgTracks(selectedAlbum.rgid)
-          .then(d => {
-            setMbTracks(d.tracks || []);
-            if (d.releaseMbid && !selectedAlbum.mbid) {
-              setSelectedAlbum(prev => prev ? { ...prev, mbid: d.releaseMbid } : prev);
-            }
-          })
-          .catch(() => {});
-      }
-    } else {
-      setMbTracks([]);
-    }
-  }, [selectedAlbum?.mbid, selectedAlbum?.rgid, selectedAlbum?.fromSearch]);
-
-  // "More by Artist" for album page
-  useEffect(() => {
-    setMoreByArtist([]);
-    if (!selectedAlbum?.artist || view !== 'album') return;
-    const artistName = selectedAlbum.artist;
-    const currentAlbumTitle = selectedAlbum.album;
-    const cached = searchArtistResults.find(a => a.name.toLowerCase() === artistName.toLowerCase());
-    const fetchArtist = cached?.mbid
-      ? Promise.resolve(cached.mbid)
-      : api.search(artistName)
-          .then(d => {
-            const match = d.artists?.find(a => a.name.toLowerCase() === artistName.toLowerCase());
-            return match?.mbid || null;
-          })
-          .catch(() => null);
-    fetchArtist.then(artistMbid => {
-      if (!artistMbid) return;
-      api.getArtist(artistMbid, artistName)
-        .then(d => {
-          const other = (d.releases || [])
-            .filter(r => r.album.toLowerCase() !== currentAlbumTitle.toLowerCase())
-            .slice(0, 6);
-          setMoreByArtist(other);
-        })
-        .catch(() => {});
-    });
-  }, [selectedAlbum?.artist, selectedAlbum?.album, view]);
-
-  // Load track durations sequentially for library album view
-  useEffect(() => {
-    if (!selectedAlbum || selectedAlbum.fromSearch) return;
-    const tracks = selectedAlbum.tracks || [];
-    if (!tracks.length) return;
-    let cancelled = false;
-    let activeAudio = null;
-    const seen = new Set();
-    const loadNext = (idx) => {
-      if (cancelled || idx >= tracks.length) return;
-      const track = tracks[idx];
-      const id = track.id;
-      if (!id || seen.has(id)) { loadNext(idx + 1); return; }
-      seen.add(id);
-      const audio = new Audio();
-      activeAudio = audio;
-      audio.preload = 'metadata';
-      audio.onloadedmetadata = () => {
-        const dur = audio.duration;
-        audio.onloadedmetadata = null;
-        audio.onerror = null;
-        audio.src = '';
-        activeAudio = null;
-        if (!cancelled && dur && isFinite(dur)) {
-          setTrackDurations(prev => prev[id] !== undefined ? prev : { ...prev, [id]: dur });
-        }
-        setTimeout(() => loadNext(idx + 1), 60);
-      };
-      audio.onerror = () => {
-        audio.onloadedmetadata = null;
-        audio.onerror = null;
-        audio.src = '';
-        activeAudio = null;
-        setTimeout(() => loadNext(idx + 1), 60);
-      };
-      audio.src = track.path || buildTrackPath(id);
-    };
-    loadNext(0);
-    return () => {
-      cancelled = true;
-      if (activeAudio) {
-        activeAudio.onloadedmetadata = null;
-        activeAudio.onerror = null;
-        activeAudio.src = '';
-        activeAudio = null;
-      }
-    };
-  }, [selectedAlbum]);
-
-  // Album header gradient color
-  useEffect(() => {
-    setAlbumColor(null);
-    setShowStickyHeader(false);
-    if (!selectedAlbum?.coverArt) return;
-    const url = selectedAlbum.coverArt.replace('/api/cover/', '/api/cover/') + '/color';
-    api.getCoverColor(url).then(d => { if (d.color) setAlbumColor(d.color); }).catch(() => {});
-  }, [selectedAlbum]);
-
-  // Sticky album header via IntersectionObserver
-  useEffect(() => {
-    if (view !== 'album' || !albumHeaderRef.current || !mainContentRef.current) {
-      setShowStickyHeader(false);
-      return;
-    }
-    const observer = new IntersectionObserver(
-      ([entry]) => setShowStickyHeader(!entry.isIntersecting),
-      { root: mainContentRef.current, threshold: 0 }
-    );
-    observer.observe(albumHeaderRef.current);
-    return () => observer.disconnect();
-  }, [view, selectedAlbum]);
 
   // -------------------------------------------------------------------------
   // Artist page
@@ -796,8 +662,7 @@ function App() {
                     selectedAlbum={selectedAlbum}
                     mbTracks={mbTracks}
                     albumColor={albumColor}
-                    showStickyHeader={showStickyHeader}
-                    albumHeaderRef={albumHeaderRef}
+                    mainContentRef={mainContentRef}
                     moreByArtist={moreByArtist}
                     trackDurations={trackDurations}
                     isMobile={isMobile}
