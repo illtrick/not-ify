@@ -1,6 +1,6 @@
 [package]
 name = "not-ify"
-version = "0.1.0"
+version = "1.1.1"
 description = "Not-ify Desktop"
 authors = []
 edition = "2021"
