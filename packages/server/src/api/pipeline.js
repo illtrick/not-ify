@@ -1,6 +1,7 @@
 const express = require('express');
 const rd = require('../services/realdebrid');
 const { parseArtistAlbum, sanitizePath, isAudioFile, isArchive, extractArchive, downloadFile } = require('../services/downloader');
+const { validateFile } = require('../services/file-validator');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -194,16 +195,26 @@ router.post('/download', async (req, res) => {
 
           checkCancelled();
           const extractedAudio = await extractArchive(archivePath, destDir);
-          downloadedFiles.push(...extractedAudio);
+          const validatedAudio = [];
+          for (const audioPath of extractedAudio) {
+            const validation = await validateFile(audioPath);
+            if (!validation.passed) {
+              console.warn('[pipeline] Extracted file failed validation, deleting:', audioPath, validation.checks);
+              try { fs.unlinkSync(audioPath); } catch (e) { /* ignore */ }
+            } else {
+              validatedAudio.push(audioPath);
+            }
+          }
+          downloadedFiles.push(...validatedAudio);
 
           send('file', {
             step: 4,
-            message: `Extracted ${extractedAudio.length} audio file(s) from ${filename}`,
+            message: `Extracted ${validatedAudio.length} audio file(s) from ${filename}`,
             fileIndex: i + 1,
             fileTotal: totalLinks,
             filename,
             done: true,
-            trackId: extractedAudio.length > 0 ? fileId(extractedAudio[0]) : null,
+            trackId: validatedAudio.length > 0 ? fileId(validatedAudio[0]) : null,
           });
         } else if (isAudioFile(filename)) {
           // Direct audio file
@@ -219,6 +230,22 @@ router.post('/download', async (req, res) => {
           checkCancelled();
           const destPath = path.join(destDir, sanitizePath(filename));
           await downloadFile(unrestricted.download, destPath);
+
+          const validation = await validateFile(destPath);
+          if (!validation.passed) {
+            console.warn('[pipeline] File failed validation, deleting:', destPath, validation.checks);
+            try { fs.unlinkSync(destPath); } catch (e) { /* ignore */ }
+            send('file', {
+              step: 4,
+              message: `Skipped (failed validation): ${filename}`,
+              fileIndex: i + 1,
+              fileTotal: totalLinks,
+              filename,
+              done: true,
+            });
+            continue;
+          }
+
           downloadedFiles.push(destPath);
 
           send('file', {
@@ -354,11 +381,25 @@ router.post('/download/background', async (req, res) => {
           const archivePath = path.join(destDir, sanitizePath(filename));
           await downloadFile(unrestricted.download, archivePath);
           const extracted = await extractArchive(archivePath, destDir);
-          downloadedFiles.push(...extracted);
+          for (const audioPath of extracted) {
+            const validation = await validateFile(audioPath);
+            if (!validation.passed) {
+              console.warn('[bg-pipeline] Extracted file failed validation, deleting:', audioPath, validation.checks);
+              try { fs.unlinkSync(audioPath); } catch (e) { /* ignore */ }
+            } else {
+              downloadedFiles.push(audioPath);
+            }
+          }
         } else if (isAudioFile(filename)) {
           const destPath = path.join(destDir, sanitizePath(filename));
           await downloadFile(unrestricted.download, destPath);
-          downloadedFiles.push(destPath);
+          const validation = await validateFile(destPath);
+          if (!validation.passed) {
+            console.warn('[bg-pipeline] File failed validation, deleting:', destPath, validation.checks);
+            try { fs.unlinkSync(destPath); } catch (e) { /* ignore */ }
+          } else {
+            downloadedFiles.push(destPath);
+          }
         }
       }
 

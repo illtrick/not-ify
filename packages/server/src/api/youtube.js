@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const router = express.Router();
 const yt = require('../services/youtube');
 const streamAuth = require('../services/stream-auth');
+const { validateFile } = require('../services/file-validator');
 
 const MUSIC_DIR = process.env.MUSIC_DIR || '/app/music';
 
@@ -170,6 +171,14 @@ async function ytDownloadOne(entry, abort) {
   });
 
   entry.progress = 100;
+
+  // Validate the downloaded file before accepting it into the library
+  const validation = await validateFile(downloadedFile);
+  if (!validation.passed) {
+    console.warn('[yt-queue] File failed validation, deleting:', downloadedFile, validation.checks);
+    try { fs.unlinkSync(downloadedFile); } catch (e) { /* ignore */ }
+    throw new Error(`Downloaded file failed validation: ${validation.checks.filter(c => !c.passed && !c.skipped).map(c => c.name).join(', ')}`);
+  }
 
   // Write .metadata.json
   const metadata = { coverArt: entry.coverArt || null, source: 'yt-dlp', sourceUrl: entry.url };
