@@ -9,6 +9,7 @@ app.use(express.json());
 app.use((req, res, next) => { req.userId = 'test-admin'; next(); });
 app.use('/api/vpn', vpnConfigRouter);
 
+beforeAll(() => db.setGlobalSetting('vpnConfig', null));
 afterAll(() => db.close());
 
 describe('VPN config API', () => {
