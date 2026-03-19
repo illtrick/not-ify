@@ -272,17 +272,6 @@ export function AlbumView({
                     {trackArtist}
                   </div>
                 </div>
-                {/* Add to queue button (hover — desktop only) */}
-                {!isMobile && <button
-                  onClick={e => { e.stopPropagation(); addToQueue(track); }}
-                  title="Add to queue"
-                  style={{
-                    background: 'none', border: 'none',
-                    cursor: 'pointer', padding: '2px 8px', opacity: isHovered ? 0.7 : 0,
-                    transition: 'opacity 0.15s', flexShrink: 0,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  }}
-                >{Icon.plus(14, COLORS.textSecondary)}</button>}
                 {!isMobile && <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
                   <QualityBadge format={track.format} />
                 </span>}
