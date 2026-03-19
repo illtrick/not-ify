@@ -375,6 +375,10 @@ app.use('/api', upgradeRouter);
 const rdConfigRouter = require('./api/realdebrid-config');
 app.use('/api/realdebrid', adminGuard, rdConfigRouter);
 
+// VPN config API (admin only)
+const vpnConfigRouter = require('./api/vpn-config');
+app.use('/api/vpn', adminGuard, vpnConfigRouter);
+
 // --- Per-user API endpoints ---
 
 // GET /api/users — list available users (for user picker)
