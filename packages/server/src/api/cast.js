@@ -408,9 +408,8 @@ router.post('/cast/next', async (req, res) => {
       await dlna.sonosPlayFromQueue(session.deviceUsn, updatedSession.queueIndex + 1);
       log(`next: Sonos skip to queue position ${updatedSession.queueIndex + 1}`);
     } else if (session.deviceType === 'wiim') {
-      const updatedSession = castSession.getSession(userId);
-      await dlna.wiimPlayQueueWithIndex(session.deviceUsn, updatedSession.queueIndex);
-      log(`next: WiiM skip to index ${updatedSession.queueIndex}`);
+      await dlna.transportNext(session.deviceUsn);
+      log(`next: WiiM AVTransport Next`);
     } else {
       const base = getLanBase();
       if (next.isYt) {
@@ -444,9 +443,8 @@ router.post('/cast/prev', async (req, res) => {
       await dlna.sonosPlayFromQueue(session.deviceUsn, updatedSession.queueIndex + 1);
       log(`prev: Sonos skip to queue position ${updatedSession.queueIndex + 1}`);
     } else if (session.deviceType === 'wiim') {
-      const updatedSession = castSession.getSession(userId);
-      await dlna.wiimPlayQueueWithIndex(session.deviceUsn, updatedSession.queueIndex);
-      log(`prev: WiiM skip to index ${updatedSession.queueIndex}`);
+      await dlna.transportPrevious(session.deviceUsn);
+      log(`prev: WiiM AVTransport Previous`);
     } else {
       const base = getLanBase();
       if (prev.isYt) {

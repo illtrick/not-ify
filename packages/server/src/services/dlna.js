@@ -393,6 +393,16 @@ async function seek(deviceUsn, seconds) {
   });
 }
 
+async function transportNext(deviceUsn) {
+  const device = _getDevice(deviceUsn);
+  await _soapCall(device.avTransportControl, AVT, 'Next', { InstanceID: 0 });
+}
+
+async function transportPrevious(deviceUsn) {
+  const device = _getDevice(deviceUsn);
+  await _soapCall(device.avTransportControl, AVT, 'Previous', { InstanceID: 0 });
+}
+
 async function setVolume(deviceUsn, level) {
   const device = _getDevice(deviceUsn);
   if (!device.renderingControl) throw new Error('No RenderingControl on device');
@@ -526,8 +536,6 @@ const WIIM_PQ = 'urn:schemas-wiimu-com:service:PlayQueue:1';
 
 function _buildWiimPlaylist(tracks) {
   const esc = s => (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  const escXml = s => esc(s).replace(/&amp;/g, '&amp;amp;').replace(/&lt;/g, '&amp;lt;').replace(/&gt;/g, '&amp;gt;').replace(/&quot;/g, '&amp;quot;');
-
   let tracksXml = '';
   for (let i = 0; i < tracks.length; i++) {
     const t = tracks[i];
@@ -544,7 +552,7 @@ function _buildWiimPlaylist(tracks) {
     });
     tracksXml += `<Track${i + 1}>` +
       `<URL>${esc(t.streamUrl)}</URL>` +
-      `<Metadata>${escXml(didl)}</Metadata>` +
+      `<Metadata>${esc(didl)}</Metadata>` +
       `<Id>${i}</Id>` +
       `<Source>Not-ify</Source>` +
       `</Track${i + 1}>`;
@@ -833,6 +841,8 @@ module.exports = {
   sonosAddToQueue,
   sonosPlayFromQueue,
   sonosPlayQueue,
+  transportNext,
+  transportPrevious,
   wiimCreateQueue,
   wiimPlayQueueWithIndex,
   wiimPlayQueue,
