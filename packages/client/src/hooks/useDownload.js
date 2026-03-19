@@ -267,21 +267,34 @@ export function useDownload({ playTrack, loadLibrary, library = [] } = {}) {
   // -------------------------------------------------------------------------
   // Auto-acquire: background download when user plays something
   // -------------------------------------------------------------------------
-  function autoAcquireAlbum(albumInfo) {
+  async function autoAcquireAlbum(albumInfo) {
     if (!albumInfo?.artist || !albumInfo?.album) return;
+    console.log('[autoAcquire]', {
+      artist: albumInfo.artist,
+      album: albumInfo.album,
+      hasSources: !!albumInfo.sources?.length,
+      firstSource: albumInfo.sources?.[0]?.source,
+      hasMagnet: !!albumInfo.sources?.[0]?.magnetLink,
+      mbTrackCount: albumInfo.mbTracks?.length,
+    });
     const torrentSrc = albumInfo.sources?.find(s => s.magnetLink);
     if (torrentSrc) {
       setBgDownloadStatus({ type: 'torrent', message: `Saving ${albumInfo.album}...`, count: 0, done: false });
-      api.startBgDownload({
-        magnetLink: torrentSrc.magnetLink,
-        name: torrentSrc.name,
-        mbid: albumInfo.mbid || null,
-        artist: albumInfo.artist,
-        albumName: albumInfo.album,
-        year: albumInfo.year || '',
-        coverArt: albumInfo.coverArt || null,
-      }).then(() => startBgPoll()).catch(err => console.warn('Bg torrent start failed:', err));
-      return;
+      try {
+        await api.startBgDownload({
+          magnetLink: torrentSrc.magnetLink,
+          name: torrentSrc.name,
+          mbid: albumInfo.mbid || null,
+          artist: albumInfo.artist,
+          albumName: albumInfo.album,
+          year: albumInfo.year || '',
+          coverArt: albumInfo.coverArt || null,
+        });
+        startBgPoll();
+        return;
+      } catch (err) {
+        console.warn('[autoAcquire] Torrent failed, falling back to YouTube:', err.message);
+      }
     }
     const tracks = albumInfo.mbTracks || [];
     if (tracks.length === 0) return;
