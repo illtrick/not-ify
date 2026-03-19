@@ -1,6 +1,11 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { COLORS } from '../constants';
 import { Icon } from './Icon';
+
+function StatusDot({ status }) {
+  const color = status === 'ok' ? COLORS.success : status === 'error' ? COLORS.error : COLORS.textSecondary;
+  return <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, display: 'inline-block', marginLeft: 6 }} />;
+}
 
 export function SettingsModal({
   showSettings, setShowSettings,
@@ -14,17 +19,61 @@ export function SettingsModal({
   lastfmSaveConfig,
   lastfmCompleteAuth,
   lastfmDisconnect,
+  isAdmin,
+  rdConfig,
+  vpnConfig,
+  vpnRegions,
 }) {
+  const [rdToken, setRdToken] = useState('');
+  const [vpnUser, setVpnUser] = useState('');
+  const [vpnPass, setVpnPass] = useState('');
+  const [vpnRegion, setVpnRegion] = useState('US East');
+
+  // Sync VPN fields when status loads
+  useEffect(() => {
+    if (vpnConfig?.status) {
+      if (vpnConfig.status.username) setVpnUser(vpnConfig.status.username);
+      if (vpnConfig.status.region) setVpnRegion(vpnConfig.status.region);
+    }
+  }, [vpnConfig?.status]);
+
   if (!showSettings) return null;
+
   const inputStyle = {
     width: '100%', padding: '10px 12px', borderRadius: 6,
     border: `1px solid ${COLORS.border}`, background: COLORS.hover,
     color: COLORS.textPrimary, fontSize: 14, outline: 'none', boxSizing: 'border-box',
   };
+
+  const sectionStyle = { marginBottom: 24 };
+
+  const sectionHeaderStyle = {
+    display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12,
+  };
+
+  const sectionTitleStyle = { fontSize: 15, fontWeight: 600 };
+
+  const buttonPrimaryStyle = {
+    padding: '8px 16px', borderRadius: 6, border: 'none',
+    background: COLORS.accent, color: '#fff',
+    fontSize: 13, fontWeight: 600, cursor: 'pointer',
+  };
+
+  const buttonSecondaryStyle = {
+    padding: '8px 16px', borderRadius: 6, border: `1px solid ${COLORS.border}`,
+    background: COLORS.hover, color: COLORS.textPrimary,
+    fontSize: 13, cursor: 'pointer',
+  };
+
+  const buttonDisabledStyle = {
+    ...buttonSecondaryStyle,
+    opacity: 0.5, cursor: 'default',
+  };
+
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       onClick={() => setShowSettings(false)}>
-      <div style={{ background: COLORS.surface, borderRadius: 12, padding: 28, width: 420, maxWidth: '90vw', boxShadow: '0 12px 40px rgba(0,0,0,0.6)' }}
+      <div style={{ background: COLORS.surface, borderRadius: 12, padding: 28, width: 420, maxWidth: '90vw', boxShadow: '0 12px 40px rgba(0,0,0,0.6)', maxHeight: '90vh', overflowY: 'auto' }}
         onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <span style={{ fontSize: 18, fontWeight: 700 }}>Settings</span>
@@ -34,7 +83,7 @@ export function SettingsModal({
         </div>
 
         {/* Playback section */}
-        <div style={{ marginBottom: 24 }}>
+        <div style={sectionStyle}>
           <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Playback</div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
             <div>
@@ -119,6 +168,116 @@ export function SettingsModal({
             </div>
           )}
         </div>
+
+        {/* Real-Debrid section — admin only */}
+        {isAdmin && rdConfig && (
+          <div style={{ ...sectionStyle, marginTop: 24 }}>
+            <div style={sectionHeaderStyle}>
+              <span style={sectionTitleStyle}>Real-Debrid</span>
+              <StatusDot status={rdConfig.status?.configured ? 'ok' : null} />
+            </div>
+            {rdConfig.status?.configured && (
+              <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 8 }}>
+                Token: {rdConfig.status.tokenPreview}
+              </div>
+            )}
+            <input
+              type="password"
+              placeholder={rdConfig.status?.configured ? 'Enter new token to update' : 'Enter API token'}
+              style={inputStyle}
+              onChange={(e) => setRdToken(e.target.value)}
+              value={rdToken}
+            />
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <button
+                onClick={() => rdConfig.save({ apiToken: rdToken })}
+                disabled={rdConfig.saving}
+                style={rdConfig.saving ? buttonDisabledStyle : buttonPrimaryStyle}
+              >
+                {rdConfig.saving ? 'Saving...' : 'Save'}
+              </button>
+              <button
+                onClick={() => rdConfig.test()}
+                disabled={rdConfig.testing}
+                style={rdConfig.testing ? buttonDisabledStyle : buttonSecondaryStyle}
+              >
+                {rdConfig.testing ? 'Testing...' : 'Test Connection'}
+              </button>
+            </div>
+            {rdConfig.testResult && (
+              <div style={{ marginTop: 8, fontSize: 12, color: rdConfig.testResult.status === 'ok' ? COLORS.success : COLORS.error }}>
+                {rdConfig.testResult.status === 'ok'
+                  ? `Premium — ${rdConfig.testResult.user?.username}, expires ${rdConfig.testResult.user?.expiration?.slice(0, 10)}`
+                  : rdConfig.testResult.error}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* VPN section — admin only */}
+        {isAdmin && vpnConfig && (
+          <div style={{ ...sectionStyle, marginTop: 24 }}>
+            <div style={sectionHeaderStyle}>
+              <span style={sectionTitleStyle}>VPN (PIA)</span>
+              <StatusDot status={vpnConfig.status?.configured ? 'ok' : null} />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 8 }}>
+              <input
+                type="text"
+                placeholder="PIA username"
+                value={vpnUser}
+                onChange={(e) => setVpnUser(e.target.value)}
+                style={inputStyle}
+              />
+              <input
+                type="password"
+                placeholder="PIA password"
+                value={vpnPass}
+                onChange={(e) => setVpnPass(e.target.value)}
+                style={inputStyle}
+              />
+              <select
+                value={vpnRegion}
+                onChange={(e) => setVpnRegion(e.target.value)}
+                style={inputStyle}
+              >
+                {(vpnRegions || []).map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <button
+                onClick={() => vpnConfig.save({ username: vpnUser, password: vpnPass, region: vpnRegion })}
+                disabled={vpnConfig.saving}
+                style={vpnConfig.saving ? buttonDisabledStyle : buttonPrimaryStyle}
+              >
+                {vpnConfig.saving ? 'Saving...' : 'Save'}
+              </button>
+              <button
+                onClick={() => vpnConfig.test()}
+                disabled={vpnConfig.testing}
+                style={vpnConfig.testing ? buttonDisabledStyle : buttonSecondaryStyle}
+              >
+                {vpnConfig.testing ? 'Testing...' : 'Test Connection'}
+              </button>
+            </div>
+            {vpnConfig.testResult && (
+              <div style={{
+                marginTop: 8, fontSize: 12,
+                color: vpnConfig.testResult.status === 'ok'
+                  ? COLORS.success
+                  : vpnConfig.testResult.status === 'proxy_unavailable'
+                    ? COLORS.textSecondary
+                    : COLORS.error,
+              }}>
+                {vpnConfig.testResult.status === 'ok'
+                  ? `Connected via ${vpnConfig.testResult.ip} (${vpnConfig.testResult.region})`
+                  : vpnConfig.testResult.status === 'proxy_unavailable'
+                    ? 'VPN proxy not available (dev mode)'
+                    : vpnConfig.testResult.error}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

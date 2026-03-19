@@ -31,6 +31,7 @@ import { useMoreByArtist } from './hooks/useMoreByArtist';
 import { useTrackDurations } from './hooks/useTrackDurations';
 import { useArtistPage } from './hooks/useArtistPage';
 import { useCast } from './hooks/useCast';
+import { useServiceConfig } from './hooks/useServiceConfig';
 
 
 // ---------------------------------------------------------------------------
@@ -202,6 +203,26 @@ function App() {
   const moreByArtist = useMoreByArtist(selectedAlbum, view, searchArtistResults);
   const { trackDurations, setTrackDurations } = useTrackDurations(selectedAlbum);
   const cast = useCast();
+
+  // Service config (admin only)
+  const rdConfig = useServiceConfig({
+    getStatus: api.getRdStatus,
+    saveConfig: api.saveRdConfig,
+    testConn: api.testRdConnection,
+    enabled: isAdmin,
+  });
+
+  const vpnConfig = useServiceConfig({
+    getStatus: api.getVpnStatus,
+    saveConfig: api.saveVpnConfig,
+    testConn: api.testVpnConnection,
+    enabled: isAdmin,
+  });
+
+  const [vpnRegions, setVpnRegions] = useState([]);
+  useEffect(() => {
+    if (isAdmin) api.getVpnRegions().then(setVpnRegions).catch(() => {});
+  }, [isAdmin]);
 
   // ── Sync UI when cast device changes tracks externally (e.g. Sonos skip) ──
   const lastCastTrackIdRef = useRef(null);
@@ -785,6 +806,10 @@ function App() {
         lastfmSaveConfig={lastfmSaveConfig}
         lastfmCompleteAuth={lastfmCompleteAuth}
         lastfmDisconnect={lastfmDisconnect}
+        isAdmin={isAdmin}
+        rdConfig={rdConfig}
+        vpnConfig={vpnConfig}
+        vpnRegions={vpnRegions}
       />
 
       <audio
