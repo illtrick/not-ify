@@ -17,6 +17,7 @@ const rd = require('./services/realdebrid');
 const db = require('./services/db');
 const { migrate } = require('./services/migrate');
 const userMiddleware = require('./middleware/user');
+const adminGuard = require('./middleware/admin');
 const searchRouter = require('./api/search');
 const pipelineRouter = require('./api/pipeline');
 const libraryRouter = require('./api/library');
@@ -41,16 +42,6 @@ app.use(express.static(path.join(__dirname, '../../client/dist')));
 const pkg = require('../../../package.json');
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', version: pkg.version, apiVersion: 1, service: 'not-ify-server' });
-});
-
-// Test RD token
-app.get('/api/test/rd-status', async (req, res) => {
-  try {
-    const user = await rd.getUserInfo();
-    res.json({ status: 'ok', user: { username: user.username, email: user.email, type: user.type, premium: user.premium, expiration: user.expiration } });
-  } catch (err) {
-    res.status(500).json({ status: 'error', message: err.message });
-  }
 });
 
 // Shared cover art fetch helper
@@ -379,6 +370,10 @@ app.use('/api', castRouter);
 
 // Quality upgrader routes
 app.use('/api', upgradeRouter);
+
+// Real-Debrid config API (admin only)
+const rdConfigRouter = require('./api/realdebrid-config');
+app.use('/api/realdebrid', adminGuard, rdConfigRouter);
 
 // --- Per-user API endpoints ---
 

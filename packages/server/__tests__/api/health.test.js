@@ -76,24 +76,3 @@ describe('GET /api/llm/health', () => {
   });
 });
 
-describe('GET /api/test/rd-status', () => {
-  test('returns user info when token valid', async () => {
-    rd.getUserInfo = jest.fn().mockResolvedValue({
-      username: 'testuser',
-      email: 'test@example.com',
-      type: 'premium',
-      premium: 365,
-    });
-    const res = await request(app).get('/api/test/rd-status');
-    expect(res.status).toBe(200);
-    expect(res.body.status).toBe('ok');
-    expect(res.body.user.username).toBe('testuser');
-  });
-
-  test('returns 500 when RD token missing or invalid', async () => {
-    rd.getUserInfo = jest.fn().mockRejectedValue(new Error('No API token configured'));
-    const res = await request(app).get('/api/test/rd-status');
-    expect(res.status).toBe(500);
-    expect(res.body.message).toMatch(/token/i);
-  });
-});

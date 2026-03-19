@@ -1,17 +1,36 @@
 const fs = require('fs');
 const path = require('path');
+const db = require('./db');
 
 const CONFIG_DIR = process.env.CONFIG_DIR || '/app/config';
 const CONFIG_PATH = path.join(CONFIG_DIR, 'settings.json');
 const RD_BASE = 'https://api.real-debrid.com/rest/1.0';
 
+let _cachedToken = null;
+
 function getToken() {
-  const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
-  const token = config.realDebrid?.apiToken;
-  if (!token || token === 'USER_PUTS_TOKEN_HERE') {
-    throw new Error('Real-Debrid API token not configured in config/settings.json');
+  if (_cachedToken) return _cachedToken;
+  // Try DB first (new path)
+  const dbToken = db.getGlobalSetting('realDebridToken');
+  if (dbToken && dbToken !== 'USER_PUTS_TOKEN_HERE') {
+    _cachedToken = dbToken;
+    return dbToken;
   }
-  return token;
+  // Fallback: legacy config/settings.json
+  try {
+    const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+    const token = config.realDebrid?.apiToken;
+    if (token && token !== 'USER_PUTS_TOKEN_HERE') {
+      db.setGlobalSetting('realDebridToken', token); // migrate to DB
+      _cachedToken = token;
+      return token;
+    }
+  } catch {}
+  throw new Error('Real-Debrid API token not configured');
+}
+
+function setToken(token) {
+  _cachedToken = token;
 }
 
 async function rdFetch(endpoint, options = {}) {
@@ -101,4 +120,5 @@ module.exports = {
   unrestrictLink,
   waitForDownload,
   deleteTorrent,
+  setToken,
 };
