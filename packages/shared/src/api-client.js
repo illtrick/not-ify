@@ -463,3 +463,39 @@ export function triggerAlbumUpgrade(artist, album) {
 export function triggerLibraryScan() {
   return post('/api/upgrade/scan');
 }
+
+// ---------------------------------------------------------------------------
+// Real-Debrid Config
+// ---------------------------------------------------------------------------
+
+export function getRdStatus() {
+  return get('/api/realdebrid/status');
+}
+
+export function saveRdConfig(body) {
+  return post('/api/realdebrid/config', body);
+}
+
+export function testRdConnection() {
+  return post('/api/realdebrid/test');
+}
+
+// ---------------------------------------------------------------------------
+// VPN Config
+// ---------------------------------------------------------------------------
+
+export function getVpnStatus() {
+  return get('/api/vpn/status');
+}
+
+export function getVpnRegions() {
+  return get('/api/vpn/regions');
+}
+
+export function saveVpnConfig(body) {
+  return post('/api/vpn/config', body);
+}
+
+export function testVpnConnection() {
+  return post('/api/vpn/test');
+}
