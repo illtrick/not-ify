@@ -21,6 +21,7 @@ function getDb() {
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       display_name TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'user',
       created_at INTEGER DEFAULT (unixepoch())
     );
 
@@ -114,6 +115,18 @@ function getDb() {
     CREATE INDEX IF NOT EXISTS idx_sh_user_time ON search_history(user_id, searched_at DESC);
     CREATE INDEX IF NOT EXISTS idx_pt_playlist ON playlist_tracks(playlist_id, position);
   `);
+
+  // Migration: add role column if missing
+  try {
+    _db.prepare("SELECT role FROM users LIMIT 1").get();
+  } catch {
+    _db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
+  }
+  // Auto-promote first user to admin if no admins exist
+  const hasAdmin = _db.prepare("SELECT 1 FROM users WHERE role = 'admin'").get();
+  if (!hasAdmin) {
+    _db.prepare("UPDATE users SET role = 'admin' WHERE id = (SELECT id FROM users WHERE id != 'default' ORDER BY created_at ASC LIMIT 1)").run();
+  }
 
   // Seed default users if they don't exist
   const upsertUser = _db.prepare('INSERT OR IGNORE INTO users (id, display_name) VALUES (?, ?)');
@@ -349,7 +362,13 @@ function saveUserSession(userId, { queue, state }) {
 
 function getUsers() {
   const db = getDb();
-  return db.prepare("SELECT id, display_name as displayName FROM users WHERE id != 'default' ORDER BY display_name").all();
+  return db.prepare("SELECT id, display_name as displayName, role FROM users WHERE id != 'default' ORDER BY display_name").all();
+}
+
+function isAdmin(userId) {
+  const db = getDb();
+  const row = db.prepare("SELECT role FROM users WHERE id = ?").get(userId);
+  return row?.role === 'admin';
 }
 
 function isValidUser(userId) {
@@ -372,6 +391,7 @@ module.exports = {
   // Users
   getUsers,
   isValidUser,
+  isAdmin,
   // Recently played
   getRecentlyPlayed,
   addRecentlyPlayed,
