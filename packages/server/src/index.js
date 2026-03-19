@@ -20,6 +20,7 @@ const userMiddleware = require('./middleware/user');
 const searchRouter = require('./api/search');
 const pipelineRouter = require('./api/pipeline');
 const libraryRouter = require('./api/library');
+const upgradeRouter = require('./api/upgrade');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -376,6 +377,9 @@ app.use('/api', importRouter);
 const castRouter = require('./api/cast');
 app.use('/api', castRouter);
 
+// Quality upgrader routes
+app.use('/api', upgradeRouter);
+
 // --- Per-user API endpoints ---
 
 // GET /api/users — list available users (for user picker)
@@ -464,6 +468,25 @@ if (require.main === module) {
     const dlna = require('./services/dlna');
     dlna.startDiscovery();
   }
+
+  // Start quality upgrader background tick (every 5 minutes)
+  // Only runs when the system is idle (no active downloads)
+  const { getUpgrader } = require('./api/upgrade');
+  const upgrader = getUpgrader();
+  let upgraderRunning = false;
+  const UPGRADER_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+  setInterval(async () => {
+    if (upgraderRunning) return; // prevent concurrent ticks
+    upgraderRunning = true;
+    try {
+      await upgrader.tick();
+    } catch (err) {
+      console.error('[upgrader] tick error:', err.message);
+    } finally {
+      upgraderRunning = false;
+    }
+  }, UPGRADER_INTERVAL_MS);
+
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Not-ify server running on port ${PORT}`);
   });

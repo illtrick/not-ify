@@ -6,6 +6,12 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 
+// Lazy-load job-queue to avoid triggering its schema initialisation at module
+// load time (which requires a real SQLite connection, unavailable in unit tests)
+function getJobQueue() {
+  return require('../services/job-queue');
+}
+
 function fileId(filepath) {
   return crypto.createHash('md5').update(filepath).digest('hex');
 }
@@ -324,6 +330,13 @@ router.post('/download/background', async (req, res) => {
   if (bgDownload?.status === 'active') return res.status(409).json({ error: 'Background download in progress' });
 
   bgDownload = { status: 'active', name: name || 'Unknown', artist: metaArtist, album: metaAlbum, progress: 0, message: 'Starting...', error: null, fileCount: 0 };
+
+  // Persist job to queue for restart-resilience (alongside the in-memory flow)
+  const dedupeKey = metaArtist && metaAlbum
+    ? `download:${metaArtist}|${metaAlbum}`
+    : `download:${magnetLink.slice(0, 60)}`;
+  getJobQueue().enqueue('download', { magnetLink, name, mbid, coverArt, year, artist: metaArtist, albumName: metaAlbum }, { dedupeKey });
+
   res.json({ started: true });
 
   // Process in background (no await — fire and forget)
