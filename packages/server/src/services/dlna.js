@@ -551,8 +551,8 @@ function _buildWiimPlaylist(tracks) {
   }
 
   return `<PlayList>` +
+    `<ListName>Not-ify Queue</ListName>` +
     `<ListInfo>` +
-    `<QueueName>Not-ify Queue</QueueName>` +
     `<SourceName>Not-ify</SourceName>` +
     `<TrackNumber>${tracks.length}</TrackNumber>` +
     `<Quality>0</Quality>` +
@@ -577,6 +577,7 @@ async function wiimPlayQueueWithIndex(deviceUsn, index) {
   if (!device.playQueueControl) throw new Error('No PlayQueue service on device');
   log(`wiimPlayQueueWithIndex: index=${index} on ${device.friendlyName}`);
   await _soapCall(device.playQueueControl, WIIM_PQ, 'PlayQueueWithIndex', {
+    QueueName: 'Not-ify Queue',
     Index: index,
   });
   log('wiimPlayQueueWithIndex: OK');
