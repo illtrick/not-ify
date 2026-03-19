@@ -6,6 +6,12 @@ const urlCache = new Map();
 const SEARCH_TTL = 5 * 60 * 1000; // 5 min
 const URL_TTL = 30 * 60 * 1000; // 30 min
 
+// VPN proxy support — route yt-dlp through HTTP proxy when configured
+function getProxyArgs() {
+  const proxy = process.env.VPN_PROXY || '';
+  return proxy ? ['--proxy', proxy] : [];
+}
+
 // Concurrency limiter
 let activeProcesses = 0;
 const MAX_CONCURRENT = 2;
@@ -28,7 +34,7 @@ async function searchYouTube(query, limit = 15) {
   await waitForSlot();
   try {
     return await new Promise((resolve, reject) => {
-      const args = [`ytsearch${limit}:${query}`, '--flat-playlist', '--dump-json', '--no-download', '--no-warnings'];
+      const args = [...getProxyArgs(), `ytsearch${limit}:${query}`, '--flat-playlist', '--dump-json', '--no-download', '--no-warnings'];
       const proc = spawn('yt-dlp', args, { timeout: 15000 });
       let stdout = '';
       let stderr = '';
@@ -63,7 +69,7 @@ async function getStreamUrl(videoId) {
   await waitForSlot();
   try {
     return await new Promise((resolve, reject) => {
-      const proc = spawn('yt-dlp', ['--get-url', '-f', 'bestaudio', '--no-warnings', `https://www.youtube.com/watch?v=${videoId}`], { timeout: 10000 });
+      const proc = spawn('yt-dlp', [...getProxyArgs(), '--get-url', '-f', 'bestaudio', '--no-warnings', `https://www.youtube.com/watch?v=${videoId}`], { timeout: 10000 });
       let stdout = '';
       let stderr = '';
       proc.stdout.on('data', d => stdout += d);
@@ -90,7 +96,7 @@ async function searchSoundCloud(query, limit = 10) {
   await waitForSlot();
   try {
     return await new Promise((resolve, reject) => {
-      const args = [`scsearch${limit}:${query}`, '--flat-playlist', '--dump-json', '--no-download', '--no-warnings'];
+      const args = [...getProxyArgs(), `scsearch${limit}:${query}`, '--flat-playlist', '--dump-json', '--no-download', '--no-warnings'];
       const proc = spawn('yt-dlp', args, { timeout: 15000 });
       let stdout = '';
       let stderr = '';

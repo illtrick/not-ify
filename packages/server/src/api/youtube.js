@@ -10,6 +10,12 @@ const { validateFile } = require('../services/file-validator');
 
 const MUSIC_DIR = process.env.MUSIC_DIR || '/app/music';
 
+// VPN proxy support — route yt-dlp through HTTP proxy when configured
+function getProxyArgs() {
+  const proxy = process.env.VPN_PROXY || '';
+  return proxy ? ['--proxy', proxy] : [];
+}
+
 function sanitizePath(s) {
   return (s || 'Unknown').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim() || 'Unknown';
 }
@@ -107,6 +113,7 @@ async function ytDownloadOne(entry, abort) {
 
   const outputTemplate = path.join(destDir, `${sanitizePath(dlTitle)}.%(ext)s`);
   const args = [
+    ...getProxyArgs(),
     '-x', '--audio-format', 'mp3', '--audio-quality', '0',
     '--no-warnings', '--newline',
     '-o', outputTemplate,

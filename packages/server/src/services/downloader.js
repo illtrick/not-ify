@@ -4,8 +4,18 @@ const { pipeline } = require('stream/promises');
 const { Readable } = require('stream');
 const { createExtractorFromFile } = require('node-unrar-js');
 const AdmZip = require('adm-zip');
+const { ProxyAgent, fetch: undiciFetch } = require('undici');
 
 const MUSIC_DIR = process.env.MUSIC_DIR || '/app/music';
+
+// Build a fetch dispatcher that routes through the VPN proxy when configured.
+// Uses undici's ProxyAgent which is built into Node via the undici package.
+function getProxyFetch() {
+  const proxy = process.env.VPN_PROXY || '';
+  if (!proxy) return fetch; // use global fetch (no proxy)
+  const dispatcher = new ProxyAgent(proxy);
+  return (url, opts) => undiciFetch(url, { ...opts, dispatcher });
+}
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.flac', '.ogg', '.m4a', '.aac', '.wav', '.opus']);
 const ARCHIVE_EXTENSIONS = new Set(['.rar', '.zip']);
 
@@ -13,7 +23,8 @@ async function downloadFile(url, destPath) {
   const dir = path.dirname(destPath);
   fs.mkdirSync(dir, { recursive: true });
 
-  const res = await fetch(url);
+  const proxyFetch = getProxyFetch();
+  const res = await proxyFetch(url);
   if (!res.ok) {
     throw new Error(`Download failed: ${res.status} ${res.statusText}`);
   }
