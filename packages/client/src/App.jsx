@@ -196,6 +196,24 @@ function App() {
   const { trackDurations, setTrackDurations } = useTrackDurations(selectedAlbum);
   const cast = useCast();
 
+  // ── Sync UI when cast device changes tracks externally (e.g. Sonos skip) ──
+  const lastCastTrackIdRef = useRef(null);
+  useEffect(() => {
+    if (!cast.activeDevice || !cast.castState?.currentTrack) return;
+    const castTrack = cast.castState.currentTrack;
+    if (castTrack.id === lastCastTrackIdRef.current) return;
+    lastCastTrackIdRef.current = castTrack.id;
+    // Don't sync on initial mount or if it matches what we already show
+    if (currentTrack?.id === castTrack.id) return;
+    // Find the matching track in our playlist and update UI without starting local audio
+    const idx = playlist.findIndex(t => t.id === castTrack.id);
+    if (idx >= 0) {
+      setCurrentTrack(playlist[idx]);
+      setPlaylistIdx(idx);
+      setCurrentCoverArt(playlist[idx].coverArt || currentCoverArt);
+    }
+  }, [cast.activeDevice, cast.castState?.currentTrack]);
+
   // ── Single-output enforcement ──────────────────────────────────────────────
   // Core rule: if activeDevice is set, ALL audio goes to cast device.
   // playTrack always runs (updates UI state), then we mute local + cast.
@@ -236,13 +254,16 @@ function App() {
     }
     // null usn = "This Device" (return to local playback)
     if (!usn) {
-      // Sync local audio to where cast was playing
+      // Sync local audio to where cast was playing, preserve play/pause state
       const castPos = cast.castState?.position || 0;
+      const wasPlaying = cast.castState?.state === 'PLAYING';
       cast.selectDevice(null);
       if (audioRef.current) {
         audioRef.current.muted = false;
         if (castPos > 0) audioRef.current.currentTime = castPos;
-        audioRef.current.play().catch(() => {});
+        if (wasPlaying) {
+          audioRef.current.play().catch(() => {});
+        }
       }
       return;
     }

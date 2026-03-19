@@ -1,11 +1,19 @@
 'use strict';
 
+const crypto = require('crypto');
+
 // In-memory cast sessions — one per user. Lost on server restart (acceptable).
-// Map<userId, { deviceUsn, queue, queueIndex }>
+// Map<userId, { deviceUsn, deviceType, queue, queueIndex, queueHash }>
 const _sessions = new Map();
 
+function computeQueueHash(queue) {
+  if (!queue || !queue.length) return '';
+  return crypto.createHash('md5').update(queue.map(t => t.id).join(':')).digest('hex');
+}
+
 function setSession(userId, session) {
-  _sessions.set(userId, { ...session });
+  const queueHash = computeQueueHash(session.queue);
+  _sessions.set(userId, { ...session, queueHash });
 }
 
 function getSession(userId) {
@@ -41,4 +49,4 @@ function currentTrack(userId) {
   return session.queue[session.queueIndex] || null;
 }
 
-module.exports = { setSession, getSession, clearSession, advanceQueue, previousInQueue, currentTrack };
+module.exports = { setSession, getSession, clearSession, advanceQueue, previousInQueue, currentTrack, computeQueueHash };
