@@ -58,7 +58,7 @@ function makeProps(overrides = {}) {
 describe('AlbumView MB track list — quality badge from library', () => {
   test('shows FLAC badge for MB track that exists in library', () => {
     const props = makeProps();
-    const { container } = render(<AlbumView {...props} />);
+    render(<AlbumView {...props} />);
     // "Paranoid Android" is in library with FLAC format — should render FLAC badge
     expect(screen.getByText('FLAC')).toBeTruthy();
   });
@@ -83,7 +83,7 @@ describe('AlbumView MB track list — quality badge from library', () => {
 
   test('shows dash for all tracks when library prop is undefined', () => {
     const props = makeProps({ library: undefined });
-    const { container } = render(<AlbumView {...props} />);
+    render(<AlbumView {...props} />);
     expect(screen.queryByText('FLAC')).toBeNull();
   });
 

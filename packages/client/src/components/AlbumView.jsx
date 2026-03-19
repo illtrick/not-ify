@@ -5,7 +5,6 @@ import { formatTime, contextMenuProps, trackRowStyle } from '../utils';
 import { Icon } from './Icon';
 import { AlbumArt } from './AlbumArt';
 import { AlbumCard } from './AlbumCard';
-import { TrackStatusIcon } from './TrackStatusIcon';
 import { QualityBadge } from './QualityBadge';
 
 export function AlbumView({
