@@ -8,9 +8,11 @@ export function useDownload({ playTrack, loadLibrary, library = [] } = {}) {
   const [dlExpanded, setDlExpanded] = useState(false);
   const [bgDownloadStatus, setBgDownloadStatus] = useState(null);
   const [dlTrackStatus, setDlTrackStatus] = useState(new Map());
+  const [jobQueueStats, setJobQueueStats] = useState(null);
 
   const pendingPlayRef = useRef(false);
   const bgPollRef = useRef(null);
+  const jobQueuePollRef = useRef(null);
   const libRefreshCountRef = useRef(0);
 
   // -------------------------------------------------------------------------
@@ -323,6 +325,40 @@ export function useDownload({ playTrack, loadLibrary, library = [] } = {}) {
     })();
   }
 
+  // -------------------------------------------------------------------------
+  // Job queue polling (upgrade pipeline)
+  // -------------------------------------------------------------------------
+  function startJobQueuePoll() {
+    if (jobQueuePollRef.current) return;
+    jobQueuePollRef.current = setInterval(async () => {
+      try {
+        const data = await api.getJobQueue();
+        const stats = data.stats || {};
+        setJobQueueStats({
+          pending: stats.pending || 0,
+          active: stats.active || 0,
+          done: stats.done || 0,
+          failed: stats.failed || 0,
+          jobs: data.jobs || [],
+        });
+        // Stop polling when queue is idle
+        if ((stats.pending || 0) === 0 && (stats.active || 0) === 0) {
+          clearInterval(jobQueuePollRef.current);
+          jobQueuePollRef.current = null;
+          loadLibrary?.();
+          setTimeout(() => setJobQueueStats(null), 4000);
+        }
+      } catch {}
+    }, 3000);
+  }
+
+  function stopJobQueuePoll() {
+    if (jobQueuePollRef.current) {
+      clearInterval(jobQueuePollRef.current);
+      jobQueuePollRef.current = null;
+    }
+  }
+
   async function handleCancel() {
     try { await api.cancelDownload(); } catch {}
   }
@@ -337,10 +373,13 @@ export function useDownload({ playTrack, loadLibrary, library = [] } = {}) {
     dlExpanded, setDlExpanded,
     bgDownloadStatus, setBgDownloadStatus,
     dlTrackStatus,
+    jobQueueStats,
     startDownload,
     startYtDownload,
     downloadAlbumViaYouTube,
     startBgPoll,
+    startJobQueuePoll,
+    stopJobQueuePoll,
     autoAcquireAlbum,
     handleCancel,
     handleYtCancel,

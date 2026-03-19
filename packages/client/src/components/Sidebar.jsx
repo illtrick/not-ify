@@ -29,6 +29,7 @@ export function Sidebar({
   removeAlbumFromLibrary,
   selectedAlbum,
   bgDownloadStatus, setBgDownloadStatus,
+  jobQueueStats,
   downloadStatus, setDownloadStatus,
   downloading,
   dlExpanded, setDlExpanded,
@@ -181,7 +182,7 @@ export function Sidebar({
           })}
         </div>
       </div>
-      <BgDownloadIndicator bgDownloadStatus={bgDownloadStatus} setBgDownloadStatus={setBgDownloadStatus} />
+      <BgDownloadIndicator bgDownloadStatus={bgDownloadStatus} setBgDownloadStatus={setBgDownloadStatus} jobQueueStats={jobQueueStats} />
       <DownloadIndicator
         downloadStatus={downloadStatus} setDownloadStatus={setDownloadStatus}
         downloading={downloading}

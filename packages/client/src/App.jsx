@@ -180,10 +180,12 @@ function App() {
     dlExpanded, setDlExpanded,
     bgDownloadStatus, setBgDownloadStatus,
     dlTrackStatus,
+    jobQueueStats,
     startDownload,
     startYtDownload,
     downloadAlbumViaYouTube,
     startBgPoll,
+    startJobQueuePoll,
     autoAcquireAlbum,
     handleCancel,
     handleYtCancel,
@@ -604,6 +606,7 @@ function App() {
             removeAlbumFromLibrary={removeAlbumFromLibrary}
             selectedAlbum={selectedAlbum}
             bgDownloadStatus={bgDownloadStatus} setBgDownloadStatus={setBgDownloadStatus}
+            jobQueueStats={jobQueueStats}
             downloadStatus={downloadStatus} setDownloadStatus={setDownloadStatus}
             downloading={downloading}
             dlExpanded={dlExpanded} setDlExpanded={setDlExpanded}
@@ -694,6 +697,7 @@ function App() {
                     setQueue={setQueue}
                     removeTrackFromLibrary={removeTrackFromLibrary}
                     getTrackDlStatus={getTrackDlStatus}
+                    onUpgradeTriggered={startJobQueuePoll}
                   />
                 )}
                 {view === 'artist' && (

@@ -447,3 +447,19 @@ export function castStatusStreamUrl(deviceUsn) {
   const base = `${_baseUrl}/api/cast/status/stream?deviceUsn=${enc(deviceUsn)}`;
   return _userId ? `${base}&userId=${enc(_userId)}` : base;
 }
+
+// ---------------------------------------------------------------------------
+// Upgrade / Job Queue
+// ---------------------------------------------------------------------------
+
+export function getJobQueue() {
+  return get('/api/upgrade/status');
+}
+
+export function triggerAlbumUpgrade(artist, album) {
+  return post('/api/upgrade/album', { artist, album });
+}
+
+export function triggerLibraryScan() {
+  return post('/api/upgrade/scan');
+}

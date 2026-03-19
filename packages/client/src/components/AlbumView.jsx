@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import * as api from '@not-ify/shared';
 import { COLORS } from '../constants';
 import { formatTime, contextMenuProps, trackRowStyle } from '../utils';
@@ -39,12 +39,21 @@ export function AlbumView({
   setQueue,
   removeTrackFromLibrary,
   getTrackDlStatus,
+  onUpgradeTriggered,
 }) {
   const albumHeaderRef = useRef(null);
   const [showStickyHeader, setShowStickyHeader] = useState(false);
+  const [upgradeState, setUpgradeState] = useState(null); // null | 'triggering' | 'queued' | 'error'
+
+  const lossyFormats = ['mp3', 'aac', 'm4a', 'ogg', 'opus'];
+  const hasLossyTracks = useCallback(
+    (trackList) => trackList.some(t => lossyFormats.includes(t.format?.toLowerCase())),
+    []
+  );
 
   useEffect(() => {
     setShowStickyHeader(false);
+    setUpgradeState(null);
     if (!albumHeaderRef.current || !mainContentRef?.current) return;
     const observer = new IntersectionObserver(
       ([entry]) => setShowStickyHeader(!entry.isIntersecting),
@@ -195,33 +204,71 @@ export function AlbumView({
             )}
 
             {/* Play/Pause button — inline with album info */}
-            {(isLib ? pl.length > 0 : mbTracks.length > 0) && (() => {
-              const isThisAlbumPlaying = isPlaying && currentAlbumInfo?.artist === artist && currentAlbumInfo?.album === album;
-              return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
+              {(isLib ? pl.length > 0 : mbTracks.length > 0) && (() => {
+                const isThisAlbumPlaying = isPlaying && currentAlbumInfo?.artist === artist && currentAlbumInfo?.album === album;
+                return (
+                  <button
+                    onClick={() => {
+                      if (isThisAlbumPlaying) { togglePlay(); return; }
+                      if (ytSearching) return;
+                      if (isLib) playTrack(pl[0], pl, 0, { artist, album, coverArt });
+                      else playAllFromYouTube(mbTracks, artist, album, coverArt);
+                    }}
+                    style={{
+                      width: 52, height: 52, borderRadius: '50%', border: 'none',
+                      background: ytSearching && !isLib && !isThisAlbumPlaying ? COLORS.hover : COLORS.accent,
+                      cursor: ytSearching && !isLib && !isThisAlbumPlaying ? 'default' : 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      boxShadow: '0 4px 16px rgba(233,69,96,0.4)',
+                      transition: 'transform 0.1s ease, background 0.15s',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.06)'; e.currentTarget.style.background = COLORS.accentHover; }}
+                    onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.background = COLORS.accent; }}
+                    title={isThisAlbumPlaying ? 'Pause' : 'Play'}
+                  >
+                    {isThisAlbumPlaying ? Icon.pause(22, '#fff') : Icon.play(22, '#fff')}
+                  </button>
+                );
+              })()}
+
+              {/* Upgrade to FLAC button — only for library albums with lossy tracks */}
+              {isLib && pl.length > 0 && hasLossyTracks(pl) && (
                 <button
-                  onClick={() => {
-                    if (isThisAlbumPlaying) { togglePlay(); return; }
-                    if (ytSearching) return;
-                    if (isLib) playTrack(pl[0], pl, 0, { artist, album, coverArt });
-                    else playAllFromYouTube(mbTracks, artist, album, coverArt);
+                  onClick={async () => {
+                    if (upgradeState === 'triggering' || upgradeState === 'queued') return;
+                    setUpgradeState('triggering');
+                    try {
+                      await api.triggerAlbumUpgrade(artist, album);
+                      setUpgradeState('queued');
+                      onUpgradeTriggered?.();
+                      setTimeout(() => setUpgradeState(null), 5000);
+                    } catch (err) {
+                      console.warn('[AlbumView] Upgrade failed:', err.message);
+                      setUpgradeState('error');
+                      setTimeout(() => setUpgradeState(null), 4000);
+                    }
                   }}
+                  disabled={upgradeState === 'triggering' || upgradeState === 'queued'}
                   style={{
-                    width: 52, height: 52, borderRadius: '50%', border: 'none',
-                    background: ytSearching && !isLib && !isThisAlbumPlaying ? COLORS.hover : COLORS.accent,
-                    cursor: ytSearching && !isLib && !isThisAlbumPlaying ? 'default' : 'pointer',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    boxShadow: '0 4px 16px rgba(233,69,96,0.4)',
-                    transition: 'transform 0.1s ease, background 0.15s',
-                    marginTop: 12,
+                    padding: '7px 14px', borderRadius: 20,
+                    border: `1px solid ${upgradeState === 'queued' ? COLORS.success : upgradeState === 'error' ? COLORS.danger || '#e94560' : COLORS.border}`,
+                    background: 'transparent',
+                    color: upgradeState === 'queued' ? COLORS.success : upgradeState === 'error' ? (COLORS.danger || '#e94560') : COLORS.textSecondary,
+                    fontSize: 12, fontWeight: 500,
+                    cursor: upgradeState === 'triggering' || upgradeState === 'queued' ? 'default' : 'pointer',
+                    transition: 'color 0.15s, border-color 0.15s',
+                    display: 'flex', alignItems: 'center', gap: 5,
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.06)'; e.currentTarget.style.background = COLORS.accentHover; }}
-                  onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.background = COLORS.accent; }}
-                  title={isThisAlbumPlaying ? 'Pause' : 'Play'}
+                  onMouseEnter={e => { if (!upgradeState) { e.currentTarget.style.color = COLORS.textPrimary; e.currentTarget.style.borderColor = COLORS.textSecondary; } }}
+                  onMouseLeave={e => { if (!upgradeState) { e.currentTarget.style.color = COLORS.textSecondary; e.currentTarget.style.borderColor = COLORS.border; } }}
+                  title="Queue this album for lossless upgrade"
                 >
-                  {isThisAlbumPlaying ? Icon.pause(22, '#fff') : Icon.play(22, '#fff')}
+                  {upgradeState === 'triggering' && <span className="spin-slow" style={{ display: 'inline-flex' }}>{Icon.music(12, COLORS.textSecondary)}</span>}
+                  {upgradeState === 'queued' ? 'Upgrade queued' : upgradeState === 'error' ? 'Upgrade failed' : 'Upgrade to FLAC'}
                 </button>
-              );
-            })()}
+              )}
+            </div>
           </div>
         </div>
       </div>
