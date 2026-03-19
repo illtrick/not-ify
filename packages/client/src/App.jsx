@@ -35,31 +35,9 @@ import { useServiceConfig } from './hooks/useServiceConfig';
 
 
 // ---------------------------------------------------------------------------
-// Main App
+// Main App (rendered only when a user is selected — all hooks are unconditional)
 // ---------------------------------------------------------------------------
-function App() {
-  // User selection
-  const [currentUser, setCurrentUser] = useState(() => {
-    const saved = getCurrentUser();
-    if (saved) api.setUser(saved);
-    return saved;
-  });
-  const [isAdmin, setIsAdmin] = useState(false);
-
-  function switchUser() {
-    clearCurrentUser();
-    api.setUser(null);
-    setCurrentUser(null);
-    setIsAdmin(false);
-  }
-
-  // Show user picker if no user selected
-  if (!currentUser) {
-    return <UserPicker onUserSelected={(user) => {
-      setCurrentUser(user.id);
-      setIsAdmin(user.role === 'admin');
-    }} />;
-  }
+function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
   // Navigation (stays in App)
   const [view, setView] = useState('search');
   const [selectedAlbum, setSelectedAlbum] = useState(null);
@@ -830,6 +808,42 @@ function App() {
       {/* Hidden secondary audio element for gapless pre-buffering and crossfade */}
       <audio ref={nextAudioRef} preload="auto" style={{ display: 'none' }} />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// App — user gate wrapper. Only 2 hooks here, so hook count is always stable
+// regardless of whether currentUser is set. MainApp handles the rest.
+// ---------------------------------------------------------------------------
+function App() {
+  const [currentUser, setCurrentUser] = useState(() => {
+    const saved = getCurrentUser();
+    if (saved) api.setUser(saved);
+    return saved;
+  });
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  function switchUser() {
+    clearCurrentUser();
+    api.setUser(null);
+    setCurrentUser(null);
+    setIsAdmin(false);
+  }
+
+  if (!currentUser) {
+    return <UserPicker onUserSelected={(user) => {
+      setCurrentUser(user.id);
+      setIsAdmin(user.role === 'admin');
+    }} />;
+  }
+
+  return (
+    <MainApp
+      currentUser={currentUser}
+      isAdmin={isAdmin}
+      setIsAdmin={setIsAdmin}
+      switchUser={switchUser}
+    />
   );
 }
 
