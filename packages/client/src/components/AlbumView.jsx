@@ -11,6 +11,7 @@ import { QualityBadge } from './QualityBadge';
 export function AlbumView({
   selectedAlbum,
   mbTracks,
+  library,
   albumColor,
   mainContentRef,
   moreByArtist,
@@ -324,6 +325,13 @@ export function AlbumView({
                   && (currentAlbumInfo?.album === album || currentTrack?.album === album));
             const isPending = ytPendingTrack === t.title;
             const trackArtist = t.artist || artist;
+            // Look up matching library track to show format badge
+            const libTrack = library?.find(lt =>
+              lt.title?.toLowerCase() === t.title?.toLowerCase() &&
+              (lt.artist?.toLowerCase() === artist.toLowerCase() ||
+               (t.artist && lt.artist?.toLowerCase() === t.artist.toLowerCase())) &&
+              lt.album?.toLowerCase() === album.toLowerCase()
+            );
             return (
               <div
                 key={i}
@@ -364,7 +372,12 @@ export function AlbumView({
                     {trackArtist}
                   </div>
                 </div>
-                <TrackStatusIcon status={getTrackDlStatus(artist, t.title, t.artist)} />
+                <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center', marginLeft: 4 }}>
+                  <QualityBadge
+                    format={libTrack?.format}
+                    status={!libTrack ? getTrackDlStatus(artist, t.title, t.artist) : null}
+                  />
+                </span>
                 {!isMobile && t.lengthMs && (
                   <span style={{ width: 50, textAlign: 'right', flexShrink: 0, fontSize: 13, color: COLORS.textSecondary, opacity: 0.5 }}>{formatTime(t.lengthMs / 1000)}</span>
                 )}

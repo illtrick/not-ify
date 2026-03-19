@@ -665,6 +665,7 @@ function App() {
                   <AlbumView
                     selectedAlbum={selectedAlbum}
                     mbTracks={mbTracks}
+                    library={library}
                     albumColor={albumColor}
                     mainContentRef={mainContentRef}
                     moreByArtist={moreByArtist}
