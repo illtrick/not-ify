@@ -31,46 +31,83 @@ export function useCast() {
     return () => clearInterval(pollRef.current);
   }, [refreshDevices]);
 
-  // SSE status stream when casting
+  // SSE status stream — runs whenever a cast device is selected
   useEffect(() => {
-    if (!isCasting || !activeDevice) return;
+    if (!activeDevice) return;
 
     const url = api.castStatusStreamUrl(activeDevice);
     const es = new EventSource(url);
     sseRef.current = es;
+    let prevState = null;
+    let prevPosition = 0;
+    let autoAdvancing = false;
 
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
         if (data.event === 'deviceLost') {
-          addLog('Device lost — stopping cast');
+          addLog('Device lost');
           setIsCasting(false);
           return;
         }
-        if (data.event === 'error') {
-          addLog(`Device error: ${data.message}`);
-          return;
+        if (data.event === 'error') return;
+
+        const newState = data.state ?? 'STOPPED';
+        const pos = data.position ?? 0;
+        const dur = data.duration ?? 0;
+
+        // Detect external play (someone started playback from Sonos/WiiM app)
+        if (!isCasting && (newState === 'PLAYING' || newState === 'TRANSITIONING') && dur > 0) {
+          setIsCasting(true);
+          autoAdvancing = false;
         }
+
+        // Detect track ended naturally (was PLAYING, now STOPPED, position was near end)
+        if (isCasting && newState === 'STOPPED' && prevState === 'PLAYING' && !autoAdvancing) {
+          const nearEnd = dur > 0 && prevPosition > 0 && (dur - prevPosition) < 5;
+          if (nearEnd) {
+            // Auto-advance to next track in queue
+            autoAdvancing = true;
+            addLog('Track ended — advancing queue');
+            api.castNext(activeDevice).then(() => {
+              autoAdvancing = false;
+            }).catch(() => {
+              autoAdvancing = false;
+              setIsCasting(false);
+              addLog('No more tracks in queue');
+            });
+          } else {
+            // Stopped externally (not at end of track)
+            setIsCasting(false);
+            addLog('Playback stopped');
+          }
+        }
+
+        // Two consecutive STOPPED with no auto-advance = truly stopped
+        if (isCasting && newState === 'STOPPED' && prevState === 'STOPPED' && !autoAdvancing) {
+          setIsCasting(false);
+        }
+
+        prevState = newState;
+        prevPosition = pos;
+
         setCastState({
-          position: data.position ?? 0,
-          duration: data.duration ?? 0,
-          state: data.state ?? 'STOPPED',
+          position: pos,
+          duration: dur,
+          state: newState,
           volume: data.volume ?? 50,
           currentTrack: data.currentTrack,
         });
       } catch {}
     };
 
-    es.onerror = () => {
-      addLog('SSE connection lost — stopping cast');
-      setIsCasting(false);
-    };
+    es.onerror = () => {};
 
     return () => {
       es.close();
       sseRef.current = null;
     };
-  }, [isCasting, activeDevice]);
+  }, [activeDevice]);
 
   const selectDevice = useCallback((usn) => {
     setActiveDeviceState(usn);
@@ -85,15 +122,20 @@ export function useCast() {
     setShowDevicePicker(false);
   }, [devices, addLog]);
 
-  const castTrack = useCallback(async (track, albumInfo, queue, overrideDevice) => {
+  const castTrack = useCallback(async (track, albumInfo, queue, overrideDevice, startPosition) => {
     const device = overrideDevice || activeDevice;
     if (!device) return;
+    // Pre-seed cast state so UI doesn't flash to 0
+    if (startPosition) {
+      setCastState(s => ({ ...s, position: startPosition, state: 'TRANSITIONING' }));
+    }
     try {
       await api.castPlay({
         deviceUsn: device,
         trackId: track.id,
         albumInfo,
         queue: (queue || [track]).map(t => ({ id: t.id, title: t.title, artist: t.artist })),
+        startPosition: startPosition || undefined,
       });
       setIsCasting(true);
       addLog(`Casting "${track.title}" to ${devices.find(d => d.usn === device)?.friendlyName || 'device'}`);

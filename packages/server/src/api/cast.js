@@ -31,7 +31,7 @@ router.get('/cast/devices', (req, res) => {
 // ── POST /api/cast/play — library track ───────────────────────────────────────
 
 router.post('/cast/play', async (req, res) => {
-  const { deviceUsn, trackId, albumInfo, queue } = req.body;
+  const { deviceUsn, trackId, albumInfo, queue, startPosition } = req.body;
   if (!deviceUsn || !trackId) return res.status(400).json({ error: 'Missing deviceUsn or trackId' });
 
   const { map, tracks } = getTrackMap();
@@ -60,7 +60,7 @@ router.post('/cast/play', async (req, res) => {
   try {
     log(`play: "${metadata.title}" by ${metadata.artist} → ${dlna.getDevices().find(d => d.usn === deviceUsn)?.friendlyName || deviceUsn}`);
     log(`play: streamUrl=${streamUrl}`);
-    await dlna.play(deviceUsn, streamUrl, { metadata, contentType: mimeType });
+    await dlna.play(deviceUsn, streamUrl, { metadata, contentType: mimeType }, startPosition);
     const userId = req.userId || 'default';
     castSession.setSession(userId, {
       deviceUsn,
@@ -120,8 +120,15 @@ router.post('/cast/pause', async (req, res) => {
   const { deviceUsn } = req.body;
   if (!deviceUsn) return res.status(400).json({ error: 'Missing deviceUsn' });
   try {
-    await dlna.pause(deviceUsn);
-    res.json({ status: 'paused' });
+    const state = await dlna.getTransportState(deviceUsn);
+    if (state === 'PLAYING') {
+      await dlna.pause(deviceUsn);
+      res.json({ status: 'paused' });
+    } else {
+      // Resume from paused/stopped — just send Play
+      await dlna.resume(deviceUsn);
+      res.json({ status: 'playing' });
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

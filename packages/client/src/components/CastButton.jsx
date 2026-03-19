@@ -51,9 +51,28 @@ export function CastButton({
             Cast to device
           </div>
 
+          <button
+            onClick={() => {
+              if (!activeDevice) return;
+              selectDevice(null);
+            }}
+            style={{
+              display: 'block', width: '100%', textAlign: 'left',
+              background: !activeDevice ? COLORS.hover : 'transparent',
+              border: 'none', cursor: 'pointer',
+              padding: '10px 14px', fontSize: 13,
+              color: !activeDevice ? COLORS.textPrimary : COLORS.textSecondary,
+              fontWeight: !activeDevice ? 600 : 400,
+            }}
+          >
+            This Device
+          </button>
+
+          <div style={{ height: 1, background: COLORS.border, margin: '4px 0' }} />
+
           {devices.length === 0 && (
             <div style={{ padding: '8px 14px 12px', fontSize: 13, color: COLORS.textSecondary }}>
-              No devices found
+              No speakers found
             </div>
           )}
 
@@ -63,15 +82,15 @@ export function CastButton({
               <button
                 key={device.usn}
                 onClick={() => {
-                  if (isActive && isCasting) return;
+                  if (isActive) return;
                   selectDevice(device.usn);
                 }}
                 style={{
                   display: 'block', width: '100%', textAlign: 'left',
-                  background: isActive ? COLORS.hover : 'transparent',
+                  background: isActive ? `rgba(${COLORS.accentRgb}, 0.15)` : 'transparent',
                   border: 'none', cursor: 'pointer',
                   padding: '10px 14px', fontSize: 13,
-                  color: isActive ? COLORS.textPrimary : COLORS.textSecondary,
+                  color: isActive ? COLORS.accent : COLORS.textSecondary,
                   fontWeight: isActive ? 600 : 400,
                 }}
               >
@@ -79,22 +98,6 @@ export function CastButton({
               </button>
             );
           })}
-
-          {isCasting && (
-            <>
-              <div style={{ height: 1, background: COLORS.border, margin: '4px 0' }} />
-              <button
-                onClick={() => { castStop(); setShowDevicePicker(false); }}
-                style={{
-                  display: 'block', width: '100%', textAlign: 'left',
-                  background: 'transparent', border: 'none', cursor: 'pointer',
-                  padding: '10px 14px 12px', fontSize: 13, color: COLORS.textSecondary,
-                }}
-              >
-                Disconnect
-              </button>
-            </>
-          )}
         </div>
       )}
     </div>

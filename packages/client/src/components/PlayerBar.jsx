@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useRef } from 'react';
 import { COLORS } from '../constants';
 import { formatTime } from '../utils';
 import { Icon } from './Icon';
@@ -20,7 +20,11 @@ export function PlayerBar({
   cast,
 }) {
   const has = !!currentTrack;
-  const pct = duration ? (progress / duration) * 100 : 0;
+  const [seekDragging, setSeekDragging] = useState(false);
+  const [seekDragValue, setSeekDragValue] = useState(0);
+  const seekFreezeRef = useRef(null);
+  const displayProgress = seekDragging ? seekDragValue : (seekFreezeRef.current !== null ? seekFreezeRef.current : progress);
+  const pct = duration ? (displayProgress / duration) * 100 : 0;
   const canGoToAlbum = has && currentAlbumInfo && (library.length > 0 || currentAlbumInfo.artistMbid);
 
   return (
@@ -89,23 +93,40 @@ export function PlayerBar({
 
         {/* Seek — hidden on mobile */}
         {!isMobile && <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', maxWidth: 480 }}>
-          <span style={{ fontSize: 11, color: COLORS.textSecondary, flexShrink: 0 }}>{formatTime(progress)}</span>
+          <span style={{ fontSize: 11, color: COLORS.textSecondary, flexShrink: 0 }}>{formatTime(displayProgress)}</span>
           <div
             style={{ flex: 1, height: 12, cursor: has ? 'pointer' : 'default', position: 'relative', display: 'flex', alignItems: 'center' }}
-            onClick={has ? handleSeekClick : undefined}
             onMouseEnter={e => { const t = e.currentTarget.querySelector('.seek-thumb'); if (t) t.style.opacity = '1'; }}
             onMouseLeave={e => { const t = e.currentTarget.querySelector('.seek-thumb'); if (t) t.style.opacity = '0'; }}
-            role="slider" tabIndex={has ? 0 : -1}
-            aria-label="Seek" aria-valuemin={0} aria-valuemax={Math.round(duration)} aria-valuenow={Math.round(progress)}
-            onKeyDown={e => {
-              if (!audioRef.current || !duration) return;
-              if (e.key === 'ArrowRight') audioRef.current.currentTime = Math.min(duration, audioRef.current.currentTime + 5);
-              if (e.key === 'ArrowLeft') audioRef.current.currentTime = Math.max(0, audioRef.current.currentTime - 5);
-            }}
           >
             <div style={{ position: 'absolute', width: '100%', height: 4, background: COLORS.border, borderRadius: 2 }} />
             <div style={{ position: 'absolute', height: 4, background: has ? COLORS.accent : COLORS.border, borderRadius: 2, width: `${pct}%`, transition: 'width 0.1s linear' }} />
             {has && <div className="seek-thumb" style={{ position: 'absolute', left: `calc(${pct}% - 6px)`, width: 12, height: 12, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 4px rgba(0,0,0,0.4)', opacity: 0, transition: 'opacity 0.15s', pointerEvents: 'none' }} />}
+            <input type="range" min={0} max={Math.round(duration) || 1} step={1} value={Math.round(displayProgress)}
+              onMouseDown={() => setSeekDragging(true)}
+              onTouchStart={() => setSeekDragging(true)}
+              onChange={e => {
+                const val = parseFloat(e.target.value);
+                setSeekDragValue(val);
+                // Only scrub local audio live — cast seeks on release only
+                if (!cast?.isCasting && audioRef.current) audioRef.current.currentTime = val;
+              }}
+              onMouseUp={e => {
+                const val = seekDragging ? seekDragValue : parseFloat(e.target.value);
+                setSeekDragging(false);
+                if (cast?.isCasting && cast.castSeek) {
+                  cast.castSeek(Math.round(val));
+                }
+              }}
+              onTouchEnd={e => {
+                const val = seekDragging ? seekDragValue : parseFloat(e.target.value);
+                setSeekDragging(false);
+                if (cast?.isCasting && cast.castSeek) {
+                  cast.castSeek(Math.round(val));
+                }
+              }}
+              style={{ position: 'absolute', width: '100%', height: '100%', opacity: 0, cursor: 'pointer', margin: 0 }}
+              aria-label="Seek" disabled={!has} />
           </div>
           <span style={{ fontSize: 11, color: COLORS.textSecondary, flexShrink: 0 }}>{formatTime(duration)}</span>
         </div>}

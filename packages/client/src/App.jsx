@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as api from '@not-ify/shared';
 import { COLORS } from './constants';
 import { buildTrackPath, contextMenuProps } from './utils';
@@ -196,15 +196,86 @@ function App() {
   const { trackDurations, setTrackDurations } = useTrackDurations(selectedAlbum);
   const cast = useCast();
 
-  // When a cast device is selected and a track is playing, auto-cast it
-  const handleCastDeviceSelected = (usn) => {
+  // ── Single-output enforcement ──────────────────────────────────────────────
+  // Core rule: if activeDevice is set, ALL audio goes to cast device.
+  // playTrack always runs (updates UI state), then we mute local + cast.
+
+  // Helper: cast a track to the active device, optionally starting at a position
+  const _sendToCast = async (track, albumInfo, pl, usn, startPosition) => {
+    if (!usn || !track) return;
+    try {
+      if (track.isYtPreview) {
+        const videoId = track.ytVideoId || track.id?.replace('yt-', '');
+        await cast.castYtTrack(videoId, track.title, track.artist, track.album, track.coverArt, usn);
+      } else {
+        await cast.castTrack(track, albumInfo || { artist: track.artist, album: track.album }, pl, usn, startPosition);
+      }
+    } catch (err) {
+      cast.addLog(`Cast failed: ${err.message}`);
+    }
+  };
+
+  // Wrap playTrack: always update UI, then route audio
+  const handlePlayTrack = (track, pl, idx, albumInfo) => {
+    // Always update UI state (currentTrack, playlist, cover art)
+    playTrack(track, pl, idx, albumInfo);
+    if (cast.activeDevice) {
+      // Mute local audio, send to cast device
+      setTimeout(() => {
+        if (audioRef.current) { audioRef.current.pause(); audioRef.current.muted = true; }
+        _sendToCast(track, albumInfo, pl, cast.activeDevice, 0);
+      }, 100);
+    }
+  };
+
+  // When a cast device is selected, transfer current playback
+  const handleCastDeviceSelected = async (usn) => {
+    // Stop previous cast device
+    if (cast.isCasting && cast.activeDevice) {
+      try { await cast.castStop(); } catch {}
+    }
+    // null usn = "This Device" (return to local playback)
+    if (!usn) {
+      // Sync local audio to where cast was playing
+      const castPos = cast.castState?.position || 0;
+      cast.selectDevice(null);
+      if (audioRef.current) {
+        audioRef.current.muted = false;
+        if (castPos > 0) audioRef.current.currentTime = castPos;
+        audioRef.current.play().catch(() => {});
+      }
+      return;
+    }
     cast.selectDevice(usn);
-    if (!usn || !currentTrack) return;
-    if (currentTrack.isYtPreview) {
-      const videoId = currentTrack.ytVideoId || currentTrack.id?.replace('yt-', '');
-      cast.castYtTrack(videoId, currentTrack.title, currentTrack.artist, currentTrack.album, currentCoverArt, usn);
+    if (!currentTrack) return;
+    // Capture position, mute local, cast
+    const currentPos = audioRef.current ? audioRef.current.currentTime : 0;
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current.muted = true; }
+    await _sendToCast(currentTrack, currentAlbumInfo, playlist, usn, currentPos);
+  };
+
+  // Bridge play/pause
+  const handleTogglePlay = () => {
+    if (cast.isCasting && cast.activeDevice) {
+      cast.castPause();
     } else {
-      cast.castTrack(currentTrack, currentAlbumInfo, playlist, usn);
+      togglePlay();
+    }
+  };
+
+  // Bridge next/prev
+  const handlePlayNext = () => {
+    if (cast.isCasting && cast.activeDevice) {
+      cast.castNext();
+    } else {
+      playNext();
+    }
+  };
+  const handlePlayPrev = () => {
+    if (cast.isCasting && cast.activeDevice) {
+      cast.castPrev();
+    } else {
+      playPrev();
     }
   };
 
@@ -506,7 +577,7 @@ function App() {
             openAlbumFromSearch={openAlbumFromSearch}
             openArtistPage={openArtistPage}
             handleSearch={handleSearch}
-            playTrack={playTrack}
+            playTrack={handlePlayTrack}
             addToQueue={addToQueue}
             showContextMenu={showContextMenu}
             removeAlbumFromLibrary={removeAlbumFromLibrary}
@@ -538,7 +609,7 @@ function App() {
                 openAlbumFromSearch={openAlbumFromSearch}
                 openArtistPage={openArtistPage}
                 handleSearch={handleSearch}
-                playTrack={playTrack}
+                playTrack={handlePlayTrack}
                 addToQueue={addToQueue}
                 showContextMenu={showContextMenu}
                 removeAlbumFromLibrary={removeAlbumFromLibrary}
@@ -589,8 +660,8 @@ function App() {
                     isInLibrary={isInLibrary}
                     prevViewRef={prevViewRef}
                     setView={setView}
-                    playTrack={playTrack}
-                    togglePlay={togglePlay}
+                    playTrack={handlePlayTrack}
+                    togglePlay={handleTogglePlay}
                     playAllFromYouTube={playAllFromYouTube}
                     openAlbumFromSearch={openAlbumFromSearch}
                     openArtistPage={openArtistPage}
@@ -646,13 +717,18 @@ function App() {
 
       <PlayerBar
         currentTrack={currentTrack} currentAlbumInfo={currentAlbumInfo} currentCoverArt={currentCoverArt}
-        isPlaying={isPlaying} volume={volume} setVolume={setVolume}
-        progress={progress} duration={duration}
+        isPlaying={cast.isCasting ? cast.castState?.state === 'PLAYING' : isPlaying}
+        volume={cast.isCasting ? (cast.castState?.volume ?? 50) / 100 : volume}
+        setVolume={cast.isCasting
+          ? (v) => { const level = typeof v === 'function' ? v((cast.castState?.volume ?? 50) / 100) : v; cast.castSetVolume(Math.round(level * 100)); }
+          : setVolume}
+        progress={cast.isCasting ? (cast.castState?.position ?? progress) : progress}
+        duration={cast.isCasting ? (cast.castState?.duration || duration) : duration}
         queue={queue} showQueue={showQueue} setShowQueue={setShowQueue}
         isMobile={isMobile}
         audioRef={audioRef}
         goToCurrentAlbum={goToCurrentAlbum}
-        togglePlay={togglePlay} playNext={playNext} playPrev={playPrev}
+        togglePlay={handleTogglePlay} playNext={handlePlayNext} playPrev={handlePlayPrev}
         handleSeekClick={handleSeekClick}
         library={library}
         cast={{ ...cast, onSelectDevice: handleCastDeviceSelected }}
