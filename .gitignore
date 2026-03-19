@@ -29,3 +29,6 @@ SYSTEM_DIAGRAM_VIEW.html
 # Claude local settings
 .claude/settings.local.json
 .claude/plan.md
+
+# Git worktrees
+.worktrees/
