@@ -1,3 +1,6 @@
+const os = require('os');
+const path = require('path');
+process.env.CONFIG_DIR = path.join(os.tmpdir(), `notify-test-${process.pid}`);
 const db = require('../../src/services/db');
 
 afterAll(() => db.close());
