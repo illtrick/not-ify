@@ -7,6 +7,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 - **MINOR** (0.x.0): New features, meaningful improvements
 - **PATCH** (0.0.x): Bug fixes, polish, iteration on current features
 
+## [1.1.1] - 2026-03-19
+
+### Added
+- Admin role system: first user auto-promoted to admin, role column on users table
+- Real-Debrid config UI with token input and connection testing (admin only)
+- VPN (PIA) config UI with region selector and proxy connectivity test (admin only)
+- Admin guard middleware for sensitive config endpoints
+- Generic `useServiceConfig` hook for service config load/save/test pattern
+
+### Changed
+- Real-Debrid token storage migrated from config/settings.json to SQLite global_settings
+- Settings modal now shows service sections based on user role
+- VPN credentials stored in SQLite (plaintext — acceptable for home network)
+
 ## [1.1.0] - 2026-03-19
 
 ### Added
