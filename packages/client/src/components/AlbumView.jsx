@@ -348,10 +348,18 @@ export function AlbumView({
               {Icon.clock(16, COLORS.textSecondary)}
             </span>}
           </div>
-          {mbTracks.map((t, i) => {
+          {(() => {
+            // Normalize for fuzzy matching: lowercase, strip non-alphanumeric
+            // (handles sanitizePath differences like : → _, whitespace variations, etc.)
+            const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            const normAlbum = norm(album);
+            const normArtist = norm(artist);
+            // Pre-filter library tracks for this album to avoid O(n*m) on every track
+            const albumLibTracks = library?.filter(lt =>
+              norm(lt.album) === normAlbum
+            ) || [];
+            return mbTracks.map((t, i) => {
             const isHovered = hoveredMbTrack === i;
-            // Match YouTube previews by title+artist, OR library tracks by title
-            // (handles navigating to MB view while a library track is playing)
             const isActive = (currentTrack?.isYtPreview
                 && currentTrack?.title === t.title
                 && currentTrack?.artist === artist)
@@ -360,12 +368,8 @@ export function AlbumView({
                   && (currentAlbumInfo?.album === album || currentTrack?.album === album));
             const isPending = ytPendingTrack === t.title;
             const trackArtist = t.artist || artist;
-            // Look up matching library track to show format badge
-            const libTrack = library?.find(lt =>
-              lt.title?.toLowerCase() === t.title?.toLowerCase() &&
-              (lt.artist?.toLowerCase() === artist.toLowerCase() ||
-               (t.artist && lt.artist?.toLowerCase() === t.artist.toLowerCase())) &&
-              lt.album?.toLowerCase() === album.toLowerCase()
+            const libTrack = albumLibTracks.find(lt =>
+              norm(lt.title) === norm(t.title)
             );
             return (
               <div
@@ -418,7 +422,8 @@ export function AlbumView({
                 )}
               </div>
             );
-          })}
+          });
+          })()}
         </div>
       )}
 
