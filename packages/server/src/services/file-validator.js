@@ -3,9 +3,11 @@
 // childProcess and fs are referenced via the module object so Jest spies intercept calls
 const childProcess = require('child_process');
 const fs = require('fs');
+const net = require('net');
 
 const CLAM_SOCKET = process.env.CLAM_SOCKET || '/var/run/clamav/clamd.sock'; // eslint-disable-line no-unused-vars
 const MAX_AUDIO_SIZE = 500 * 1024 * 1024; // 500 MB
+const CLAM_CHUNK_SIZE = 64 * 1024; // 64 KB chunks for INSTREAM
 
 const AUDIO_MIMES = new Set([
   'audio/mpeg', 'audio/flac', 'audio/ogg', 'audio/mp4',
@@ -62,10 +64,81 @@ function checkFfprobe(filePath) {
   }
 }
 
-function checkClamAV(filePath) {
+function checkClamAVviaTCP(filePath) {
+  return new Promise((resolve) => {
+    const host = process.env.CLAM_HOST || 'clamav';
+    const port = parseInt(process.env.CLAM_PORT || '3310', 10);
+    const socket = new net.Socket();
+    let response = '';
+
+    socket.setTimeout(30000);
+
+    socket.on('error', (err) => {
+      resolve({ name: 'clam', passed: false, detail: `TCP error: ${err.message}` });
+    });
+
+    socket.on('timeout', () => {
+      socket.destroy();
+      resolve({ name: 'clam', passed: false, detail: 'TCP timeout' });
+    });
+
+    socket.connect(port, host, () => {
+      // Send INSTREAM command (null-terminated)
+      socket.write('zINSTREAM\0');
+
+      // Stream file in chunks
+      let fd;
+      try {
+        fd = fs.openSync(filePath, 'r');
+        const buf = Buffer.alloc(CLAM_CHUNK_SIZE);
+        let bytesRead;
+        while ((bytesRead = fs.readSync(fd, buf, 0, CLAM_CHUNK_SIZE, null)) > 0) {
+          const sizeHeader = Buffer.allocUnsafe(4);
+          sizeHeader.writeUInt32BE(bytesRead, 0);
+          socket.write(sizeHeader);
+          socket.write(buf.slice(0, bytesRead));
+        }
+        fs.closeSync(fd);
+      } catch (err) {
+        if (fd !== undefined) {
+          try { fs.closeSync(fd); } catch (_) { /* ignore */ }
+        }
+        socket.destroy();
+        resolve({ name: 'clam', passed: false, detail: `Read error: ${err.message}` });
+        return;
+      }
+
+      // Send end-of-stream (4 zero bytes)
+      socket.write(Buffer.alloc(4));
+    });
+
+    socket.on('data', (data) => {
+      response += data.toString();
+    });
+
+    socket.on('end', () => {
+      // Response is like "stream: OK\0" or "stream: Win.Test.EICAR FOUND\0"
+      const clean = response.replace(/\0/g, '').trim();
+      if (clean.endsWith('OK')) {
+        resolve({ name: 'clam', passed: true, detail: 'clean' });
+      } else {
+        resolve({ name: 'clam', passed: false, detail: clean || 'infected' });
+      }
+    });
+  });
+}
+
+async function checkClamAV(filePath) {
   if (!isClamEnabled()) {
     return { name: 'clam', skipped: true, detail: 'ClamAV disabled' };
   }
+
+  // If CLAM_HOST is set, use TCP INSTREAM protocol (Docker/daemon mode)
+  if (process.env.CLAM_HOST) {
+    return checkClamAVviaTCP(filePath);
+  }
+
+  // Fallback: clamdscan CLI (local daemon or socket)
   try {
     childProcess.execSync(`clamdscan --no-summary "${filePath}"`);
     return { name: 'clam', passed: true, detail: 'clean' };
@@ -103,7 +176,7 @@ async function validateFile(filePath) {
   }
 
   // 4. ClamAV scan (if enabled)
-  const clamCheck = checkClamAV(filePath);
+  const clamCheck = await checkClamAV(filePath);
   results.checks.push(clamCheck);
   if (!clamCheck.skipped && !clamCheck.passed) {
     results.passed = false;
