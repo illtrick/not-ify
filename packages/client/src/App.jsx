@@ -43,16 +43,21 @@ function App() {
     if (saved) api.setUser(saved);
     return saved;
   });
+  const [isAdmin, setIsAdmin] = useState(false);
 
   function switchUser() {
     clearCurrentUser();
     api.setUser(null);
     setCurrentUser(null);
+    setIsAdmin(false);
   }
 
   // Show user picker if no user selected
   if (!currentUser) {
-    return <UserPicker onUserSelected={(userId) => setCurrentUser(userId)} />;
+    return <UserPicker onUserSelected={(user) => {
+      setCurrentUser(user.id);
+      setIsAdmin(user.role === 'admin');
+    }} />;
   }
   // Navigation (stays in App)
   const [view, setView] = useState('search');
@@ -344,10 +349,17 @@ function App() {
 
   // ===== EFFECTS =====
 
-  // Initial load: library + Last.fm + URL param search + version check
+  // Initial load: library + Last.fm + URL param search + version check + admin role
   useEffect(() => {
     loadLibrary();
     lastfm.load();
+
+    // Resolve admin role for the current user (handles page reload case where
+    // currentUser is restored from localStorage but isAdmin starts as false)
+    api.getAvailableUsers().then(users => {
+      const me = users?.find(u => u.id === currentUser);
+      if (me) setIsAdmin(me.role === 'admin');
+    }).catch(() => {});
 
     // Check API version compatibility
     api.checkHealth().then(result => {

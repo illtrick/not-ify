@@ -18,9 +18,13 @@ export function UserPicker({ onUserSelected }) {
       .finally(() => setLoading(false));
   }, []);
 
-  function selectUser(userId) {
-    localStorage.setItem(USER_KEY, userId);
-    api.setUser(userId);
+  function selectUser(user) {
+    localStorage.setItem(USER_KEY, user.id);
+    api.setUser(user.id);
+    // Pass full user object (id, displayName, role) to parent before reloading.
+    // Note: the page reload means onUserSelected is primarily for future use
+    // (e.g. if reload is removed). The role is resolved server-side on reload.
+    onUserSelected(user);
     // Reload so all hooks re-initialize with the correct user context
     window.location.reload();
   }
@@ -39,7 +43,7 @@ export function UserPicker({ onUserSelected }) {
         {users.map(user => (
           <button
             key={user.id}
-            onClick={() => selectUser(user.id)}
+            onClick={() => selectUser(user)}
             style={{
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
               background: 'none', border: '2px solid transparent', borderRadius: 12,
