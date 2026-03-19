@@ -114,7 +114,7 @@ async function ytDownloadOne(entry, abort) {
   const outputTemplate = path.join(destDir, `${sanitizePath(dlTitle)}.%(ext)s`);
   const args = [
     ...getProxyArgs(),
-    '-x', '--audio-format', 'mp3', '--audio-quality', '0',
+    '-x', '--audio-format', 'mp3', '--audio-quality', '5',
     '--no-warnings', '--newline',
     '-o', outputTemplate,
     entry.url,
