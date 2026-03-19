@@ -157,6 +157,12 @@ async function _fetchDeviceInfo(location) {
     const nameMatch = xml.match(/<friendlyName>([^<]+)<\/friendlyName>/);
     const friendlyName = nameMatch ? nameMatch[1].trim() : 'Unknown Device';
 
+    // Sonos-specific: extract roomName and displayName for friendly display
+    const roomMatch = xml.match(/<roomName>([^<]+)<\/roomName>/);
+    const displayMatch = xml.match(/<displayName>([^<]+)<\/displayName>/);
+    const roomName = roomMatch ? roomMatch[1].trim() : null;
+    const displayName = displayMatch ? displayMatch[1].trim() : null;
+
     // Must have AVTransport somewhere
     if (!xml.includes('AVTransport')) return { friendlyName, playable: false };
 
@@ -197,7 +203,7 @@ async function _fetchDeviceInfo(location) {
     const pqMatch = xml.match(/<serviceType>urn:schemas-wiimu-com:service:PlayQueue:1<\/serviceType>[\s\S]*?<controlURL>([^<]+)<\/controlURL>/);
     const playQueueControl = pqMatch ? baseUrl + pqMatch[1] : null;
 
-    return { friendlyName, playable: true, baseUrl, avTransportControl, avTransportEvent, renderingControl, renderingControlEvent, playQueueControl, manufacturer, modelName, deviceType };
+    return { friendlyName, roomName, displayName, playable: true, baseUrl, avTransportControl, avTransportEvent, renderingControl, renderingControlEvent, playQueueControl, manufacturer, modelName, deviceType };
   } catch {
     return { friendlyName: 'Unknown Device', playable: false };
   }
@@ -238,6 +244,8 @@ async function startDiscovery() {
     _devices.set(usn, {
       usn,
       friendlyName: info.friendlyName,
+      roomName: info.roomName,
+      displayName: info.displayName,
       location,
       ip: rinfo.address,
       baseUrl: info.baseUrl,
@@ -284,6 +292,8 @@ function getDevices() {
   return Array.from(_devices.values()).map(d => ({
     usn: d.usn,
     friendlyName: d.friendlyName,
+    roomName: d.roomName || null,
+    displayName: d.displayName || null,
     ip: d.ip,
     location: d.location,
     deviceType: d.deviceType,

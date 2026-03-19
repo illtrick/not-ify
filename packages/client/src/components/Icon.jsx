@@ -113,19 +113,32 @@ export const Icon = {
       <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
     </svg>
   ),
+  // Standard cast icon — screen with WiFi waves (Google Cast style)
   cast: (size = 16, color = 'currentColor') => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
-      <path d="M2 8.5A6.5 6.5 0 018.5 2" /><path d="M2 12.5A10.5 10.5 0 0112.5 2" />
-      <path d="M2 16.5A14.5 14.5 0 0116.5 2" />
-      <rect x="2" y="18" width="4" height="4" rx="1" fill={color} stroke="none" />
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={{ display: 'block' }}>
+      <path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11zm20-7H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z" />
     </svg>
   ),
   castConnected: (size = 16, color = 'currentColor') => (
     <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={{ display: 'block' }}>
-      <path d="M2 8.5A6.5 6.5 0 018.5 2" stroke={color} strokeWidth="2" strokeLinecap="round" fill="none" />
-      <path d="M2 12.5A10.5 10.5 0 0112.5 2" stroke={color} strokeWidth="2" strokeLinecap="round" fill="none" />
-      <path d="M2 16.5A14.5 14.5 0 0116.5 2" stroke={color} strokeWidth="2" strokeLinecap="round" fill="none" />
-      <rect x="2" y="18" width="4" height="4" rx="1" />
+      <path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11zm20-7H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z" />
+      <path d="M1 18v3h3c0-1.66-1.34-3-3-3z" fill={color} />
+    </svg>
+  ),
+  // Device type icons for cast menu
+  speaker: (size = 16, color = 'currentColor') => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={{ display: 'block' }}>
+      <path d="M17 2H7c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-5 2c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0 16c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" />
+    </svg>
+  ),
+  laptop: (size = 16, color = 'currentColor') => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={{ display: 'block' }}>
+      <path d="M20 18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z" />
+    </svg>
+  ),
+  soundbar: (size = 16, color = 'currentColor') => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={{ display: 'block' }}>
+      <path d="M2 9c0-1.1.9-2 2-2h16c1.1 0 2 .9 2 2v6c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V9zm4 3c0 .83.67 1.5 1.5 1.5S9 12.83 9 12s-.67-1.5-1.5-1.5S6 11.17 6 12zm4.5 0c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5-1.5.67-1.5 1.5zm4.5 0c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5-1.5.67-1.5 1.5z" />
     </svg>
   ),
 };

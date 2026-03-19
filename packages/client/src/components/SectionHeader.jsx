@@ -6,7 +6,7 @@ import { COLORS } from '../constants';
 // ---------------------------------------------------------------------------
 export function SectionHeader({ children }) {
   return (
-    <div style={{ fontSize: 22, fontWeight: 700, color: COLORS.textPrimary, marginBottom: 16, marginTop: 8 }}>
+    <div style={{ fontSize: 24, fontWeight: 700, color: COLORS.textPrimary, marginBottom: 16, marginTop: 8 }}>
       {children}
     </div>
   );

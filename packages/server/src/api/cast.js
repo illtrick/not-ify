@@ -69,7 +69,8 @@ router.post('/cast/play', async (req, res) => {
   if (!info) return res.status(404).json({ error: 'Track not found' });
 
   const deviceType = dlna.getDeviceType(deviceUsn);
-  const deviceName = dlna.getDevices().find(d => d.usn === deviceUsn)?.friendlyName || deviceUsn;
+  const _dev = dlna.getDevices().find(d => d.usn === deviceUsn);
+  const deviceName = _dev?.roomName || _dev?.friendlyName || deviceUsn;
   const userId = req.userId || 'default';
 
   try {
@@ -192,7 +193,8 @@ router.post('/cast/play/yt', async (req, res) => {
   };
 
   try {
-    log(`play/yt: "${title}" by ${artist} → ${dlna.getDevices().find(d => d.usn === deviceUsn)?.friendlyName || deviceUsn}`);
+    const _ytDev = dlna.getDevices().find(d => d.usn === deviceUsn);
+    log(`play/yt: "${title}" by ${artist} → ${_ytDev?.roomName || _ytDev?.friendlyName || deviceUsn}`);
     log(`play/yt: streamUrl=${streamUrl}`);
     await dlna.play(deviceUsn, streamUrl, { metadata, contentType: 'audio/mpeg' });
     const userId = req.userId || 'default';
@@ -203,7 +205,7 @@ router.post('/cast/play/yt', async (req, res) => {
     });
     const device = dlna.getDevices().find(d => d.usn === deviceUsn);
     log('play/yt: success');
-    res.json({ status: 'playing', device: device?.friendlyName || deviceUsn });
+    res.json({ status: 'playing', device: device?.roomName || device?.friendlyName || deviceUsn });
   } catch (err) {
     log(`play/yt: FAILED — ${err.message}`);
     res.status(500).json({ error: err.message });

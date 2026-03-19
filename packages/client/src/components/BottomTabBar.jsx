@@ -10,7 +10,7 @@ export function BottomTabBar({ isMobile, mobileTab, setMobileTab, view, setView 
   ];
   return (
     <nav style={{
-      height: 56, minHeight: 56, background: COLORS.surface,
+      height: 60, minHeight: 60, background: COLORS.surface,
       borderTop: `1px solid ${COLORS.border}`,
       display: 'flex', alignItems: 'center', justifyContent: 'space-around',
       paddingBottom: 'env(safe-area-inset-bottom)',
@@ -32,8 +32,8 @@ export function BottomTabBar({ isMobile, mobileTab, setMobileTab, view, setView 
               background: 'none', border: 'none', cursor: 'pointer', padding: '8px 0',
               color: highlighted ? COLORS.accent : COLORS.textSecondary,
             }}>
-            {t.icon(22, highlighted ? COLORS.accent : COLORS.textSecondary)}
-            <span style={{ fontSize: 10, fontWeight: 600 }}>{t.label}</span>
+            {t.icon(24, highlighted ? COLORS.accent : COLORS.textSecondary)}
+            <span style={{ fontSize: 11, fontWeight: 600 }}>{t.label}</span>
           </button>
         );
       })}

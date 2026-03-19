@@ -19,7 +19,7 @@ export function AlbumCard({ album, onPlay, onClick, isDownloading, inLibrary }) 
       className="album-card"
       style={{
         background: hovered ? '#222' : COLORS.card,
-        borderRadius: 8, padding: 12, cursor: 'pointer',
+        borderRadius: 10, padding: 14, cursor: 'pointer',
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -43,7 +43,7 @@ export function AlbumCard({ album, onPlay, onClick, isDownloading, inLibrary }) 
           >
             <button
               style={{
-                width: 48, height: 48, borderRadius: '50%',
+                width: 52, height: 52, borderRadius: '50%',
                 background: isDownloading ? COLORS.hover : COLORS.accent,
                 border: 'none',
                 cursor: isDownloading ? 'not-allowed' : 'pointer',
@@ -55,21 +55,21 @@ export function AlbumCard({ album, onPlay, onClick, isDownloading, inLibrary }) 
               disabled={isDownloading}
               aria-label={`Play ${album.artist} - ${album.album}`}
             >
-              {Icon.play(20, '#fff')}
+              {Icon.play(22, '#fff')}
             </button>
           </div>
         </div>
       </div>
 
       {/* Info */}
-      <div className="card-title" style={{ fontSize: 14, fontWeight: 600, color: COLORS.textPrimary, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div className="card-title" style={{ fontSize: 15, fontWeight: 600, color: COLORS.textPrimary, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
         {album.album || album.artist}
         {inLibrary && <span style={{ width: 8, height: 8, borderRadius: '50%', background: COLORS.success, flexShrink: 0 }} />}
         {album.availableVia === 'youtube' && !inLibrary && (
           <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: 'rgba(255,255,255,0.1)', color: COLORS.textSecondary, flexShrink: 0, letterSpacing: 0.5 }}>YT</span>
         )}
       </div>
-      <div style={{ fontSize: 12, color: COLORS.textSecondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <div style={{ fontSize: 13, color: COLORS.textSecondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {album.artist}{subLabel ? ` · ${subLabel}` : ''}
       </div>
     </div>

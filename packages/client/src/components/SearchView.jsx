@@ -56,7 +56,7 @@ export function SearchView({
               onChange={e => setQuery(e.target.value)}
               placeholder="Search for artists, albums..."
               style={{
-                width: '100%', padding: isMobile ? '12px 14px' : '14px 18px',
+                width: '100%', padding: isMobile ? '14px 16px' : '16px 20px',
                 paddingRight: query ? 40 : undefined,
                 borderRadius: 8,
                 border: `1px solid ${COLORS.border}`, background: COLORS.hover,
@@ -87,7 +87,7 @@ export function SearchView({
           <button
             type="submit"
             style={{
-              padding: isMobile ? '12px 16px' : '14px 24px', borderRadius: 8, border: 'none',
+              padding: isMobile ? '14px 18px' : '16px 28px', borderRadius: 8, border: 'none',
               background: COLORS.accent, color: '#fff', fontSize: 15,
               fontWeight: 600, cursor: 'pointer',
             }}
@@ -99,7 +99,7 @@ export function SearchView({
 
       {/* Loading skeletons */}
       {searching && (
-        <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${isMobile ? 140 : 180}px, 1fr))`, gap: 20 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${isMobile ? 140 : 200}px, 1fr))`, gap: 20 }}>
           {Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} />)}
         </div>
       )}
@@ -225,8 +225,8 @@ export function SearchView({
           {/* Recently played */}
           {recentlyPlayed.length > 0 && (
             <div style={{ marginBottom: 32 }}>
-              <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>Recently Played</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 16 }}>
+              <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 16 }}>Recently Played</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 16 }}>
                 {recentlyPlayed.map((r, i) => {
                   const libAlbum = libraryAlbums().find(la =>
                     la.artist.toLowerCase() === r.artist.toLowerCase() && la.album.toLowerCase() === r.album.toLowerCase()
@@ -248,8 +248,8 @@ export function SearchView({
                             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />;
                         })()}
                       </div>
-                      <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.album}</div>
-                      <div style={{ fontSize: 11, color: COLORS.textSecondary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.artist}</div>
+                      <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.album}</div>
+                      <div style={{ fontSize: 12, color: COLORS.textSecondary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.artist}</div>
                     </div>
                   );
                 })}
@@ -260,8 +260,8 @@ export function SearchView({
           {/* Last.fm top artists */}
           {lastfmTopArtists.length > 0 && (
             <div style={{ marginBottom: 32 }}>
-              <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>Your Top Artists</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 16 }}>
+              <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 16 }}>Your Top Artists</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 16 }}>
                 {lastfmTopArtists.map((a, i) => (
                   <div key={i} style={{ background: COLORS.card, borderRadius: 8, padding: 12, cursor: 'pointer', transition: 'background 0.15s' }}
                     onClick={() => handleSearch(null, a.name)}
@@ -272,7 +272,7 @@ export function SearchView({
                         onError={e => e.target.style.display = 'none'}
                         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
                     </div>
-                    <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.name}</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.name}</div>
                     <div style={{ fontSize: 11, color: COLORS.textSecondary }}>{parseInt(a.playcount).toLocaleString()} plays</div>
                   </div>
                 ))}
@@ -337,7 +337,7 @@ export function SearchView({
           {restAlbums.length > 0 && (
             <div>
               <SectionHeader>Albums</SectionHeader>
-              <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${isMobile ? 140 : 180}px, 1fr))`, gap: 20 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${isMobile ? 140 : 200}px, 1fr))`, gap: 20 }}>
                 {restAlbums.map(album => (
                   <AlbumCard
                     key={album.id}
@@ -360,7 +360,7 @@ export function SearchView({
           {otherResults.length > 0 && (
             <div style={{ marginTop: 32 }}>
               <SectionHeader>Other Results</SectionHeader>
-              <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${isMobile ? 140 : 180}px, 1fr))`, gap: 20 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${isMobile ? 140 : 200}px, 1fr))`, gap: 20 }}>
                 {otherResults.map(album => (
                   <AlbumCard
                     key={album.id}
