@@ -532,6 +532,11 @@ export function getVpnFailures() {
   return get('/api/vpn/failures');
 }
 
+// Service health check — all external dependencies
+export function getServiceHealth() {
+  return get('/api/health/services');
+}
+
 // Activity log — verbose download/pipeline events for debugging
 export function getActivityLog({ since, category, limit } = {}) {
   const params = new URLSearchParams();

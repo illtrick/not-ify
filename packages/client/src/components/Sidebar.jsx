@@ -184,6 +184,20 @@ export function Sidebar({
         </div>
       </div>
       <BgDownloadIndicator bgDownloadStatus={bgDownloadStatus} setBgDownloadStatus={setBgDownloadStatus} jobQueueStats={jobQueueStats} onToggleLog={onToggleLog} />
+      {/* Always-visible log toggle — shown when BgDownloadIndicator is hidden */}
+      {!bgDownloadStatus && !(jobQueueStats && (jobQueueStats.active + jobQueueStats.pending > 0)) && (
+        <div
+          onClick={onToggleLog}
+          style={{
+            padding: '4px 12px', fontSize: 10, color: COLORS.textSecondary,
+            borderTop: `1px solid ${COLORS.border}`,
+            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+          }}
+          title="Toggle activity log"
+        >
+          <span>▲ Activity Log</span>
+        </div>
+      )}
       <DownloadIndicator
         downloadStatus={downloadStatus} setDownloadStatus={setDownloadStatus}
         downloading={downloading}

@@ -44,6 +44,63 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', version: pkg.version, apiVersion: 1, service: 'not-ify-server' });
 });
 
+// Service health check — tests connectivity to all external dependencies
+app.get('/api/health/services', async (req, res) => {
+  const checks = {};
+  async function check(name, fn) {
+    const start = Date.now();
+    try {
+      const result = await fn();
+      checks[name] = { status: 'ok', latency: Date.now() - start, ...result };
+    } catch (err) {
+      checks[name] = { status: 'error', latency: Date.now() - start, error: err.message };
+    }
+  }
+  await Promise.all([
+    check('musicbrainz', async () => {
+      const r = await fetch('https://musicbrainz.org/ws/2/artist/5b11f4ce-a62d-471e-81fc-a69a8278c7da?fmt=json', {
+        signal: AbortSignal.timeout(8000), headers: { 'User-Agent': 'Not-ify/1.0 (personal-use)' },
+      });
+      return { ok: r.ok };
+    }),
+    check('lastfm', async () => {
+      const r = await fetch('https://ws.audioscrobbler.com/2.0/?method=chart.gettoptracks&format=json&api_key=dummy&limit=1', {
+        signal: AbortSignal.timeout(8000),
+      });
+      return { ok: r.status !== 0 }; // 403 is fine — means the service is reachable
+    }),
+    check('youtube', async () => {
+      const r = await fetch('https://www.youtube.com/', { signal: AbortSignal.timeout(8000) });
+      return { ok: r.ok };
+    }),
+    check('realdebrid', async () => {
+      const r = await fetch('https://api.real-debrid.com/rest/1.0/disable_access_token', {
+        signal: AbortSignal.timeout(8000),
+      });
+      return { ok: r.status !== 0 };
+    }),
+    check('vpn', async () => {
+      const proxy = process.env.VPN_PROXY;
+      if (!proxy) return { status: 'disabled', ok: true };
+      const { getProxyFetch } = require('./services/proxy');
+      const pf = getProxyFetch();
+      const r = await pf('https://api.ipify.org?format=json', { signal: AbortSignal.timeout(8000) });
+      const data = await r.json();
+      return { ok: true, ip: data.ip };
+    }),
+    check('gluetun', async () => {
+      const url = process.env.GLUETUN_CONTROL_URL;
+      if (!url) return { status: 'disabled', ok: true };
+      const r = await fetch(`${url}/v1/vpn/settings`, { signal: AbortSignal.timeout(5000) });
+      const data = await r.json();
+      const region = data?.provider?.server_selection?.regions?.[0] || 'unknown';
+      return { ok: true, region };
+    }),
+  ]);
+  const overall = Object.values(checks).every(c => c.status === 'ok') ? 'ok' : 'degraded';
+  res.json({ status: overall, version: pkg.version, checks });
+});
+
 // Shared cover art fetch helper
 async function fetchAndCacheCover(coverUrl, cachePath, missPath, res) {
   fs.mkdirSync(COVERS_DIR, { recursive: true });

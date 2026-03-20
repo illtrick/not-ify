@@ -782,6 +782,8 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
         </main>
       </div>
 
+      <ActivityLog open={showActivityLog} onClose={() => setShowActivityLog(false)} />
+
       <PlayerBar
         currentTrack={currentTrack} currentAlbumInfo={currentAlbumInfo} currentCoverArt={currentCoverArt}
         isPlaying={cast.isCasting ? cast.castState?.state === 'PLAYING' : isPlaying}
@@ -839,7 +841,6 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
       />
       {/* Hidden secondary audio element for gapless pre-buffering and crossfade */}
       <audio ref={nextAudioRef} preload="auto" style={{ display: 'none' }} />
-      <ActivityLog open={showActivityLog} onClose={() => setShowActivityLog(false)} />
     </div>
   );
 }
