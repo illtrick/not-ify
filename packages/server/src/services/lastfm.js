@@ -239,10 +239,16 @@ async function getRecentTracksPage(user, page = 1, limit = 200, from = null) {
     page: String(page),
   });
 
-  // We need an API key — use the first user's config that has one
-  // (this is a public endpoint, any valid key works)
-  const cfg = getConfig('default');
-  const apiKey = cfg.apiKey || '';
+  // We need an API key — try default, then fall back to any user that has one
+  let apiKey = getConfig('default').apiKey;
+  if (!apiKey) {
+    const users = db.getUsers ? db.getUsers() : [];
+    for (const u of users) {
+      const c = getConfig(u.id);
+      if (c.apiKey) { apiKey = c.apiKey; break; }
+    }
+  }
+  apiKey = apiKey || '';
   params.set('api_key', apiKey);
 
   if (from) params.set('from', String(from));

@@ -13,38 +13,44 @@ async function fullSync(userId, lastfmUsername) {
   let totalPages = 1;
   let fetched = 0;
 
-  while (page <= totalPages) {
-    let retries = 0;
-    let result;
-    while (retries < 5) {
-      try {
-        result = await lastfm.getRecentTracksPage(lastfmUsername, page, 200);
-        break; // success
-      } catch (err) {
-        if (err.message?.includes('429') && retries < 4) {
-          console.warn(`[scrobble-sync] Rate limited, backing off 30s (page ${page}, attempt ${retries + 1})`);
-          await sleep(30000);
-          retries++;
-          continue;
+  try {
+    while (page <= totalPages) {
+      let retries = 0;
+      let result;
+      while (retries < 5) {
+        try {
+          result = await lastfm.getRecentTracksPage(lastfmUsername, page, 200);
+          break; // success
+        } catch (err) {
+          if (err.message?.includes('429') && retries < 4) {
+            console.warn(`[scrobble-sync] Rate limited, backing off 30s (page ${page}, attempt ${retries + 1})`);
+            await sleep(30000);
+            retries++;
+            continue;
+          }
+          throw err; // non-429 or max retries exceeded
         }
-        throw err; // non-429 or max retries exceeded
       }
+      totalPages = result.totalPages;
+
+      const scrobbles = result.tracks
+        .filter(t => t.date)
+        .map(t => ({
+          artist: t.artist?.['#text'] || t.artist?.name || '',
+          album: t.album?.['#text'] || '',
+          track: t.name || '',
+          played_at: parseInt(t.date?.uts || '0', 10),
+        }));
+
+      db.insertScrobbles(userId, scrobbles);
+      fetched += scrobbles.length;
+      setSyncState(userId, { state: 'syncing', total: result.total, fetched, startedAt });
+      page++;
     }
-    totalPages = result.totalPages;
-
-    const scrobbles = result.tracks
-      .filter(t => t.date)
-      .map(t => ({
-        artist: t.artist?.['#text'] || t.artist?.name || '',
-        album: t.album?.['#text'] || '',
-        track: t.name || '',
-        played_at: parseInt(t.date?.uts || '0', 10),
-      }));
-
-    db.insertScrobbles(userId, scrobbles);
-    fetched += scrobbles.length;
-    setSyncState(userId, { state: 'syncing', total: result.total, fetched, startedAt });
-    page++;
+  } catch (err) {
+    console.error(`[scrobble-sync] Full sync failed for ${userId} at page ${page}:`, err.message);
+    setSyncState(userId, { state: 'error', error: err.message, fetched });
+    throw err;
   }
 
   db.rebuildArtistAffinity(userId);
