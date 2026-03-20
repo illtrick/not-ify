@@ -1,7 +1,7 @@
 // Load .env.dev for native Windows development (no Docker)
 const _envPath = require('path').resolve(__dirname, '../../../.env.dev');
 if (require('fs').existsSync(_envPath)) {
-  for (const line of require('fs').readFileSync(_envPath, 'utf8').split('\n')) {
+  for (const line of require('fs').readFileSync(_envPath, 'utf8').split(/\r?\n/)) {
     const m = line.match(/^([^#=]+)=(.*)$/);
     if (m && !process.env[m[1].trim()]) process.env[m[1].trim()] = m[2].trim();
   }
