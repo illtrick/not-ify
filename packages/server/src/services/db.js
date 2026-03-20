@@ -445,12 +445,14 @@ function getScrobbleCount(userId) {
 
 function rebuildArtistAffinity(userId) {
   const db = getDb();
-  db.prepare('DELETE FROM artist_affinity WHERE user_id = ?').run(userId);
-  db.prepare(`
-    INSERT INTO artist_affinity (user_id, artist, play_count, last_played_at)
-    SELECT user_id, artist, COUNT(*) as play_count, MAX(played_at) as last_played_at
-    FROM scrobbles WHERE user_id = ? GROUP BY user_id, artist
-  `).run(userId);
+  db.transaction(() => {
+    db.prepare('DELETE FROM artist_affinity WHERE user_id = ?').run(userId);
+    db.prepare(`
+      INSERT INTO artist_affinity (user_id, artist, play_count, last_played_at)
+      SELECT user_id, artist, COUNT(*) as play_count, MAX(played_at) as last_played_at
+      FROM scrobbles WHERE user_id = ? GROUP BY user_id, artist
+    `).run(userId);
+  })();
 }
 
 function getArtistAffinity(userId) {
