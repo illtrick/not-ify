@@ -73,4 +73,31 @@ describe('scrobble-sync', () => {
     await sync.deltaSync('nathan', 'lfmuser');
     expect(lastfm.getRecentTracksPage).toHaveBeenCalledWith('lfmuser', 1, 200, 999999);
   });
+
+  test('fullSync retries page on 429 then succeeds', async () => {
+    const lastfm = require('../../src/services/lastfm');
+    // Mock sleep to be instant so test doesn't wait 30s
+    jest.spyOn(global, 'setTimeout').mockImplementation((fn) => { fn(); return 0; });
+
+    lastfm.getRecentTracksPage
+      .mockRejectedValueOnce(new Error('Last.fm API 429'))
+      .mockResolvedValueOnce({ tracks: [mockTrack('A', 'B', 'T', 1000)], totalPages: 1, total: 1 });
+
+    // 'nathan' is seeded in db.js
+    const result = await sync.fullSync('nathan', 'lfmuser-retry');
+    expect(result.fetched).toBe(1);
+
+    jest.restoreAllMocks();
+  });
+
+  test('deltaSync falls back to fullSync when no lastSyncedAt', async () => {
+    const lastfm = require('../../src/services/lastfm');
+    lastfm.getRecentTracksPage
+      .mockResolvedValueOnce({ tracks: [mockTrack('A', 'B', 'T', 1000)], totalPages: 1, total: 1 });
+
+    // 'sarah' is seeded in db.js; ensure no prior sync state so deltaSync falls back to fullSync
+    db.setUserSetting('sarah', 'scrobbleSync', null);
+    const result = await sync.deltaSync('sarah', 'lfmuser-fallback');
+    expect(result.fetched).toBe(1);
+  });
 });

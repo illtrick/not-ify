@@ -14,16 +14,21 @@ async function fullSync(userId, lastfmUsername) {
   let fetched = 0;
 
   while (page <= totalPages) {
+    let retries = 0;
     let result;
-    try {
-      result = await lastfm.getRecentTracksPage(lastfmUsername, page, 200);
-    } catch (err) {
-      if (err.message && err.message.includes('429')) {
-        console.warn(`[scrobble-sync] Rate limited, backing off 30s (page ${page})`);
-        await sleep(30000);
-        continue;
+    while (retries < 5) {
+      try {
+        result = await lastfm.getRecentTracksPage(lastfmUsername, page, 200);
+        break; // success
+      } catch (err) {
+        if (err.message?.includes('429') && retries < 4) {
+          console.warn(`[scrobble-sync] Rate limited, backing off 30s (page ${page}, attempt ${retries + 1})`);
+          await sleep(30000);
+          retries++;
+          continue;
+        }
+        throw err; // non-429 or max retries exceeded
       }
-      throw err;
     }
     totalPages = result.totalPages;
 
@@ -55,7 +60,21 @@ async function deltaSync(userId, lastfmUsername) {
 
   let page = 1, totalPages = 1, fetched = 0;
   while (page <= totalPages) {
-    const result = await lastfm.getRecentTracksPage(lastfmUsername, page, 200, from);
+    let retries = 0;
+    let result;
+    while (retries < 5) {
+      try {
+        result = await lastfm.getRecentTracksPage(lastfmUsername, page, 200, from);
+        break;
+      } catch (err) {
+        if (err.message?.includes('429') && retries < 4) {
+          await sleep(30000);
+          retries++;
+          continue;
+        }
+        throw err;
+      }
+    }
     totalPages = result.totalPages;
     const scrobbles = result.tracks
       .filter(t => t.date)
