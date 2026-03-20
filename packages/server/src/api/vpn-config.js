@@ -91,4 +91,33 @@ router.get('/failures', (req, res) => {
   res.json(getFailureSummary());
 });
 
+router.post('/region', async (req, res) => {
+  const { region } = req.body;
+  if (!region) return res.status(400).json({ error: 'Missing region' });
+
+  const controlUrl = process.env.GLUETUN_CONTROL_URL || 'http://localhost:8000';
+  try {
+    const response = await fetch(`${controlUrl}/v1/openvpn/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ server_regions: [region] }),
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      return res.json({ status: 'error', error: `Gluetun returned ${response.status}: ${body}` });
+    }
+
+    // Update saved config
+    const config = db.getGlobalSetting('vpnConfig') || {};
+    config.region = region;
+    db.setGlobalSetting('vpnConfig', config);
+
+    res.json({ status: 'ok', region, message: `VPN region changed to ${region}. Reconnecting...` });
+  } catch (err) {
+    res.json({ status: 'error', error: err.message });
+  }
+});
+
 module.exports = router;
