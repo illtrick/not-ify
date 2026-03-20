@@ -1,5 +1,8 @@
 const { spawn } = require('child_process');
-const { getProxyArgs } = require('./proxy');
+// NOTE: yt-dlp intentionally does NOT route through VPN proxy.
+// YouTube aggressively blocks VPN IPs ("Sign in to confirm you're not a bot").
+// Streaming from YouTube doesn't need privacy protection — only torrent search
+// and RealDebrid API calls are sensitive.
 
 // In-memory caches
 const searchCache = new Map();
@@ -29,7 +32,7 @@ async function searchYouTube(query, limit = 15) {
   await waitForSlot();
   try {
     return await new Promise((resolve, reject) => {
-      const args = [...getProxyArgs(), `ytsearch${limit}:${query}`, '--flat-playlist', '--dump-json', '--no-download', '--no-warnings'];
+      const args = [`ytsearch${limit}:${query}`, '--flat-playlist', '--dump-json', '--no-download', '--no-warnings'];
       const proc = spawn('yt-dlp', args, { timeout: 15000 });
       let stdout = '';
       let stderr = '';
@@ -64,7 +67,7 @@ async function getStreamUrl(videoId) {
   await waitForSlot();
   try {
     return await new Promise((resolve, reject) => {
-      const proc = spawn('yt-dlp', [...getProxyArgs(), '--get-url', '-f', 'bestaudio', '--no-warnings', `https://www.youtube.com/watch?v=${videoId}`], { timeout: 10000 });
+      const proc = spawn('yt-dlp', ['--get-url', '-f', 'bestaudio', '--no-warnings', `https://www.youtube.com/watch?v=${videoId}`], { timeout: 10000 });
       let stdout = '';
       let stderr = '';
       proc.stdout.on('data', d => stdout += d);
@@ -91,7 +94,7 @@ async function searchSoundCloud(query, limit = 10) {
   await waitForSlot();
   try {
     return await new Promise((resolve, reject) => {
-      const args = [...getProxyArgs(), `scsearch${limit}:${query}`, '--flat-playlist', '--dump-json', '--no-download', '--no-warnings'];
+      const args = [`scsearch${limit}:${query}`, '--flat-playlist', '--dump-json', '--no-download', '--no-warnings'];
       const proc = spawn('yt-dlp', args, { timeout: 15000 });
       let stdout = '';
       let stderr = '';
