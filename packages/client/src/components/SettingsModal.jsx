@@ -356,12 +356,22 @@ export function SettingsModal({
                 onChange={(e) => setVpnRegion(e.target.value)}
                 style={inputStyle}
               >
+                <option value="">Select region...</option>
                 {(vpnRegions || []).map(r => <option key={r} value={r}>{r}</option>)}
               </select>
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <button
-                onClick={() => vpnConfig.save({ username: vpnUser, password: vpnPass, region: vpnRegion })}
+                onClick={async () => {
+                  await vpnConfig.save({ username: vpnUser, password: vpnPass, region: vpnRegion });
+                  if (vpnRegion) {
+                    try {
+                      await switchVpnRegion(vpnRegion);
+                      // Auto-test after region switch to verify new connection
+                      setTimeout(() => vpnConfig.test(), 5000);
+                    } catch {}
+                  }
+                }}
                 disabled={vpnConfig.saving}
                 style={vpnConfig.saving ? buttonDisabledStyle : buttonPrimaryStyle}
               >
@@ -373,20 +383,6 @@ export function SettingsModal({
                 style={vpnConfig.testing ? buttonDisabledStyle : buttonSecondaryStyle}
               >
                 {vpnConfig.testing ? 'Testing...' : 'Test Connection'}
-              </button>
-              <button
-                onClick={async () => {
-                  try {
-                    const data = await switchVpnRegion(vpnRegion);
-                    if (data.status === 'ok') {
-                      // After region switch, auto-test to verify new connection
-                      setTimeout(() => vpnConfig.test(), 5000);
-                    }
-                  } catch {}
-                }}
-                style={buttonSecondaryStyle}
-              >
-                Switch Region
               </button>
             </div>
             {vpnConfig.testResult && (
