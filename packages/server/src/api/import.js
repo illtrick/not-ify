@@ -212,49 +212,79 @@ router.post('/import/wanted/batch-search', async (req, res) => {
 });
 
 // ─── POST /api/import/lastfm ──────────────────────────────────────────────
-// Pull top albums from Last.fm and add to wanted list
+// Import albums from the user's scrobble history into the download queue.
+// Requires scrobble sync to be complete (state === 'complete').
+// Deduplicates against: local library, existing pending/active jobs.
 router.post('/import/lastfm', async (req, res) => {
-  const { period = '3month', limit = 50 } = req.body;
+  // Lazy-require to avoid circular-init issues when db is mocked in tests
+  const db = require('../services/db');
+  const jobQueue = require('../services/job-queue');
+  const libraryCheck = require('../services/library-check');
 
-  try {
-    const statusRes = await fetch('http://localhost:3000/api/lastfm/status');
-    const status = await statusRes.json();
-    if (!status.authenticated) return res.status(400).json({ error: 'Last.fm not authenticated' });
+  const { days = 60 } = req.body;
+  const userId = req.userId;
 
-    const albumsRes = await fetch(`http://localhost:3000/api/lastfm/top/albums?period=${period}&limit=${limit}`);
-    const topAlbums = await albumsRes.json();
-
-    if (!Array.isArray(topAlbums) || topAlbums.length === 0) {
-      return res.json({ imported: 0, message: 'No Last.fm albums found' });
-    }
-
-    const existing = loadWanted();
-    const existingKeys = new Set(existing.map(e => `${e.artist.toLowerCase()}|||${e.album.toLowerCase()}`));
-
-    let added = 0;
-    for (const a of topAlbums) {
-      const key = `${(a.artist || '').toLowerCase()}|||${(a.name || '').toLowerCase()}`;
-      if (existingKeys.has(key)) continue;
-
-      existing.push({
-        artist: a.artist,
-        album: a.name,
-        minutesPlayed: 0,
-        uniqueTracks: 0,
-        lastPlayed: null,
-        status: 'not-searched',
-        source: 'lastfm',
-        playcount: a.playcount || 0,
-      });
-      existingKeys.add(key);
-      added++;
-    }
-
-    saveWanted(existing);
-    res.json({ imported: added, total: existing.length });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  // Guard: scrobble sync must be complete before we can use scrobble data
+  const syncState = db.getUserSetting(userId, 'scrobbleSync') || {};
+  if (syncState.state !== 'complete') {
+    return res.status(400).json({
+      error: 'Scrobble sync not complete yet. Please wait for sync to finish.',
+    });
   }
+
+  // Gather unique artist/album pairs from the scrobble window
+  const albums = db.getUniqueAlbumsSince(userId, days);
+  const uniqueArtists = new Set(albums.map(a => a.artist));
+
+  let alreadyInLibrary = 0;
+  let alreadyQueued = 0;
+  let queued = 0;
+  let notFound = 0;
+
+  for (const { artist, album } of albums) {
+    if (!artist || !album) {
+      notFound++;
+      continue;
+    }
+
+    // Check if already in the local music library
+    if (libraryCheck.albumExistsInLibrary(artist, album)) {
+      alreadyInLibrary++;
+      continue;
+    }
+
+    // Check if a pending or active job already exists for this album
+    const dedupeKey = libraryCheck.normalize(artist) + ':' + libraryCheck.normalize(album);
+    const existingJob = db.getDb().prepare(
+      "SELECT id FROM jobs WHERE dedupe_key = ? AND status IN ('pending', 'active')"
+    ).get(dedupeKey);
+
+    if (existingJob) {
+      alreadyQueued++;
+      continue;
+    }
+
+    // Enqueue as a background-priority download job (worker handles source discovery)
+    try {
+      jobQueue.enqueue(
+        'download',
+        { artist, album, source_meta: {} },
+        { priority: 0, dedupeKey }
+      );
+      queued++;
+    } catch {
+      notFound++;
+    }
+  }
+
+  res.json({
+    found: albums.length,
+    artists: uniqueArtists.size,
+    alreadyInLibrary,
+    alreadyQueued,
+    queued,
+    notFound,
+  });
 });
 
 // ─── DELETE /api/import/wanted ─────────────────────────────────────────────
