@@ -523,3 +523,11 @@ export function saveVpnConfig(body) {
 export function testVpnConnection() {
   return post('/api/vpn/test');
 }
+
+export function switchVpnRegion(region) {
+  return post('/api/vpn/region', { region });
+}
+
+export function getVpnFailures() {
+  return get('/api/vpn/failures');
+}

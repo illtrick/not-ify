@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { COLORS } from '../constants';
 import { Icon } from './Icon';
-import { importFromLastfm } from '@not-ify/shared';
+import { importFromLastfm, switchVpnRegion } from '@not-ify/shared';
 
 function StatusDot({ status }) {
   const color = status === 'ok' ? COLORS.success : status === 'error' ? COLORS.error : COLORS.textSecondary;
@@ -363,21 +363,55 @@ export function SettingsModal({
               >
                 {vpnConfig.testing ? 'Testing...' : 'Test Connection'}
               </button>
+              <button
+                onClick={async () => {
+                  try {
+                    const data = await switchVpnRegion(vpnRegion);
+                    if (data.status === 'ok') {
+                      // After region switch, auto-test to verify new connection
+                      setTimeout(() => vpnConfig.test(), 5000);
+                    }
+                  } catch {}
+                }}
+                style={buttonSecondaryStyle}
+              >
+                Switch Region
+              </button>
             </div>
             {vpnConfig.testResult && (
-              <div style={{
-                marginTop: 8, fontSize: 12,
-                color: vpnConfig.testResult.status === 'ok'
-                  ? COLORS.success
-                  : vpnConfig.testResult.status === 'proxy_unavailable'
-                    ? COLORS.textSecondary
-                    : COLORS.error,
-              }}>
-                {vpnConfig.testResult.status === 'ok'
-                  ? `Connected via ${vpnConfig.testResult.ip} (${vpnConfig.testResult.region})`
-                  : vpnConfig.testResult.status === 'proxy_unavailable'
-                    ? 'VPN proxy not available (dev mode)'
-                    : vpnConfig.testResult.error}
+              <div style={{ marginTop: 8, fontSize: 12 }}>
+                {vpnConfig.testResult.status === 'proxy_unavailable' ? (
+                  <div style={{ color: COLORS.textSecondary }}>
+                    VPN proxy not available (dev mode)
+                  </div>
+                ) : (
+                  <>
+                    <div style={{
+                      color: vpnConfig.testResult.status === 'ok' ? COLORS.success : COLORS.error,
+                      marginBottom: 4,
+                    }}>
+                      {vpnConfig.testResult.ip
+                        ? `Connected via ${vpnConfig.testResult.ip} (${vpnConfig.testResult.region})`
+                        : 'VPN connection check complete'}
+                    </div>
+                    {vpnConfig.testResult.services && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        {Object.entries(vpnConfig.testResult.services).map(([name, svc]) => (
+                          <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{
+                              width: 8, height: 8, borderRadius: '50%', display: 'inline-block',
+                              backgroundColor: svc.status === 'ok' ? COLORS.success : COLORS.error,
+                            }} />
+                            <span style={{ color: COLORS.textPrimary }}>{name}</span>
+                            <span style={{ color: COLORS.textSecondary }}>
+                              {svc.status === 'ok' ? `${svc.latency}ms` : svc.error}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             )}
           </div>
