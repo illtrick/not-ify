@@ -19,7 +19,7 @@ function getProxyFetch() {
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.flac', '.ogg', '.m4a', '.aac', '.wav', '.opus']);
 const ARCHIVE_EXTENSIONS = new Set(['.rar', '.zip']);
 
-async function downloadFile(url, destPath) {
+async function downloadFile(url, destPath, { inactivityTimeout = 60000 } = {}) {
   const dir = path.dirname(destPath);
   fs.mkdirSync(dir, { recursive: true });
 
@@ -37,7 +37,24 @@ async function downloadFile(url, destPath) {
 
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      // Race the read against an inactivity timer so a stalled stream is aborted promptly.
+      const stallError = new Error(`Download stalled: no data for ${inactivityTimeout}ms`);
+      let stallTimer;
+      const stallPromise = new Promise((_, reject) => {
+        stallTimer = setTimeout(() => reject(stallError), inactivityTimeout);
+      });
+
+      let chunk;
+      try {
+        chunk = await Promise.race([reader.read(), stallPromise]);
+      } catch (err) {
+        reader.cancel();
+        throw err;
+      } finally {
+        clearTimeout(stallTimer);
+      }
+
+      const { done, value } = chunk;
       if (done) break;
       fileStream.write(value);
       downloadedBytes += value.length;

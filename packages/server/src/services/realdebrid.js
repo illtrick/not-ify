@@ -38,6 +38,7 @@ async function rdFetch(endpoint, options = {}) {
   const url = `${RD_BASE}${endpoint}`;
   const res = await fetch(url, {
     ...options,
+    signal: AbortSignal.timeout(30000),
     headers: {
       'Authorization': `Bearer ${token}`,
       ...options.headers,
