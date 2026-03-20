@@ -126,7 +126,8 @@ router.post('/import/wanted/:index/search', async (req, res) => {
 
   try {
     // Use the app's own search API internally
-    const searchRes = await fetch(`http://localhost:3000/api/search?q=${encodeURIComponent(query)}`, {
+    const port = process.env.PORT || 3000;
+    const searchRes = await fetch(`http://localhost:${port}/api/search?q=${encodeURIComponent(query)}`, {
       signal: AbortSignal.timeout(30000),
     });
     const data = await searchRes.json();
@@ -180,7 +181,8 @@ router.post('/import/wanted/batch-search', async (req, res) => {
     const query = `${item.artist} ${item.album}`;
 
     try {
-      const searchRes = await fetch(`http://localhost:3000/api/search?q=${encodeURIComponent(query)}`, {
+      const port = process.env.PORT || 3000;
+      const searchRes = await fetch(`http://localhost:${port}/api/search?q=${encodeURIComponent(query)}`, {
         signal: AbortSignal.timeout(30000),
       });
       const data = await searchRes.json();

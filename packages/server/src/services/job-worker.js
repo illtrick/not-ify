@@ -2,7 +2,7 @@
 
 const jobQueue = require('./job-queue');
 const db = require('./db');
-const { albumExistsInLibrary, getExistingQuality, isUpgrade } = require('./library-check');
+const { getExistingQuality, isUpgrade } = require('./library-check');
 
 const POLL_INTERVAL = 5000; // 5 seconds
 const BACKOFF = [60000, 300000, 900000]; // 1min, 5min, 15min
@@ -25,42 +25,32 @@ async function processNextJob() {
 
   const payload = JSON.parse(job.payload);
 
-  if (payload.artist && payload.album && albumExistsInLibrary(payload.artist, payload.album)) {
-    jobQueue.skip(job.id, 'skipped_duplicate');
-    db.addJobLog({
-      job_id: job.id,
-      artist: payload.artist,
-      album: payload.album,
-      attempt: (job.retries || 0) + 1,
-      duration_ms: 0,
-      outcome: 'skipped_duplicate',
-      fail_reason: null,
-      quality: null,
-    });
-    return true;
-  }
+  // No-downgrade / duplicate guard: use a single getExistingQuality call.
+  // Returns null if not in library (allow download), or a quality string if found.
+  const existingQuality = (payload.artist && payload.album)
+    ? getExistingQuality(payload.artist, payload.album)
+    : null;
 
-  // No-downgrade check: if album exists, only proceed if incoming quality is strictly better
-  if (payload.artist && payload.album) {
-    const existingQuality = getExistingQuality(payload.artist, payload.album);
-    if (existingQuality !== null) {
-      const incomingQuality = (payload.source_meta?.quality || 'unknown').toLowerCase();
-      if (!isUpgrade(existingQuality, incomingQuality)) {
-        jobQueue.skip(job.id, 'skipped_no_upgrade');
-        db.addJobLog({
-          job_id: job.id,
-          artist: payload.artist,
-          album: payload.album,
-          attempt: (job.retries || 0) + 1,
-          duration_ms: 0,
-          outcome: 'skipped_no_upgrade',
-          fail_reason: null,
-          quality: existingQuality,
-        });
-        return true;
-      }
+  if (existingQuality !== null) {
+    // Album exists on disk — only proceed if incoming quality is strictly better
+    const incomingQuality = (payload.source_meta?.quality || 'unknown').toLowerCase();
+    if (!isUpgrade(existingQuality, incomingQuality)) {
+      jobQueue.skip(job.id, 'skipped_no_upgrade');
+      db.addJobLog({
+        job_id: job.id,
+        artist: payload.artist,
+        album: payload.album,
+        attempt: (job.retries || 0) + 1,
+        duration_ms: 0,
+        outcome: 'skipped_no_upgrade',
+        fail_reason: null,
+        quality: existingQuality,
+      });
+      return true;
     }
+    // else: incoming quality is strictly better — continue to download (upgrade)
   }
+  // existingQuality === null: album not in library — continue to download
 
   const start = Date.now();
   let timeoutTimer;
