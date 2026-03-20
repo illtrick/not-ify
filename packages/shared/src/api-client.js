@@ -14,10 +14,12 @@ let _userId = null;
 const CLIENT_API_VERSION = 1;
 
 let _versionMismatchCallback = null;
+let _onRequest = null;
 
-export function configure({ baseUrl, onVersionMismatch }) {
+export function configure({ baseUrl, onVersionMismatch, onRequest }) {
   _baseUrl = (baseUrl || '').replace(/\/$/, '');
   if (onVersionMismatch) _versionMismatchCallback = onVersionMismatch;
+  if (onRequest) _onRequest = onRequest;
 }
 
 export function setUser(userId) {
@@ -65,7 +67,17 @@ export async function request(path, options = {}) {
   // Inject user identification header
   if (_userId) headers['X-User-Id'] = _userId;
 
-  const response = await fetch(url, { ...options, headers });
+  const startTime = Date.now();
+  let response;
+  try {
+    response = await fetch(url, { ...options, headers });
+  } catch (err) {
+    if (_onRequest) _onRequest({ path, method: options.method || 'GET', error: err.message, latency: Date.now() - startTime });
+    throw err;
+  }
+
+  const latency = Date.now() - startTime;
+  if (_onRequest) _onRequest({ path, method: options.method || 'GET', status: response.status, latency });
 
   if (!response.ok) {
     const error = new Error(`API ${response.status}: ${response.statusText}`);
@@ -535,6 +547,11 @@ export function getVpnFailures() {
 // Service health check — all external dependencies
 export function getServiceHealth() {
   return get('/api/health/services');
+}
+
+// Diagnostics — full server + service state snapshot
+export function getDiagnostics() {
+  return get('/api/diagnostics');
 }
 
 // Activity log — verbose download/pipeline events for debugging

@@ -33,6 +33,7 @@ import { useTrackDurations } from './hooks/useTrackDurations';
 import { useArtistPage } from './hooks/useArtistPage';
 import { useCast } from './hooks/useCast';
 import { useServiceConfig } from './hooks/useServiceConfig';
+import { onApiRequest, startErrorCapture } from './services/client-diagnostics';
 
 
 // ---------------------------------------------------------------------------
@@ -242,6 +243,23 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
       setCurrentCoverArt(playlist[idx].coverArt || currentCoverArt);
     }
   }, [cast.activeDevice, cast.castState?.currentTrack]);
+
+  // ── Diagnostics state getter ────────────────────────────────────────────────
+  useEffect(() => {
+    window.__notifyDiagnostics = () => ({
+      view,
+      user: currentUser,
+      currentTrack: currentTrack ? { title: currentTrack.title, artist: currentAlbumInfo?.artist } : null,
+      isPlaying,
+      downloading: !!downloading,
+      bgDownloadStatus: !!bgDownloadStatus,
+      downloadStatus: downloadStatus ? { step: downloadStatus.step, message: downloadStatus.message, complete: downloadStatus.complete, error: downloadStatus.error } : null,
+      queueLength: queue?.length || 0,
+      libraryCount: library?.length || 0,
+      castActive: !!cast?.activeDevice,
+    });
+    return () => { delete window.__notifyDiagnostics; };
+  });
 
   // ── Single-output enforcement ──────────────────────────────────────────────
   // Core rule: if activeDevice is set, ALL audio goes to cast device.
@@ -856,6 +874,11 @@ function App() {
     return saved;
   });
   const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    api.configure({ onRequest: onApiRequest });
+    startErrorCapture();
+  }, []);
 
   function switchUser() {
     clearCurrentUser();
