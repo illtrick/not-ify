@@ -101,6 +101,17 @@ app.get('/api/health/services', async (req, res) => {
   res.json({ status: overall, version: pkg.version, checks });
 });
 
+// Diagnostics — full internal service state (admin only)
+const diagnostics = require('./services/diagnostics');
+app.get('/api/diagnostics', adminGuard, async (req, res) => {
+  try {
+    const data = await diagnostics.collect();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Shared cover art fetch helper
 async function fetchAndCacheCover(coverUrl, cachePath, missPath, res) {
   fs.mkdirSync(COVERS_DIR, { recursive: true });
@@ -560,6 +571,7 @@ if (require.main === module) {
   // Start quality upgrader background tick (every 5 minutes)
   // Only runs when the system is idle (no active downloads)
   const { getUpgrader } = require('./api/upgrade');
+  diagnostics.registerUpgrader(() => { try { return getUpgrader(); } catch { return null; } });
   const upgrader = getUpgrader();
   let upgraderRunning = false;
   const UPGRADER_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
