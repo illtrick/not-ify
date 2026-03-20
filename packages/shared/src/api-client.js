@@ -182,6 +182,23 @@ export function getMbRgTracks(rgid) {
 }
 
 // ---------------------------------------------------------------------------
+// MB track prefetch cache — populated on album hover, consumed by useMbTracks
+// ---------------------------------------------------------------------------
+
+const prefetchCache = new Map();
+
+export function prefetchMbTracks(mbid, rgid) {
+  const key = mbid || rgid;
+  if (!key || prefetchCache.has(key)) return;
+  const promise = mbid ? getMbReleaseTracks(mbid) : getMbRgTracks(rgid);
+  prefetchCache.set(key, promise);
+}
+
+export function getCachedMbTracks(key) {
+  return prefetchCache.get(key) || null;
+}
+
+// ---------------------------------------------------------------------------
 // Cover
 // ---------------------------------------------------------------------------
 

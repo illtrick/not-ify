@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import * as api from '@not-ify/shared';
+import { getCachedMbTracks } from '@not-ify/shared';
 
 export function useMbTracks(selectedAlbum, setSelectedAlbum) {
   const [mbTracks, setMbTracks] = useState([]);
@@ -7,12 +8,14 @@ export function useMbTracks(selectedAlbum, setSelectedAlbum) {
   useEffect(() => {
     if (selectedAlbum?.fromSearch && (selectedAlbum?.mbid || selectedAlbum?.rgid)) {
       setMbTracks([]);
+      const cacheKey = selectedAlbum.mbid || selectedAlbum.rgid;
+      const cached = getCachedMbTracks(cacheKey);
       if (selectedAlbum.mbid) {
-        api.getMbReleaseTracks(selectedAlbum.mbid)
+        (cached || api.getMbReleaseTracks(selectedAlbum.mbid))
           .then(d => setMbTracks(d.tracks || []))
           .catch(() => {});
       } else if (selectedAlbum.rgid) {
-        api.getMbRgTracks(selectedAlbum.rgid)
+        (cached || api.getMbRgTracks(selectedAlbum.rgid))
           .then(d => {
             setMbTracks(d.tracks || []);
             if (d.releaseMbid && !selectedAlbum.mbid) {

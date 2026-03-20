@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { COLORS } from '../constants';
 import { Icon } from './Icon';
 import { AlbumArt } from './AlbumArt';
+import { prefetchMbTracks } from '@not-ify/shared';
 
 // ---------------------------------------------------------------------------
 // AlbumCard — used in both search results and library
@@ -21,7 +22,7 @@ export function AlbumCard({ album, onPlay, onClick, isDownloading, inLibrary }) 
         background: hovered ? '#222' : COLORS.card,
         borderRadius: 10, padding: 14, cursor: 'pointer',
       }}
-      onMouseEnter={() => setHovered(true)}
+      onMouseEnter={() => { setHovered(true); if (album.mbid || album.rgid) prefetchMbTracks(album.mbid, album.rgid); }}
       onMouseLeave={() => setHovered(false)}
       onClick={onClick}
     >
