@@ -2,7 +2,7 @@
 
 const jobQueue = require('./job-queue');
 const db = require('./db');
-const { albumExistsInLibrary } = require('./library-check');
+const { albumExistsInLibrary, getExistingQuality, isUpgrade } = require('./library-check');
 
 const POLL_INTERVAL = 5000; // 5 seconds
 const BACKOFF = [60000, 300000, 900000]; // 1min, 5min, 15min
@@ -38,6 +38,28 @@ async function processNextJob() {
       quality: null,
     });
     return true;
+  }
+
+  // No-downgrade check: if album exists, only proceed if incoming quality is strictly better
+  if (payload.artist && payload.album) {
+    const existingQuality = getExistingQuality(payload.artist, payload.album);
+    if (existingQuality !== null) {
+      const incomingQuality = (payload.source_meta?.quality || 'unknown').toLowerCase();
+      if (!isUpgrade(existingQuality, incomingQuality)) {
+        jobQueue.skip(job.id, 'skipped_no_upgrade');
+        db.addJobLog({
+          job_id: job.id,
+          artist: payload.artist,
+          album: payload.album,
+          attempt: (job.retries || 0) + 1,
+          duration_ms: 0,
+          outcome: 'skipped_no_upgrade',
+          fail_reason: null,
+          quality: existingQuality,
+        });
+        return true;
+      }
+    }
   }
 
   const start = Date.now();
