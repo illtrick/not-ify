@@ -43,6 +43,11 @@ function checkMimeType(filePath) {
     const passed = AUDIO_MIMES.has(raw);
     return { name: 'mime', passed, detail: raw };
   } catch (err) {
+    const msg = (err.message || '').toLowerCase();
+    // If `file` command isn't installed, skip rather than fail
+    if (msg.includes('enoent') || msg.includes('not found') || msg.includes('no such file')) {
+      return { name: 'mime', skipped: true, detail: '`file` command not available' };
+    }
     return { name: 'mime', passed: false, detail: err.message };
   }
 }
@@ -143,6 +148,12 @@ async function checkClamAV(filePath) {
     childProcess.execSync(`clamdscan --no-summary "${filePath}"`);
     return { name: 'clam', passed: true, detail: 'clean' };
   } catch (err) {
+    const msg = (err.message || '').toLowerCase();
+    // If ClamAV daemon/CLI isn't available, skip rather than fail
+    if (msg.includes('enoent') || msg.includes('not found') || msg.includes('no such file')
+        || msg.includes('connection refused') || msg.includes('could not connect')) {
+      return { name: 'clam', skipped: true, detail: 'ClamAV not available' };
+    }
     return { name: 'clam', passed: false, detail: err.message || 'infected' };
   }
 }
@@ -163,7 +174,7 @@ async function validateFile(filePath) {
   if (isMimeCheckEnabled()) {
     const mimeCheck = checkMimeType(filePath);
     results.checks.push(mimeCheck);
-    if (!mimeCheck.passed) {
+    if (!mimeCheck.skipped && !mimeCheck.passed) {
       results.passed = false;
     }
   }

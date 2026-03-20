@@ -19,7 +19,7 @@ RUN npm run build -w @not-ify/client
 # Stage 2: Production image — only runtime deps
 FROM node:20-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg curl ca-certificates unrar-free python3 \
+    ffmpeg curl ca-certificates unrar-free python3 file \
     && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
        -o /usr/local/bin/yt-dlp && chmod +x /usr/local/bin/yt-dlp \
     && rm -rf /var/lib/apt/lists/*
