@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../services/db');
+const { getProxyFetch } = require('../services/proxy');
 
 // Common PIA regions (source: PIA server list, March 2026)
 const PIA_REGIONS = [
@@ -37,28 +38,53 @@ router.post('/config', (req, res) => {
   res.json({ saved: true });
 });
 
+async function checkService(name, url, proxyFetch, timeoutMs = 10000) {
+  const start = Date.now();
+  try {
+    const res = await proxyFetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    const latency = Date.now() - start;
+    if (!res.ok) return { name, status: 'error', error: `HTTP ${res.status}`, latency };
+    // For IP service, parse and return the body
+    if (name === 'ip') {
+      const data = await res.json();
+      return { name, status: 'ok', latency, ip: data.ip };
+    }
+    return { name, status: 'ok', latency };
+  } catch (err) {
+    return { name, status: 'error', error: err.message, latency: Date.now() - start };
+  }
+}
+
 router.post('/test', async (req, res) => {
   const proxyUrl = process.env.VPN_PROXY;
   if (!proxyUrl) {
-    return res.json({ status: 'proxy_unavailable', message: 'VPN proxy not available (dev mode — no gluetun sidecar)' });
+    return res.json({ status: 'proxy_unavailable', message: 'VPN proxy not available (no gluetun sidecar)' });
   }
-  try {
-    const { ProxyAgent } = require('undici');
-    const agent = new ProxyAgent(proxyUrl);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
-    const response = await fetch('https://api.ipify.org?format=json', {
-      dispatcher: agent,
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-    const data = await response.json();
-    const config = db.getGlobalSetting('vpnConfig');
-    const region = config?.region || 'unknown';
-    res.json({ status: 'ok', ip: data.ip, region, message: `Connected via ${data.ip} (${region})` });
-  } catch (err) {
-    res.json({ status: 'error', error: err.message });
-  }
+
+  const proxyFetch = getProxyFetch();
+
+  const [ipResult, apibay, realdebrid, youtube] = await Promise.all([
+    checkService('ip', 'https://api.ipify.org?format=json', proxyFetch),
+    checkService('apibay', 'https://apibay.org/q.php?q=test&cat=100', proxyFetch),
+    checkService('realdebrid', 'https://api.real-debrid.com/rest/1.0/time', proxyFetch),
+    checkService('youtube', 'https://www.youtube.com/robots.txt', proxyFetch),
+  ]);
+
+  const vpnIp = ipResult.ip || null;
+  const config = db.getGlobalSetting('vpnConfig');
+  const region = config?.region || 'unknown';
+  const services = { apibay, realdebrid, youtube };
+  const allOk = ipResult.status === 'ok' && Object.values(services).every(s => s.status === 'ok');
+
+  res.json({
+    status: allOk ? 'ok' : 'degraded',
+    ip: vpnIp,
+    region,
+    services,
+    message: allOk
+      ? `All services reachable via ${vpnIp} (${region})`
+      : `Some services unreachable via VPN (${region})`,
+  });
 });
 
 module.exports = router;
