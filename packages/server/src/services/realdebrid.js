@@ -1,6 +1,14 @@
 const fs = require('fs');
 const path = require('path');
 const db = require('./db');
+const { ProxyAgent, fetch: undiciFetch } = require('undici');
+
+function getProxyFetch() {
+  const proxy = process.env.VPN_PROXY || '';
+  if (!proxy) return fetch;
+  const dispatcher = new ProxyAgent(proxy);
+  return (url, opts) => undiciFetch(url, { ...opts, dispatcher });
+}
 
 const CONFIG_DIR = process.env.CONFIG_DIR || '/app/config';
 const CONFIG_PATH = path.join(CONFIG_DIR, 'settings.json');
@@ -36,7 +44,8 @@ function setToken(token) {
 async function rdFetch(endpoint, options = {}) {
   const token = getToken();
   const url = `${RD_BASE}${endpoint}`;
-  const res = await fetch(url, {
+  const proxyFetch = getProxyFetch();
+  const res = await proxyFetch(url, {
     ...options,
     signal: AbortSignal.timeout(30000),
     headers: {
