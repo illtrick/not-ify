@@ -54,6 +54,9 @@ services:
       - MUSIC_DIR=/app/music
       - LOG_LEVEL=info
       - DLNA_ENABLED=true
+      - VPN_ENABLED=${VPN_ENABLED:-false}
+      - VPN_PROXY=http://localhost:8888
+      - GLUETUN_CONTROL_URL=http://localhost:8000
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
@@ -62,6 +65,37 @@ services:
       retries: 3
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+
+  # ---------------------------------------------------------------------------
+  # Gluetun VPN sidecar — HTTP proxy for staging (bridge mode, NOT host)
+  # Exposes port 8888 (HTTP proxy) and 8000 (control API) to host network
+  # ---------------------------------------------------------------------------
+  gluetun:
+    image: qmcgaw/gluetun
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      - VPN_SERVICE_PROVIDER=private internet access
+      - VPN_TYPE=openvpn
+      - OPENVPN_USER=${PIA_USERNAME}
+      - OPENVPN_PASSWORD=${PIA_PASSWORD}
+      - SERVER_REGIONS=${VPN_REGION:-US West}
+      - DOT=on
+      - DOT_PROVIDERS=${DOT_PROVIDERS:-cloudflare}
+      - HTTPPROXY=on
+      - HTTPPROXY_LOG=off
+    ports:
+      - "8888:8888/tcp"
+      - "8000:8000/tcp"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://ip.me"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
 
   # ---------------------------------------------------------------------------
   # Watchtower — auto-updates staging container when "latest" tag changes
