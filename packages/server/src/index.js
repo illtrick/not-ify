@@ -468,6 +468,20 @@ if (require.main === module) {
     dlna.startDiscovery();
   }
 
+  // Start job queue worker
+  const jobWorker = require('./services/job-worker');
+  // NOTE: downloader.downloadAlbum expects (torrentInfo, rdService) — the pipeline API
+  // constructs those objects directly. The job queue worker uses a simplified payload
+  // with {artist, album, magnetLink, sourceMeta}. A dedicated processor will be wired
+  // when the full pipeline integration is implemented.
+  jobWorker.setProcessor(async (job) => {
+    const payload = JSON.parse(job.payload);
+    console.warn(`[job-worker] No processor implemented for job type "${job.type}" (artist: ${payload.artist}, album: ${payload.album}). Skipping.`);
+    return {};
+  });
+  jobWorker.start();
+  console.log('[job-worker] Started polling for queued jobs');
+
   // Start quality upgrader background tick (every 5 minutes)
   // Only runs when the system is idle (no active downloads)
   const { getUpgrader } = require('./api/upgrade');

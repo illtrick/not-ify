@@ -107,6 +107,19 @@ function getDb() {
       key TEXT PRIMARY KEY,
       value TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS job_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      job_id INTEGER,
+      artist TEXT,
+      album TEXT,
+      attempt INTEGER,
+      duration_ms INTEGER,
+      outcome TEXT,
+      fail_reason TEXT,
+      quality TEXT,
+      created_at INTEGER DEFAULT (unixepoch())
+    );
   `);
 
   // Create indexes
@@ -376,6 +389,22 @@ function isValidUser(userId) {
   return !!db.prepare('SELECT 1 FROM users WHERE id = ?').get(userId);
 }
 
+// --- Job Log ---
+
+function addJobLog(entry) {
+  const db = getDb();
+  db.prepare(`INSERT INTO job_log (job_id, artist, album, attempt, duration_ms, outcome, fail_reason, quality)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    entry.job_id, entry.artist, entry.album, entry.attempt,
+    entry.duration_ms, entry.outcome, entry.fail_reason || null, entry.quality || null
+  );
+}
+
+function getJobLogs(limit = 100) {
+  const db = getDb();
+  return db.prepare(`SELECT * FROM job_log ORDER BY created_at DESC LIMIT ?`).all(limit);
+}
+
 // --- Cleanup ---
 
 function close() {
@@ -425,4 +454,7 @@ module.exports = {
   // Session
   getUserSession,
   saveUserSession,
+  // Job log
+  addJobLog,
+  getJobLogs,
 };

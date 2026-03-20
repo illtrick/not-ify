@@ -16,6 +16,7 @@ function initSchema() {
       result TEXT,
       retries INTEGER DEFAULT 0,
       max_retries INTEGER DEFAULT 3,
+      retry_after INTEGER,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
       dedupe_key TEXT
@@ -28,6 +29,13 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
     CREATE INDEX IF NOT EXISTS idx_jobs_type ON jobs(type);
   `);
+
+  // Migration: add retry_after column if missing (existing databases)
+  try {
+    db.prepare('SELECT retry_after FROM jobs LIMIT 1').get();
+  } catch {
+    db.exec('ALTER TABLE jobs ADD COLUMN retry_after INTEGER');
+  }
 }
 
 // Initialise schema immediately on require
@@ -72,15 +80,16 @@ function dequeue(type) {
   const db = getDb();
 
   const dequeueTransaction = db.transaction((type) => {
+    const now = Date.now();
     let job;
     if (type) {
       job = db.prepare(
-        "SELECT * FROM jobs WHERE status = 'pending' AND type = ? ORDER BY priority DESC, id ASC LIMIT 1"
-      ).get(type);
+        "SELECT * FROM jobs WHERE status = 'pending' AND type = ? AND (retry_after IS NULL OR retry_after <= ?) ORDER BY priority DESC, id ASC LIMIT 1"
+      ).get(type, now);
     } else {
       job = db.prepare(
-        "SELECT * FROM jobs WHERE status = 'pending' ORDER BY priority DESC, id ASC LIMIT 1"
-      ).get();
+        "SELECT * FROM jobs WHERE status = 'pending' AND (retry_after IS NULL OR retry_after <= ?) ORDER BY priority DESC, id ASC LIMIT 1"
+      ).get(now);
     }
 
     if (!job) return null;
@@ -113,24 +122,26 @@ function complete(id, result) {
  * If retries >= max_retries, sets to 'failed' (permanent failure).
  * @param {number} id
  * @param {string} error - Error message
+ * @param {number} [retryAfter] - Timestamp (ms) before which the job should not be retried
  */
-function fail(id, error) {
+function fail(id, error, retryAfter) {
   const db = getDb();
 
-  const failTransaction = db.transaction((id, error) => {
+  const failTransaction = db.transaction((id, error, retryAfter) => {
     const job = db.prepare('SELECT retries, max_retries FROM jobs WHERE id = ?').get(id);
     if (!job) return;
 
     const newRetries = job.retries + 1;
     const permanent = newRetries >= job.max_retries;
     const newStatus = permanent ? 'failed' : 'pending';
+    const retryAfterVal = permanent ? null : (retryAfter || null);
 
     db.prepare(
-      'UPDATE jobs SET status = ?, retries = ?, result = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-    ).run(newStatus, newRetries, JSON.stringify({ error }), id);
+      'UPDATE jobs SET status = ?, retries = ?, result = ?, retry_after = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+    ).run(newStatus, newRetries, JSON.stringify({ error }), retryAfterVal, id);
   });
 
-  failTransaction(id, error);
+  failTransaction(id, error, retryAfter);
 }
 
 /**
