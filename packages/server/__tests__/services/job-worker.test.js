@@ -5,13 +5,6 @@ const Database = require('better-sqlite3');
 // mockDb is the shared proxy — jest.mock factory may reference 'mock*' variables
 let mockDb = null;
 
-jest.mock('../../src/services/db', () => ({
-  getDb: () => mockDb,
-  addJobLog: (...args) => mockAddJobLog(...args),
-  getJobLogs: (...args) => mockGetJobLogs(...args),
-  close: () => { if (mockDb && mockDb.open) { mockDb.close(); mockDb = null; } },
-}));
-
 // These need to be declared before the mock factory captures them (hoisted),
 // so we use module-level vars and proxy calls through them.
 let mockAddJobLog = () => {};

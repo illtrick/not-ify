@@ -151,7 +151,7 @@ function fail(id, error, retryAfter) {
  */
 function skip(id, reason) {
   const db = getDb();
-  db.prepare(`UPDATE jobs SET status = ?, updated_at = unixepoch() WHERE id = ?`).run(reason, id);
+  db.prepare(`UPDATE jobs SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(reason, id);
 }
 
 /**
