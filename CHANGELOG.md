@@ -7,6 +7,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 - **MINOR** (0.x.0): New features, meaningful improvements
 - **PATCH** (0.0.x): Bug fixes, polish, iteration on current features
 
+## [1.2.1] - 2026-03-20
+
+### Fixed
+- Restored RealDebrid VPN proxy routing — VPN tester confirmed no IP blocking across 7 regions
+- YouTube yt-dlp correctly bypasses VPN (stream extraction blocked on 5/7 VPN regions, search unaffected)
+- Gluetun control API auth: disabled default auth config to enable region switching
+- Region switching uses correct gluetun endpoint (`/v1/vpn/settings` with nested provider payload)
+- QNAP staging volumes use absolute `/share/CACHEDEV1_DATA/` paths (prevents 16MB tmpfs issue)
+- Settings UI: merged Save and Switch Region into single Save button
+
+### Changed
+- VPN routing policy (test-validated): ApiBay + RealDebrid + downloads through VPN; YouTube direct
+
 ## [1.1.1] - 2026-03-19
 
 ### Added

@@ -1,9 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const db = require('./db');
-// NOTE: RD intentionally does NOT route through VPN proxy.
-// RD tokens are IP-locked — requests from VPN IPs get 403 Forbidden.
-// Only torrent search (ApiBay) needs VPN privacy protection.
+const { getProxyFetch, recordFailure } = require('./proxy');
 
 const CONFIG_DIR = process.env.CONFIG_DIR || '/app/config';
 const CONFIG_PATH = path.join(CONFIG_DIR, 'settings.json');
@@ -39,7 +37,8 @@ function setToken(token) {
 async function rdFetch(endpoint, options = {}) {
   const token = getToken();
   const url = `${RD_BASE}${endpoint}`;
-  const res = await fetch(url, {
+  const proxyFetch = getProxyFetch();
+  const res = await proxyFetch(url, {
     ...options,
     signal: AbortSignal.timeout(30000),
     headers: {
@@ -50,6 +49,7 @@ async function rdFetch(endpoint, options = {}) {
 
   if (!res.ok) {
     const body = await res.text();
+    recordFailure('realdebrid', `${res.status} on ${endpoint}: ${body}`);
     throw new Error(`RD API error ${res.status} on ${endpoint}: ${body}`);
   }
 
