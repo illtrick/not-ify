@@ -551,6 +551,12 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
       );
     });
     if (missingTracks.length > 0) {
+      // Reorder: currently playing track + subsequent tracks first, then earlier tracks
+      const clickedPos = tracks[0]?.position || 1;
+      const fromClick = missingTracks.filter(t => (t.position || 0) >= clickedPos);
+      const beforeClick = missingTracks.filter(t => (t.position || 0) < clickedPos);
+      const orderedTracks = [...fromClick, ...beforeClick];
+
       autoAcquireAlbum({
         artist: albumArtist,
         album: albumName,
@@ -559,7 +565,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
         mbid: selectedAlbum?.mbid,
         rgid: selectedAlbum?.rgid,
         year: selectedAlbum?.year,
-        mbTracks: missingTracks,
+        mbTracks: orderedTracks,
       });
     }
   }
