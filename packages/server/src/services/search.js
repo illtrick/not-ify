@@ -1,5 +1,8 @@
 const APIBAY_BASE = 'https://apibay.org';
 
+const torrentCache = new Map();
+const TORRENT_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
 function formatBytes(bytes) {
   if (bytes === 0) return '0 B';
   const k = 1024;
@@ -9,6 +12,12 @@ function formatBytes(bytes) {
 }
 
 async function searchMusic(query) {
+  const cacheKey = query.toLowerCase().trim();
+  const cached = torrentCache.get(cacheKey);
+  if (cached && cached.expires > Date.now()) {
+    return cached.data;
+  }
+
   try {
     const url = `${APIBAY_BASE}/q.php?q=${encodeURIComponent(query)}&cat=100`;
     const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
@@ -38,6 +47,7 @@ async function searchMusic(query) {
       }))
       .sort((a, b) => b.seeders - a.seeders);
 
+    torrentCache.set(cacheKey, { data: results, expires: Date.now() + TORRENT_CACHE_TTL });
     return results;
   } catch (err) {
     console.error(`Search failed: ${err.message}`);
