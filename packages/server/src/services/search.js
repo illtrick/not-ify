@@ -1,13 +1,6 @@
-const { ProxyAgent, fetch: undiciFetch } = require('undici');
+const { getProxyFetch } = require('./proxy');
 
 const APIBAY_BASE = 'https://apibay.org';
-
-function getProxyFetch() {
-  const proxy = process.env.VPN_PROXY || '';
-  if (!proxy) return fetch;
-  const dispatcher = new ProxyAgent(proxy);
-  return (url, opts) => undiciFetch(url, { ...opts, dispatcher });
-}
 
 const torrentCache = new Map();
 const TORRENT_CACHE_TTL = 10 * 60 * 1000; // 10 minutes

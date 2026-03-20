@@ -1,16 +1,11 @@
 const { spawn } = require('child_process');
+const { getProxyArgs } = require('./proxy');
 
 // In-memory caches
 const searchCache = new Map();
 const urlCache = new Map();
 const SEARCH_TTL = 5 * 60 * 1000; // 5 min
 const URL_TTL = 30 * 60 * 1000; // 30 min
-
-// VPN proxy support — route yt-dlp through HTTP proxy when configured
-function getProxyArgs() {
-  const proxy = process.env.VPN_PROXY || '';
-  return proxy ? ['--proxy', proxy] : [];
-}
 
 // Concurrency limiter
 let activeProcesses = 0;

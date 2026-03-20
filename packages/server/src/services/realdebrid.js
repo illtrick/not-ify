@@ -1,14 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const db = require('./db');
-const { ProxyAgent, fetch: undiciFetch } = require('undici');
-
-function getProxyFetch() {
-  const proxy = process.env.VPN_PROXY || '';
-  if (!proxy) return fetch;
-  const dispatcher = new ProxyAgent(proxy);
-  return (url, opts) => undiciFetch(url, { ...opts, dispatcher });
-}
+const { getProxyFetch } = require('./proxy');
 
 const CONFIG_DIR = process.env.CONFIG_DIR || '/app/config';
 const CONFIG_PATH = path.join(CONFIG_DIR, 'settings.json');
