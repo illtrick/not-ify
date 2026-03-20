@@ -145,6 +145,16 @@ function fail(id, error, retryAfter) {
 }
 
 /**
+ * Mark a job as skipped (no retry).
+ * @param {number} id
+ * @param {string} reason - 'skipped_duplicate' | 'skipped_no_upgrade'
+ */
+function skip(id, reason) {
+  const db = getDb();
+  db.prepare(`UPDATE jobs SET status = ?, updated_at = unixepoch() WHERE id = ?`).run(reason, id);
+}
+
+/**
  * Get all jobs of a given type.
  * @param {string} type
  * @returns {object[]}
@@ -178,6 +188,7 @@ module.exports = {
   dequeue,
   complete,
   fail,
+  skip,
   getByType,
   getByStatus,
   getAll,

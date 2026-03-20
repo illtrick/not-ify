@@ -34,14 +34,22 @@ async function processNextJob() {
     clearTimeout(timeoutTimer);
     const duration = Date.now() - start;
 
-    jobQueue.complete(job.id, result || {});
+    const outcome = result?.outcome || 'success';
+    if (outcome === 'skipped_duplicate' || outcome === 'skipped_no_upgrade') {
+      jobQueue.skip(job.id, outcome);
+    } else if (outcome === 'stalled') {
+      const retryAfter = Date.now() + (BACKOFF[job.retries || 0] || BACKOFF[BACKOFF.length - 1]);
+      jobQueue.fail(job.id, 'stalled', retryAfter);
+    } else {
+      jobQueue.complete(job.id, result || {});
+    }
     db.addJobLog({
       job_id: job.id,
       artist: payload.artist,
       album: payload.album,
       attempt: (job.retries || 0) + 1,
       duration_ms: duration,
-      outcome: 'success',
+      outcome,
       fail_reason: null,
       quality: result?.quality || null,
     });
@@ -58,7 +66,7 @@ async function processNextJob() {
       album: payload.album,
       attempt: (job.retries || 0) + 1,
       duration_ms: duration,
-      outcome: duration >= JOB_TIMEOUT ? 'timeout' : 'failed',
+      outcome: err.message === 'Job timeout exceeded' ? 'timeout' : 'failed',
       fail_reason: err.message,
       quality: null,
     });
