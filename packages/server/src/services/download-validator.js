@@ -9,9 +9,9 @@ const mb = require('./musicbrainz');
  */
 function getFileDuration(filePath) {
   try {
-    const raw = childProcess.execSync(
-      `ffprobe -v error -show_format -of json "${filePath}"`
-    ).toString();
+    const raw = childProcess.execFileSync('ffprobe', [
+      '-v', 'error', '-show_format', '-of', 'json', filePath
+    ]).toString();
     const parsed = JSON.parse(raw);
     return parseFloat(parsed.format?.duration) || 0;
   } catch {

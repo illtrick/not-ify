@@ -16,8 +16,8 @@ const { validate, computeScore } = require('../../src/services/download-validato
 // Helper: mock ffprobe to return specific durations for files
 function mockFfprobe(durations) {
   let callIdx = 0;
-  childProcess.execSync.mockImplementation((cmd) => {
-    if (cmd.includes('ffprobe')) {
+  childProcess.execFileSync.mockImplementation((cmd, args) => {
+    if (cmd === 'ffprobe') {
       const dur = durations[callIdx++] || 0;
       return JSON.stringify({ format: { duration: String(dur) } });
     }
