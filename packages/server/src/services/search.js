@@ -1,4 +1,4 @@
-const { getProxyFetch } = require('./proxy');
+const { getProxyFetch, recordFailure } = require('./proxy');
 
 const APIBAY_BASE = 'https://apibay.org';
 
@@ -54,6 +54,7 @@ async function searchMusic(query) {
     return results;
   } catch (err) {
     console.error(`Search failed: ${err.message}`);
+    recordFailure('apibay', err.message);
     return [];
   }
 }

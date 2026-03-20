@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const db = require('./db');
-const { getProxyFetch } = require('./proxy');
+const { getProxyFetch, recordFailure } = require('./proxy');
 
 const CONFIG_DIR = process.env.CONFIG_DIR || '/app/config';
 const CONFIG_PATH = path.join(CONFIG_DIR, 'settings.json');
@@ -49,6 +49,7 @@ async function rdFetch(endpoint, options = {}) {
 
   if (!res.ok) {
     const body = await res.text();
+    recordFailure('realdebrid', `${res.status} on ${endpoint}`);
     throw new Error(`RD API error ${res.status} on ${endpoint}: ${body}`);
   }
 

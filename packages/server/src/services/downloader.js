@@ -4,7 +4,7 @@ const { pipeline } = require('stream/promises');
 const { Readable } = require('stream');
 const { createExtractorFromFile } = require('node-unrar-js');
 const AdmZip = require('adm-zip');
-const { getProxyFetch } = require('./proxy');
+const { getProxyFetch, recordFailure } = require('./proxy');
 
 const MUSIC_DIR = process.env.MUSIC_DIR || '/app/music';
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.flac', '.ogg', '.m4a', '.aac', '.wav', '.opus']);
@@ -17,6 +17,7 @@ async function downloadFile(url, destPath, { inactivityTimeout = 60000 } = {}) {
   const proxyFetch = getProxyFetch();
   const res = await proxyFetch(url);
   if (!res.ok) {
+    recordFailure('download', `${res.status} ${res.statusText}`);
     throw new Error(`Download failed: ${res.status} ${res.statusText}`);
   }
 

@@ -19,4 +19,32 @@ function getProxyArgs() {
   return proxy ? ['--proxy', proxy] : [];
 }
 
-module.exports = { getProxyFetch, getProxyArgs };
+// Per-service failure tracking
+const failureCounts = {};
+const FAILURE_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
+
+function recordFailure(service, error) {
+  if (!failureCounts[service]) failureCounts[service] = [];
+  failureCounts[service].push({ time: Date.now(), error: error.substring(0, 200) });
+  // Prune old entries
+  const cutoff = Date.now() - FAILURE_WINDOW_MS;
+  failureCounts[service] = failureCounts[service].filter(f => f.time > cutoff);
+}
+
+function getFailureSummary() {
+  const cutoff = Date.now() - FAILURE_WINDOW_MS;
+  const summary = {};
+  for (const [service, failures] of Object.entries(failureCounts)) {
+    const recent = failures.filter(f => f.time > cutoff);
+    if (recent.length > 0) {
+      summary[service] = {
+        count: recent.length,
+        lastError: recent[recent.length - 1].error,
+        lastAt: recent[recent.length - 1].time,
+      };
+    }
+  }
+  return summary;
+}
+
+module.exports = { getProxyFetch, getProxyArgs, recordFailure, getFailureSummary };

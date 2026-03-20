@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../services/db');
-const { getProxyFetch } = require('../services/proxy');
+const { getProxyFetch, getFailureSummary } = require('../services/proxy');
 
 // Common PIA regions (source: PIA server list, March 2026)
 const PIA_REGIONS = [
@@ -85,6 +85,10 @@ router.post('/test', async (req, res) => {
       ? `All services reachable via ${vpnIp} (${region})`
       : `Some services unreachable via VPN (${region})`,
   });
+});
+
+router.get('/failures', (req, res) => {
+  res.json(getFailureSummary());
 });
 
 module.exports = router;
