@@ -7,6 +7,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 - **MINOR** (0.x.0): New features, meaningful improvements
 - **PATCH** (0.0.x): Bug fixes, polish, iteration on current features
 
+## [1.3.0] - 2026-03-20
+
+### Added
+- Full internal service diagnostics: every server service exposes `getStatus()` with live operational state
+- Diagnostics aggregator endpoint (`/api/diagnostics`, admin-only) collects all service state in one call
+- Client-side diagnostics collector: passive API call logging, SSE connection tracking, uncaught error capture
+- One-click "Copy Diagnostics" button in Status tab — produces a pasteable text blob for debugging
+- Status tab now shows internal services (job-worker, job-queue, LLM, YouTube, DLNA, file-validator, RealDebrid, downloader, scrobble-sync, cast, database, upgrader) with color-coded health indicators
+- `onRequest` callback hook in api-client for API call timing/latency tracking
+- `window.__notifyDiagnostics` getter exposes React app state on demand for diagnostic snapshots
+
 ## [1.2.1] - 2026-03-20
 
 ### Fixed
