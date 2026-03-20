@@ -500,6 +500,10 @@ if (require.main === module) {
     }
   }, UPGRADER_INTERVAL_MS);
 
+  // Start Last.fm scrobble delta sync scheduler for users with existing auth
+  const scrobbleSync = require('./services/scrobble-sync');
+  scrobbleSync.startDeltaSyncScheduler();
+
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Not-ify server running on port ${PORT}`);
   });

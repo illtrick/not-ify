@@ -1,5 +1,6 @@
 const express = require('express');
 const lfm = require('../services/lastfm');
+const db = require('../services/db');
 
 const router = express.Router();
 
@@ -38,6 +39,15 @@ router.post('/lastfm/auth/session', async (req, res) => {
   try {
     const session = await lfm.getSession(token, req.userId);
     res.json({ success: true, username: session.name });
+
+    // Fire and forget — don't block the auth response
+    const scrobbleSync = require('../services/scrobble-sync');
+    const userId = req.userId;
+    const username = session.name;
+    scrobbleSync.fullSync(userId, username).catch(err =>
+      console.error('[scrobble-sync] Initial sync failed:', err.message)
+    );
+    scrobbleSync.scheduleDeltaSync(userId, username);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -138,6 +148,33 @@ router.post('/lastfm/queue/flush', async (req, res) => {
   try {
     const result = await lfm.flushScrobbleQueue(req.userId);
     res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/lastfm/sync/status — Returns current scrobble sync state (per-user)
+router.get('/lastfm/sync/status', (req, res) => {
+  try {
+    const state = db.getUserSetting(req.userId, 'scrobbleSync');
+    res.json(state || { state: 'not_started' });
+  } catch {
+    res.json({ state: 'not_started' });
+  }
+});
+
+// POST /api/lastfm/sync — Manual delta sync trigger (per-user)
+router.post('/lastfm/sync', async (req, res) => {
+  const scrobbleSync = require('../services/scrobble-sync');
+  try {
+    const userId = req.userId;
+    const config = db.getLastfmConfig(userId);
+    if (!config || !config.sessionKey) {
+      return res.status(400).json({ error: 'Last.fm not connected' });
+    }
+    // fire and forget
+    scrobbleSync.deltaSync(userId, config.username).catch(() => {});
+    res.json({ started: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

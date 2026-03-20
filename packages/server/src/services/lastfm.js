@@ -223,6 +223,44 @@ const getArtistTopTracks = cached('artistTopTracks', 30 * 60 * 1000, async (arti
   }));
 });
 
+async function getRecentTracksPage(user, page = 1, limit = 200, from = null) {
+  // Apply rate limiter (max 5 req/sec — 200ms minimum gap)
+  const now = Date.now();
+  const wait = 200 - (now - lastRequestTime);
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  lastRequestTime = Date.now();
+
+  const params = new URLSearchParams({
+    method: 'user.getrecenttracks',
+    user,
+    api_key: '', // placeholder — resolved below
+    format: 'json',
+    limit: String(limit),
+    page: String(page),
+  });
+
+  // We need an API key — use the first user's config that has one
+  // (this is a public endpoint, any valid key works)
+  const cfg = getConfig('default');
+  const apiKey = cfg.apiKey || '';
+  params.set('api_key', apiKey);
+
+  if (from) params.set('from', String(from));
+
+  const response = await fetch(`${LFM_BASE}?${params}`, {
+    headers: { 'User-Agent': 'Not-ify/1.0.0' },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error(`Last.fm API ${response.status}`);
+  const data = await response.json();
+  if (data.error) throw new Error(`Last.fm error ${data.error}: ${data.message}`);
+  return {
+    tracks: data.recenttracks?.track || [],
+    totalPages: parseInt(data.recenttracks?.['@attr']?.totalPages || '1', 10),
+    total: parseInt(data.recenttracks?.['@attr']?.total || '0', 10),
+  };
+}
+
 module.exports = {
   getConfig,
   saveConfig,
@@ -237,4 +275,5 @@ module.exports = {
   getTopAlbums,
   getTopTracks,
   getArtistTopTracks,
+  getRecentTracksPage,
 };
