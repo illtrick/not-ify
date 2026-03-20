@@ -2,6 +2,7 @@
 
 const jobQueue = require('./job-queue');
 const db = require('./db');
+const { albumExistsInLibrary } = require('./library-check');
 
 const POLL_INTERVAL = 5000; // 5 seconds
 const BACKOFF = [60000, 300000, 900000]; // 1min, 5min, 15min
@@ -23,6 +24,22 @@ async function processNextJob() {
   if (!job) return false;
 
   const payload = JSON.parse(job.payload);
+
+  if (payload.artist && payload.album && albumExistsInLibrary(payload.artist, payload.album)) {
+    jobQueue.skip(job.id, 'skipped_duplicate');
+    db.addJobLog({
+      job_id: job.id,
+      artist: payload.artist,
+      album: payload.album,
+      attempt: (job.retries || 0) + 1,
+      duration_ms: 0,
+      outcome: 'skipped_duplicate',
+      fail_reason: null,
+      quality: null,
+    });
+    return true;
+  }
+
   const start = Date.now();
   let timeoutTimer;
 
