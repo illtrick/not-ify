@@ -11,6 +11,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { ContextMenu } from './components/ContextMenu';
 import { BgDownloadIndicator } from './components/BgDownloadIndicator';
 import { DownloadIndicator } from './components/DownloadIndicator';
+import { ActivityLog } from './components/ActivityLog';
 import { Sidebar } from './components/Sidebar';
 import { QueuePanel } from './components/QueuePanel';
 import { PlayerBar } from './components/PlayerBar';
@@ -56,6 +57,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
   // UI state (stays in App)
   const [contextMenu, setContextMenu] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showActivityLog, setShowActivityLog] = useState(false);
   const [versionWarning, setVersionWarning] = useState(null);
   const [serverVersion, setServerVersion] = useState(null);
 
@@ -639,6 +641,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
             selectedAlbum={selectedAlbum}
             bgDownloadStatus={bgDownloadStatus} setBgDownloadStatus={setBgDownloadStatus}
             jobQueueStats={jobQueueStats}
+            onToggleLog={() => setShowActivityLog(v => !v)}
             downloadStatus={downloadStatus} setDownloadStatus={setDownloadStatus}
             downloading={downloading}
             dlExpanded={dlExpanded} setDlExpanded={setDlExpanded}
@@ -830,6 +833,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
       />
       {/* Hidden secondary audio element for gapless pre-buffering and crossfade */}
       <audio ref={nextAudioRef} preload="auto" style={{ display: 'none' }} />
+      <ActivityLog open={showActivityLog} onClose={() => setShowActivityLog(false)} />
     </div>
   );
 }

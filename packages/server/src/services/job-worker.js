@@ -3,6 +3,7 @@
 const jobQueue = require('./job-queue');
 const db = require('./db');
 const { getExistingQuality, isUpgrade } = require('./library-check');
+const activity = require('./activity-log');
 
 const POLL_INTERVAL = 5000; // 5 seconds
 const BACKOFF = [60000, 300000, 900000]; // 1min, 5min, 15min
@@ -35,6 +36,7 @@ async function processNextJob() {
     // Album exists on disk — only proceed if incoming quality is strictly better
     const incomingQuality = (payload.source_meta?.quality || 'unknown').toLowerCase();
     if (!isUpgrade(existingQuality, incomingQuality)) {
+      activity.log('upgrade', 'info', `Skipped (no upgrade): ${payload.artist} — ${payload.album} (have: ${existingQuality}, incoming: ${incomingQuality})`, { artist: payload.artist, album: payload.album, existing: existingQuality, incoming: incomingQuality });
       jobQueue.skip(job.id, 'skipped_no_upgrade');
       db.addJobLog({
         job_id: job.id,
@@ -64,6 +66,7 @@ async function processNextJob() {
     const duration = Date.now() - start;
 
     const outcome = result?.outcome || 'success';
+    activity.log('upgrade', outcome === 'success' ? 'success' : 'info', `Job ${outcome}: ${payload.artist} — ${payload.album}${result?.quality ? ' (' + result.quality + ')' : ''}`, { artist: payload.artist, album: payload.album, outcome, quality: result?.quality });
     if (outcome === 'skipped_duplicate' || outcome === 'skipped_no_upgrade') {
       jobQueue.skip(job.id, outcome);
     } else if (outcome === 'stalled') {
@@ -87,6 +90,7 @@ async function processNextJob() {
     clearTimeout(timeoutTimer);
     const duration = Date.now() - start;
 
+    activity.log('upgrade', 'error', `Job failed: ${payload.artist} — ${payload.album}: ${err.message}`, { artist: payload.artist, album: payload.album, error: err.message, attempt: (job.retries || 0) + 1 });
     const retryAfter = Date.now() + (BACKOFF[job.retries || 0] || BACKOFF[BACKOFF.length - 1]);
     jobQueue.fail(job.id, err.message, retryAfter);
     db.addJobLog({

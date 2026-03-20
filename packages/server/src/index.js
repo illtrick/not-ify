@@ -379,6 +379,24 @@ app.use('/api/realdebrid', adminGuard, rdConfigRouter);
 const vpnConfigRouter = require('./api/vpn-config');
 app.use('/api/vpn', adminGuard, vpnConfigRouter);
 
+// Activity log API — verbose download/pipeline event stream for debugging UI
+const activityLog = require('./services/activity-log');
+app.get('/api/activity', (req, res) => {
+  const since = req.query.since ? parseInt(req.query.since, 10) : undefined;
+  const category = req.query.category || undefined;
+  const limit = req.query.limit ? parseInt(req.query.limit, 10) : 100;
+  res.json(activityLog.getEntries({ since, category, limit }));
+});
+// SSE stream for real-time activity events
+app.get('/api/activity/stream', (req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+  res.write(':\n\n');
+  const remove = activityLog.onEntry((entry) => {
+    try { res.write(`data: ${JSON.stringify(entry)}\n\n`); } catch {}
+  });
+  req.on('close', remove);
+});
+
 // --- Per-user API endpoints ---
 
 // GET /api/users — list available users (for user picker)

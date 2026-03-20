@@ -531,3 +531,16 @@ export function switchVpnRegion(region) {
 export function getVpnFailures() {
   return get('/api/vpn/failures');
 }
+
+// Activity log — verbose download/pipeline events for debugging
+export function getActivityLog({ since, category, limit } = {}) {
+  const params = new URLSearchParams();
+  if (since) params.set('since', since);
+  if (category) params.set('category', category);
+  if (limit) params.set('limit', limit);
+  return get(`/api/activity?${params}`);
+}
+
+export function getActivityStreamUrl() {
+  return `${getBaseUrl()}/api/activity/stream`;
+}

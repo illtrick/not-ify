@@ -7,6 +7,7 @@ const router = express.Router();
 const yt = require('../services/youtube');
 const streamAuth = require('../services/stream-auth');
 const { validateFile } = require('../services/file-validator');
+const activity = require('../services/activity-log');
 
 const MUSIC_DIR = process.env.MUSIC_DIR || '/app/music';
 
@@ -80,7 +81,7 @@ async function ytQueueProcess() {
       } else {
         next.status = 'error';
         next.error = err.message;
-        console.error(`yt-dlp queue error (${next.title}): ${err.message}`);
+        activity.log('youtube', 'error', `Failed: ${next.title} — ${err.message}`, { title: next.title, error: err.message });
       }
     } finally {
       activeYtDownload = null;
@@ -100,7 +101,7 @@ async function ytDownloadOne(entry, abort) {
   const dlArtist = sanitizePath(entry.artist || 'Unknown Artist');
   const dlAlbum = sanitizePath(entry.album || 'Singles');
 
-  console.log(`[yt-queue] Downloading: ${dlTitle} → ${dlArtist}/${dlAlbum}`);
+  activity.log('youtube', 'info', `Downloading: ${dlTitle}`, { artist: dlArtist, album: dlAlbum, title: dlTitle });
 
   const destDir = path.join(MUSIC_DIR, dlArtist, dlAlbum);
   fs.mkdirSync(destDir, { recursive: true });
@@ -198,7 +199,7 @@ async function ytDownloadOne(entry, abort) {
     fetch(`http://localhost:3000/api/cover/search?artist=${encodeURIComponent(dlArtist)}&album=${encodeURIComponent(dlAlbum)}`, { signal: AbortSignal.timeout(10000) }).catch(() => {});
   } catch {}
 
-  console.log(`[yt-queue] Done: ${dlTitle}`);
+  activity.log('youtube', 'success', `Saved: ${dlTitle}`, { artist: dlArtist, album: dlAlbum, title: dlTitle, path: downloadedFile });
   return downloadedFile;
 }
 
@@ -319,6 +320,7 @@ router.post('/download/yt/album', async (req, res) => {
     } catch {}
   }
 
+  activity.log('youtube', 'info', `Album queued: ${artist} — ${album} (${queued.length} tracks, ${errors.length} failed)`, { artist, album, queued: queued.length, errors: errors.length });
   res.json({
     queued: queued.length,
     errors: errors.length,

@@ -30,6 +30,7 @@ export function Sidebar({
   selectedAlbum,
   bgDownloadStatus, setBgDownloadStatus,
   jobQueueStats,
+  onToggleLog,
   downloadStatus, setDownloadStatus,
   downloading,
   dlExpanded, setDlExpanded,
@@ -182,7 +183,7 @@ export function Sidebar({
           })}
         </div>
       </div>
-      <BgDownloadIndicator bgDownloadStatus={bgDownloadStatus} setBgDownloadStatus={setBgDownloadStatus} jobQueueStats={jobQueueStats} />
+      <BgDownloadIndicator bgDownloadStatus={bgDownloadStatus} setBgDownloadStatus={setBgDownloadStatus} jobQueueStats={jobQueueStats} onToggleLog={onToggleLog} />
       <DownloadIndicator
         downloadStatus={downloadStatus} setDownloadStatus={setDownloadStatus}
         downloading={downloading}

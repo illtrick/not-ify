@@ -25,7 +25,7 @@ export function PlayerBar({
   const seekFreezeRef = useRef(null);
   const displayProgress = seekDragging ? seekDragValue : (seekFreezeRef.current !== null ? seekFreezeRef.current : progress);
   const pct = duration ? (displayProgress / duration) * 100 : 0;
-  const canGoToAlbum = has && currentAlbumInfo && (library.length > 0 || currentAlbumInfo.artistMbid);
+  const canGoToAlbum = has && currentAlbumInfo && (currentAlbumInfo.artist || currentAlbumInfo.artistMbid);
 
   return (
     <footer style={{

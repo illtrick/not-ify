@@ -2,6 +2,7 @@ const express = require('express');
 const rd = require('../services/realdebrid');
 const { parseArtistAlbum, sanitizePath, isAudioFile, isArchive, extractArchive, downloadFile } = require('../services/downloader');
 const { validateFile } = require('../services/file-validator');
+const activity = require('../services/activity-log');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -82,7 +83,7 @@ router.post('/download', async (req, res) => {
     }
   }
 
-  console.log(`\n=== Starting download pipeline for: ${name || 'Unknown'} ===`);
+  activity.log('torrent', 'info', `Starting download: ${metaArtist || ''} — ${metaAlbum || name || 'Unknown'}`, { artist: metaArtist, album: metaAlbum });
 
   try {
     // Step 1: Add magnet to Real-Debrid
@@ -288,6 +289,7 @@ router.post('/download', async (req, res) => {
       fetch(warmUrl, { signal: AbortSignal.timeout(10000) }).catch(() => {});
     } catch {}
 
+    activity.log('torrent', 'success', `Complete: ${destArtist}/${destAlbum} — ${downloadedFiles.length} tracks`, { artist: destArtist, album: destAlbum, fileCount: downloadedFiles.length });
     send('complete', {
       message: `Done! ${downloadedFiles.length} track(s) added to library.`,
       name: name || torrentInfo.filename,
@@ -297,10 +299,10 @@ router.post('/download', async (req, res) => {
     });
   } catch (err) {
     if (err.message === 'Download cancelled') {
-      console.log('Download cancelled by user.');
+      activity.log('torrent', 'warn', 'Download cancelled by user');
       send('cancelled', { message: 'Download cancelled.' });
     } else {
-      console.error(`Pipeline error: ${err.message}`);
+      activity.log('torrent', 'error', `Pipeline error: ${err.message}`, { error: err.message });
       send('error', { message: err.message });
     }
   } finally {
@@ -330,6 +332,7 @@ router.post('/download/background', async (req, res) => {
   if (bgDownload?.status === 'active') return res.status(409).json({ error: 'Background download in progress' });
 
   bgDownload = { status: 'active', name: name || 'Unknown', artist: metaArtist, album: metaAlbum, progress: 0, message: 'Starting...', error: null, fileCount: 0 };
+  activity.log('torrent', 'info', `Background download started: ${metaArtist || ''} — ${metaAlbum || name}`, { artist: metaArtist, album: metaAlbum });
 
   // Persist job to queue for restart-resilience (alongside the in-memory flow)
   const dedupeKey = metaArtist && metaAlbum
@@ -428,12 +431,12 @@ router.post('/download/background', async (req, res) => {
       bgDownload.progress = 100;
       bgDownload.message = `Done! ${downloadedFiles.length} tracks saved.`;
       bgDownload.fileCount = downloadedFiles.length;
-      console.log(`[bg-torrent] Done: ${name} → ${downloadedFiles.length} files`);
+      activity.log('torrent', 'success', `Background complete: ${destArtist}/${destAlbum} — ${downloadedFiles.length} files`, { artist: destArtist, album: destAlbum, fileCount: downloadedFiles.length });
     } catch (err) {
       bgDownload.status = 'error';
       bgDownload.error = err.message;
       bgDownload.message = `Error: ${err.message}`;
-      console.error(`[bg-torrent] Error: ${err.message}`);
+      activity.log('torrent', 'error', `Background error: ${err.message}`, { error: err.message });
     }
   })();
 });
