@@ -96,10 +96,13 @@ router.post('/region', async (req, res) => {
   if (!region) return res.status(400).json({ error: 'Missing region' });
 
   const controlUrl = process.env.GLUETUN_CONTROL_URL || 'http://localhost:8000';
+  const apiKey = process.env.GLUETUN_API_KEY || '';
   try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (apiKey) headers['X-API-Key'] = apiKey;
     const response = await fetch(`${controlUrl}/v1/openvpn/settings`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ server_regions: [region] }),
       signal: AbortSignal.timeout(15000),
     });
