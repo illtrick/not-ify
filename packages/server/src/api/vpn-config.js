@@ -100,10 +100,10 @@ router.post('/region', async (req, res) => {
   try {
     const headers = { 'Content-Type': 'application/json' };
     if (apiKey) headers['X-API-Key'] = apiKey;
-    const response = await fetch(`${controlUrl}/v1/openvpn/settings`, {
+    const response = await fetch(`${controlUrl}/v1/vpn/settings`, {
       method: 'PUT',
       headers,
-      body: JSON.stringify({ server_regions: [region] }),
+      body: JSON.stringify({ provider: { server_selection: { regions: [region] } } }),
       signal: AbortSignal.timeout(15000),
     });
 
