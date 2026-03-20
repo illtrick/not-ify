@@ -1,10 +1,7 @@
 'use strict';
 
-// Suite — youtube service VPN proxy support
-// When VPN_PROXY is set, all yt-dlp spawn calls must include --proxy <url>
-
-// We need resetModules so we can require the service fresh per describe block
-// with different env vars. We use jest.isolateModules() inside tests.
+// Suite — youtube service does NOT route through VPN proxy
+// YouTube blocks VPN IPs, so yt-dlp must never include --proxy args
 
 function makeProc(stdoutData) {
   const EventEmitter = require('events');
@@ -30,74 +27,9 @@ const SEARCH_JSON = JSON.stringify({
 
 const STREAM_URL = 'https://stream.example.com/audio.mp4\n';
 
-describe('youtube service — VPN proxy args', () => {
-  test('searchYouTube passes --proxy when VPN_PROXY is set', async () => {
+describe('youtube service — no VPN proxy (YouTube blocks VPN IPs)', () => {
+  test('searchYouTube does NOT pass --proxy even when VPN_PROXY is set', async () => {
     process.env.VPN_PROXY = 'http://test-proxy:8888';
-    let capturedArgs;
-
-    await jest.isolateModulesAsync(async () => {
-      jest.doMock('child_process', () => ({
-        spawn: jest.fn((cmd, args) => {
-          capturedArgs = args;
-          return makeProc(SEARCH_JSON);
-        }),
-      }));
-      const yt = require('../../src/services/youtube');
-      await yt.searchYouTube('test query', 5);
-    });
-
-    expect(capturedArgs).toContain('--proxy');
-    expect(capturedArgs).toContain('http://test-proxy:8888');
-    const proxyIdx = capturedArgs.indexOf('--proxy');
-    expect(capturedArgs[proxyIdx + 1]).toBe('http://test-proxy:8888');
-
-    delete process.env.VPN_PROXY;
-  });
-
-  test('searchSoundCloud passes --proxy when VPN_PROXY is set', async () => {
-    process.env.VPN_PROXY = 'http://test-proxy:8888';
-    let capturedArgs;
-
-    await jest.isolateModulesAsync(async () => {
-      jest.doMock('child_process', () => ({
-        spawn: jest.fn((cmd, args) => {
-          capturedArgs = args;
-          return makeProc(SEARCH_JSON);
-        }),
-      }));
-      const yt = require('../../src/services/youtube');
-      await yt.searchSoundCloud('test query', 5);
-    });
-
-    expect(capturedArgs).toContain('--proxy');
-    expect(capturedArgs).toContain('http://test-proxy:8888');
-
-    delete process.env.VPN_PROXY;
-  });
-
-  test('getStreamUrl passes --proxy when VPN_PROXY is set', async () => {
-    process.env.VPN_PROXY = 'http://test-proxy:8888';
-    let capturedArgs;
-
-    await jest.isolateModulesAsync(async () => {
-      jest.doMock('child_process', () => ({
-        spawn: jest.fn((cmd, args) => {
-          capturedArgs = args;
-          return makeProc(STREAM_URL);
-        }),
-      }));
-      const yt = require('../../src/services/youtube');
-      await yt.getStreamUrl('dQw4w9WgXcQ');
-    });
-
-    expect(capturedArgs).toContain('--proxy');
-    expect(capturedArgs).toContain('http://test-proxy:8888');
-
-    delete process.env.VPN_PROXY;
-  });
-
-  test('searchYouTube does NOT pass --proxy when VPN_PROXY is unset', async () => {
-    delete process.env.VPN_PROXY;
     let capturedArgs;
 
     await jest.isolateModulesAsync(async () => {
@@ -112,5 +44,44 @@ describe('youtube service — VPN proxy args', () => {
     });
 
     expect(capturedArgs).not.toContain('--proxy');
+    delete process.env.VPN_PROXY;
+  });
+
+  test('searchSoundCloud does NOT pass --proxy even when VPN_PROXY is set', async () => {
+    process.env.VPN_PROXY = 'http://test-proxy:8888';
+    let capturedArgs;
+
+    await jest.isolateModulesAsync(async () => {
+      jest.doMock('child_process', () => ({
+        spawn: jest.fn((cmd, args) => {
+          capturedArgs = args;
+          return makeProc(SEARCH_JSON);
+        }),
+      }));
+      const yt = require('../../src/services/youtube');
+      await yt.searchSoundCloud('test query', 5);
+    });
+
+    expect(capturedArgs).not.toContain('--proxy');
+    delete process.env.VPN_PROXY;
+  });
+
+  test('getStreamUrl does NOT pass --proxy even when VPN_PROXY is set', async () => {
+    process.env.VPN_PROXY = 'http://test-proxy:8888';
+    let capturedArgs;
+
+    await jest.isolateModulesAsync(async () => {
+      jest.doMock('child_process', () => ({
+        spawn: jest.fn((cmd, args) => {
+          capturedArgs = args;
+          return makeProc(STREAM_URL);
+        }),
+      }));
+      const yt = require('../../src/services/youtube');
+      await yt.getStreamUrl('dQw4w9WgXcQ');
+    });
+
+    expect(capturedArgs).not.toContain('--proxy');
+    delete process.env.VPN_PROXY;
   });
 });
