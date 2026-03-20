@@ -202,6 +202,27 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
     if (isAdmin) api.getVpnRegions().then(setVpnRegions).catch(() => {});
   }, [isAdmin]);
 
+  // ── Scrobble sync status polling ──────────────────────────────────────────
+  const [syncStatus, setSyncStatus] = useState(null);
+  useEffect(() => {
+    if (!showSettings) return;
+    let cancelled = false;
+    const fetchStatus = () => {
+      api.getScrobbleSyncStatus().then(data => {
+        if (!cancelled) setSyncStatus(data);
+      }).catch(() => {});
+    };
+    fetchStatus();
+    const interval = setInterval(fetchStatus, syncStatus?.state === 'syncing' ? 5000 : 60000);
+    return () => { cancelled = true; clearInterval(interval); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSettings, syncStatus?.state]);
+
+  const handleSyncNow = useCallback(() => {
+    api.triggerScrobbleSync().catch(() => {});
+    api.getScrobbleSyncStatus().then(setSyncStatus).catch(() => {});
+  }, []);
+
   // ── Sync UI when cast device changes tracks externally (e.g. Sonos skip) ──
   const lastCastTrackIdRef = useRef(null);
   useEffect(() => {
@@ -788,6 +809,8 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
         rdConfig={rdConfig}
         vpnConfig={vpnConfig}
         vpnRegions={vpnRegions}
+        syncStatus={syncStatus}
+        onSyncNow={handleSyncNow}
       />
 
       <audio

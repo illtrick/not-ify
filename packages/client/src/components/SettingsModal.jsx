@@ -23,6 +23,8 @@ export function SettingsModal({
   rdConfig,
   vpnConfig,
   vpnRegions,
+  syncStatus,
+  onSyncNow,
 }) {
   const [rdToken, setRdToken] = useState('');
   const [vpnUser, setVpnUser] = useState('');
@@ -127,6 +129,32 @@ export function SettingsModal({
                 padding: '8px 16px', borderRadius: 6, border: `1px solid ${COLORS.error}`,
                 background: 'transparent', color: COLORS.error, fontSize: 13, cursor: 'pointer',
               }}>Disconnect</button>
+              {/* Scrobble sync status */}
+              <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 6, background: COLORS.hover, fontSize: 12 }}>
+                {syncStatus?.state === 'syncing' ? (
+                  <span style={{ color: COLORS.textSecondary }}>
+                    Syncing Last.fm history… {syncStatus.fetched || 0} / {syncStatus.total || '?'} scrobbles
+                  </span>
+                ) : syncStatus?.state === 'complete' ? (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <span style={{ color: COLORS.textSecondary }}>
+                      {(() => {
+                        const secsAgo = Math.floor(Date.now() / 1000) - (syncStatus.lastSyncedAt || 0);
+                        const hrs = Math.floor(secsAgo / 3600);
+                        return hrs >= 1 ? `Last synced: ${hrs}h ago` : `Last synced: ${Math.floor(secsAgo / 60)}m ago`;
+                      })()}
+                    </span>
+                    <button onClick={onSyncNow} style={{
+                      padding: '4px 10px', borderRadius: 4, border: `1px solid ${COLORS.border}`,
+                      background: 'transparent', color: COLORS.textPrimary, fontSize: 11, cursor: 'pointer',
+                    }}>Sync Now</button>
+                  </div>
+                ) : (
+                  <span style={{ color: COLORS.textSecondary }}>
+                    Scrobble sync will start automatically once connected…
+                  </span>
+                )}
+              </div>
             </div>
           ) : lastfmAuthStep === 1 ? (
             <div>
