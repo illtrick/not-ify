@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { COLORS } from '../constants';
 import { Icon } from './Icon';
+import { importFromLastfm } from '@not-ify/shared';
 
 function StatusDot({ status }) {
   const color = status === 'ok' ? COLORS.success : status === 'error' ? COLORS.error : COLORS.textSecondary;
@@ -30,6 +31,24 @@ export function SettingsModal({
   const [vpnUser, setVpnUser] = useState('');
   const [vpnPass, setVpnPass] = useState('');
   const [vpnRegion, setVpnRegion] = useState('US East');
+
+  // Last.fm library import state
+  const [importDays, setImportDays] = useState(60);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+
+  const handleImport = async () => {
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const result = await importFromLastfm(importDays);
+      setImportResult(result);
+    } catch (err) {
+      setImportResult({ error: err.message });
+    } finally {
+      setImporting(false);
+    }
+  };
 
   // Sync VPN fields when status loads
   useEffect(() => {
@@ -152,6 +171,63 @@ export function SettingsModal({
                 ) : (
                   <span style={{ color: COLORS.textSecondary }}>
                     Scrobble sync will start automatically once connected…
+                  </span>
+                )}
+              </div>
+
+              {/* Library import from scrobbles */}
+              <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 6, background: COLORS.hover, fontSize: 12 }}>
+                {syncStatus?.state === 'complete' ? (
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <span style={{ color: COLORS.textPrimary, fontWeight: 600 }}>Import to Library</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <span style={{ color: COLORS.textSecondary }}>From last</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={3650}
+                        value={importDays}
+                        onChange={e => setImportDays(parseInt(e.target.value, 10) || 60)}
+                        style={{
+                          width: 60, padding: '3px 6px', borderRadius: 4, border: `1px solid ${COLORS.border}`,
+                          background: COLORS.surface, color: COLORS.textPrimary, fontSize: 12, textAlign: 'center',
+                        }}
+                      />
+                      <span style={{ color: COLORS.textSecondary }}>days of scrobbles</span>
+                      <button
+                        onClick={handleImport}
+                        disabled={importing}
+                        style={{
+                          marginLeft: 'auto', padding: '4px 12px', borderRadius: 4, border: 'none',
+                          background: importing ? COLORS.hover : COLORS.accent,
+                          color: importing ? COLORS.textSecondary : '#fff',
+                          fontSize: 12, fontWeight: 600, cursor: importing ? 'default' : 'pointer',
+                        }}
+                      >
+                        {importing ? 'Importing…' : 'Import'}
+                      </button>
+                    </div>
+                    {importResult && (
+                      <div style={{ color: importResult.error ? COLORS.error : COLORS.textSecondary, lineHeight: 1.6 }}>
+                        {importResult.error ? (
+                          importResult.error
+                        ) : (
+                          <>
+                            Found {importResult.found} albums by {importResult.artists} artists.
+                            {importResult.alreadyInLibrary > 0 && ` ${importResult.alreadyInLibrary} already in library.`}
+                            {importResult.alreadyQueued > 0 && ` ${importResult.alreadyQueued} already queued.`}
+                            {importResult.queued > 0 && ` ${importResult.queued} queued for download.`}
+                            {importResult.queued === 0 && importResult.found > 0 && importResult.alreadyInLibrary === 0 && importResult.alreadyQueued === 0 && ' Nothing new to queue.'}
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <span style={{ color: COLORS.textSecondary, opacity: 0.6 }}>
+                    Library import available after scrobble sync completes.
                   </span>
                 )}
               </div>

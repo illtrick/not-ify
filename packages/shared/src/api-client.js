@@ -329,6 +329,10 @@ export function lastfmDisconnect() {
 export function getScrobbleSyncStatus() { return get('/api/lastfm/sync/status'); }
 export function triggerScrobbleSync() { return post('/api/lastfm/sync'); }
 
+export function importFromLastfm(days = 60) {
+  return post('/api/import/lastfm', { days });
+}
+
 // ---------------------------------------------------------------------------
 // Recently Played
 // ---------------------------------------------------------------------------
