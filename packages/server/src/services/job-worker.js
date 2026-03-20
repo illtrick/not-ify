@@ -11,6 +11,10 @@ const JOB_TIMEOUT = 600000; // 10 minutes
 
 let running = false;
 let pollTimer = null;
+let jobsProcessed = 0;
+let jobsFailed = 0;
+let lastJobAt = null;
+let lastErrorAt = null;
 
 let processor = async (job) => {
   throw new Error('No job processor registered');
@@ -74,6 +78,7 @@ async function processNextJob() {
       jobQueue.fail(job.id, 'stalled', retryAfter);
     } else {
       jobQueue.complete(job.id, result || {});
+      jobsProcessed++; lastJobAt = Date.now();
     }
     db.addJobLog({
       job_id: job.id,
@@ -93,6 +98,7 @@ async function processNextJob() {
     activity.log('upgrade', 'error', `Job failed: ${payload.artist} — ${payload.album}: ${err.message}`, { artist: payload.artist, album: payload.album, error: err.message, attempt: (job.retries || 0) + 1 });
     const retryAfter = Date.now() + (BACKOFF[job.retries || 0] || BACKOFF[BACKOFF.length - 1]);
     jobQueue.fail(job.id, err.message, retryAfter);
+    jobsFailed++; lastErrorAt = Date.now();
     db.addJobLog({
       job_id: job.id,
       artist: payload.artist,
@@ -134,4 +140,8 @@ function stop() {
   }
 }
 
-module.exports = { start, stop, setProcessor, processNextJob };
+function getStatus() {
+  return { running, jobsProcessed, jobsFailed, lastJobAt, lastErrorAt };
+}
+
+module.exports = { start, stop, setProcessor, processNextJob, getStatus };

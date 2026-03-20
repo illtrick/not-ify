@@ -183,6 +183,19 @@ function getAll() {
   return db.prepare('SELECT * FROM jobs ORDER BY id ASC').all();
 }
 
+function getStats() {
+  const db = getDb();
+  const rows = db.prepare('SELECT status, COUNT(*) as count FROM jobs GROUP BY status').all();
+  const stats = { pending: 0, active: 0, done: 0, failed: 0 };
+  for (const r of rows) {
+    if (r.status in stats) stats[r.status] = r.count;
+    else if (r.status.startsWith('skipped')) stats.done += r.count;
+  }
+  const oldest = db.prepare("SELECT MIN(created_at) as oldest FROM jobs WHERE status = 'pending'").get();
+  stats.oldestPendingAge = oldest?.oldest ? Date.now() - new Date(oldest.oldest).getTime() : null;
+  return stats;
+}
+
 module.exports = {
   enqueue,
   dequeue,
@@ -192,4 +205,5 @@ module.exports = {
   getByType,
   getByStatus,
   getAll,
+  getStats,
 };

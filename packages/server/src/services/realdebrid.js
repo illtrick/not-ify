@@ -8,6 +8,9 @@ const CONFIG_PATH = path.join(CONFIG_DIR, 'settings.json');
 const RD_BASE = 'https://api.real-debrid.com/rest/1.0';
 
 let _cachedToken = null;
+let _lastCallAt = null;
+let _lastCallOk = null;
+let _lastRdError = null;
 
 function getToken() {
   if (_cachedToken) return _cachedToken;
@@ -47,12 +50,16 @@ async function rdFetch(endpoint, options = {}) {
     },
   });
 
+  _lastCallAt = Date.now();
   if (!res.ok) {
     const body = await res.text();
+    _lastCallOk = false;
+    _lastRdError = `${res.status} on ${endpoint}`;
     recordFailure('realdebrid', `${res.status} on ${endpoint}: ${body}`);
     throw new Error(`RD API error ${res.status} on ${endpoint}: ${body}`);
   }
 
+  _lastCallOk = true;
   const text = await res.text();
   if (!text) return null;
   return JSON.parse(text);
@@ -116,6 +123,15 @@ async function deleteTorrent(torrentId) {
   await rdFetch(`/torrents/delete/${torrentId}`, { method: 'DELETE' });
 }
 
+function getStatus() {
+  return {
+    configured: !!(_cachedToken || process.env.RD_TOKEN),
+    lastCallAt: _lastCallAt,
+    lastCallOk: _lastCallOk,
+    lastError: _lastRdError,
+  };
+}
+
 module.exports = {
   getUserInfo,
   addMagnet,
@@ -125,4 +141,5 @@ module.exports = {
   waitForDownload,
   deleteTorrent,
   setToken,
+  getStatus,
 };

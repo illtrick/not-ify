@@ -10,7 +10,14 @@ const MUSIC_DIR = process.env.MUSIC_DIR || '/app/music';
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.flac', '.ogg', '.m4a', '.aac', '.wav', '.opus']);
 const ARCHIVE_EXTENSIONS = new Set(['.rar', '.zip']);
 
+let _activeDownloads = 0;
+let _lastCompletedAt = null;
+let _lastFailedAt = null;
+let _lastDownloadError = null;
+
 async function downloadFile(url, destPath, { inactivityTimeout = 60000 } = {}) {
+  _activeDownloads++;
+  try {
   const dir = path.dirname(destPath);
   fs.mkdirSync(dir, { recursive: true });
 
@@ -61,7 +68,15 @@ async function downloadFile(url, destPath, { inactivityTimeout = 60000 } = {}) {
   }
 
   if (totalBytes > 0) console.log('');
+  _lastCompletedAt = Date.now();
   return destPath;
+  } catch (err) {
+    _lastFailedAt = Date.now();
+    _lastDownloadError = err.message;
+    throw err;
+  } finally {
+    _activeDownloads--;
+  }
 }
 
 function isAudioFile(filename) {
@@ -195,6 +210,10 @@ function formatBytes(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
+function getStatus() {
+  return { activeDownloads: _activeDownloads, lastCompletedAt: _lastCompletedAt, lastFailedAt: _lastFailedAt, lastError: _lastDownloadError };
+}
+
 module.exports = {
   downloadFile,
   downloadAlbum,
@@ -204,4 +223,5 @@ module.exports = {
   formatBytes,
   parseArtistAlbum,
   sanitizePath,
+  getStatus,
 };

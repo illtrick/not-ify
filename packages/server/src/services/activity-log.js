@@ -9,6 +9,9 @@ emitter.setMaxListeners(20);
 
 const MAX_ENTRIES = 200;
 const entries = [];
+let errorCount = 0;
+let lastError = null;
+const bootTime = Date.now();
 
 /**
  * Log levels: info, warn, error, success
@@ -24,6 +27,7 @@ function log(category, level, message, meta = {}) {
     ...meta,
   };
   entries.push(entry);
+  if (level === 'error') { errorCount++; lastError = entry; }
   if (entries.length > MAX_ENTRIES) entries.shift();
 
   // Emit for SSE listeners
@@ -54,4 +58,13 @@ function clear() {
   entries.length = 0;
 }
 
-module.exports = { log, getEntries, onEntry, clear };
+function getStatus() {
+  return {
+    entryCount: entries.length,
+    errorCount,
+    lastError: lastError ? { ts: lastError.ts, category: lastError.category, message: lastError.message } : null,
+    uptimeMs: Date.now() - bootTime,
+  };
+}
+
+module.exports = { log, getEntries, onEntry, clear, getStatus };

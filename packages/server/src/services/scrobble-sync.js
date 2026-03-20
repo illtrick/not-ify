@@ -148,4 +148,22 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-module.exports = { fullSync, deltaSync, startDeltaSyncScheduler, scheduleDeltaSync, stopAll };
+function getStatus() {
+  const db = require('./db');
+  const users = db.getUsers();
+  const syncs = {};
+  for (const u of users) {
+    const state = getSyncState(u.id);
+    syncs[u.display_name || u.id] = {
+      state: state.state || 'idle',
+      lastSyncedAt: state.lastSyncedAt || null,
+      total: state.total || 0,
+      fetched: state.fetched || 0,
+      error: state.error || null,
+      scheduled: intervals.has(u.id),
+    };
+  }
+  return syncs;
+}
+
+module.exports = { fullSync, deltaSync, startDeltaSyncScheduler, scheduleDeltaSync, stopAll, getStatus };

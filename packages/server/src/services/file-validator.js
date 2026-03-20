@@ -9,6 +9,8 @@ const CLAM_SOCKET = process.env.CLAM_SOCKET || '/var/run/clamav/clamd.sock'; // 
 const MAX_AUDIO_SIZE = 500 * 1024 * 1024; // 500 MB
 const CLAM_CHUNK_SIZE = 64 * 1024; // 64 KB chunks for INSTREAM
 
+let _toolStatus = null;
+
 const AUDIO_MIMES = new Set([
   'audio/mpeg', 'audio/flac', 'audio/ogg', 'audio/mp4',
   'audio/aac', 'audio/wav', 'audio/x-wav', 'audio/opus',
@@ -193,11 +195,27 @@ async function validateFile(filePath) {
     results.passed = false;
   }
 
+  const _mime = results.checks.find(c => c.name === 'mime');
+  const _ffprobe = results.checks.find(c => c.name === 'ffprobe');
+  const _clam = results.checks.find(c => c.name === 'clam');
+  _toolStatus = {
+    file: _mime ? !_mime.skipped : null,
+    ffprobe: _ffprobe ? !_ffprobe.skipped : null,
+    clamdscan: _clam ? !_clam.skipped : null,
+  };
+
   return results;
+}
+
+function getStatus() {
+  return {
+    toolsProbed: _toolStatus !== null,
+    tools: _toolStatus || { file: 'untested', ffprobe: 'untested', clamdscan: 'untested' },
+  };
 }
 
 module.exports = {
   validateFile,
-  // Exported for unit testing of individual checks
+  getStatus,
   _test: { checkMimeType, checkFfprobe, checkFileSize, checkClamAV },
 };

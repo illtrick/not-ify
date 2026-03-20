@@ -49,4 +49,12 @@ function currentTrack(userId) {
   return session.queue[session.queueIndex] || null;
 }
 
-module.exports = { setSession, getSession, clearSession, advanceQueue, previousInQueue, currentTrack, computeQueueHash };
+function getStatus() {
+  const sessions = [];
+  for (const [userId, s] of _sessions) {
+    sessions.push({ userId, deviceUsn: s.deviceUsn, deviceType: s.deviceType, queueLength: s.queue?.length || 0, queueIndex: s.queueIndex });
+  }
+  return { activeSessions: sessions.length, sessions };
+}
+
+module.exports = { setSession, getSession, clearSession, advanceQueue, previousInQueue, currentTrack, computeQueueHash, getStatus };

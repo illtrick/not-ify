@@ -246,10 +246,22 @@ function parseTorrentNamesAsync(names) {
 
 loadCache();
 
+function getStatus() {
+  return {
+    healthy,
+    modelReady,
+    lastCheckAt: lastHealthCheck || null,
+    cacheSize: Object.keys(diskCache).length,
+    ollamaUrl: OLLAMA_URL,
+    model: MODEL,
+  };
+}
+
 module.exports = {
   prompt,
   parseTorrentBatch,
   parseTorrentNamesAsync,
   getCachedParse,
   checkHealth,
+  getStatus,
 };

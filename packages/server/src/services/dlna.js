@@ -17,6 +17,7 @@ const log = (...args) => console.log('[dlna]', ...args);
 const _devices = new Map();
 let _socket = null;
 let _scanTimer = null;
+let lastScanAt = null;
 const _emitter = new EventEmitter();
 
 // ── DIDL-Lite XML generation ──────────────────────────────────────────────────
@@ -130,6 +131,7 @@ function _parseHeaders(msg) {
 }
 
 function _sendSearch() {
+  lastScanAt = Date.now();
   if (!_socket) return;
   const msg = _buildMSearch(MEDIA_RENDERER_ST);
   _socket.send(msg, 0, msg.length, SSDP_PORT, SSDP_MULTICAST);
@@ -860,6 +862,13 @@ module.exports = {
   unsubscribe,
   getDeviceState,
   isUsingPolling,
+  getStatus: () => {
+    const devices = [];
+    for (const [, d] of _devices) {
+      devices.push({ name: d.displayName || d.friendlyName, type: d.deviceType, ip: d.ip });
+    }
+    return { enabled: !!process.env.DLNA_ENABLED, deviceCount: _devices.size, devices, scanning: !!_socket, lastScanAt };
+  },
   on: (event, cb) => _emitter.on(event, cb),
   off: (event, cb) => _emitter.off(event, cb),
 };

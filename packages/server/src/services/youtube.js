@@ -122,4 +122,13 @@ async function searchSoundCloud(query, limit = 10) {
   }
 }
 
-module.exports = { searchYouTube, searchSoundCloud, getStreamUrl };
+function getStatus() {
+  return {
+    activeProcesses,
+    maxConcurrent: MAX_CONCURRENT,
+    searchCacheSize: searchCache.size,
+    urlCacheSize: urlCache.size,
+  };
+}
+
+module.exports = { searchYouTube, searchSoundCloud, getStreamUrl, getStatus };
