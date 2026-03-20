@@ -3,6 +3,8 @@ const { searchMusic } = require('../services/search');
 const { searchReleases, searchArtists, browseArtistReleases, getReleaseTracks, getReleaseGroupTracks, searchReleasesFuzzy, searchArtistsFuzzy, searchRecordings, normalizeQuery, getArtistDetails } = require('../services/musicbrainz');
 const { searchYouTube, searchSoundCloud } = require('../services/youtube');
 const llm = require('../services/llm');
+const { rankResults, getHistoryInjections } = require('../services/search-ranking');
+const db = require('../services/db');
 
 const router = express.Router();
 
@@ -567,6 +569,7 @@ router.get('/search', async (req, res) => {
         trackCount: group.trackCount,
         hasCoverArt: group.coverArt !== null,
         bestSeeders: best?.seeders || 0,
+        bestQuality: best?.quality || 'unknown',
         sources: group.sources,
       };
 
@@ -588,9 +591,18 @@ router.get('/search', async (req, res) => {
     unmatched.sort((a, b) => b.bestSeeders - a.bestSeeders);
 
     // Primary: MB-matched (clean canonical albums), limited to 20
-    const albums = mbMatched.slice(0, 20);
+    let albums = mbMatched.slice(0, 20);
     // Secondary: unmatched torrents that passed filters, limited to 10
     const otherResults = unmatched.slice(0, 10);
+
+    // ── Personalized ranking: inject history matches + re-rank with affinity ──
+    if (req.userId) {
+      const affinityRows = db.getArtistAffinity(req.userId);
+      const affinityMap = new Map(affinityRows.map(a => [a.artist.toLowerCase(), a]));
+      const injections = getHistoryInjections(db, req.userId, q, albums.map(a => a.artist));
+      const allResults = [...albums, ...injections];
+      albums = rankResults(allResults, affinityMap);
+    }
 
     // ── Phase 2: Always surface MB albums, even without torrent sources ────
     // Collect rgids already represented in torrent-matched albums
