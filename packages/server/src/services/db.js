@@ -120,6 +120,23 @@ function getDb() {
       quality TEXT,
       created_at INTEGER DEFAULT (unixepoch())
     );
+
+    CREATE TABLE IF NOT EXISTS scrobbles (
+      user_id TEXT NOT NULL,
+      artist TEXT NOT NULL,
+      album TEXT,
+      track TEXT NOT NULL,
+      played_at INTEGER NOT NULL,
+      UNIQUE(user_id, artist, track, played_at)
+    );
+
+    CREATE TABLE IF NOT EXISTS artist_affinity (
+      user_id TEXT NOT NULL,
+      artist TEXT NOT NULL,
+      play_count INTEGER NOT NULL,
+      last_played_at INTEGER NOT NULL,
+      PRIMARY KEY(user_id, artist)
+    );
   `);
 
   // Create indexes
@@ -127,6 +144,8 @@ function getDb() {
     CREATE INDEX IF NOT EXISTS idx_rp_user_time ON recently_played(user_id, played_at DESC);
     CREATE INDEX IF NOT EXISTS idx_sh_user_time ON search_history(user_id, searched_at DESC);
     CREATE INDEX IF NOT EXISTS idx_pt_playlist ON playlist_tracks(playlist_id, position);
+    CREATE INDEX IF NOT EXISTS idx_scrobbles_user_artist ON scrobbles(user_id, artist);
+    CREATE INDEX IF NOT EXISTS idx_scrobbles_user_time ON scrobbles(user_id, played_at);
   `);
 
   // Migration: add role column if missing
@@ -405,6 +424,57 @@ function getJobLogs(limit = 100) {
   return db.prepare(`SELECT * FROM job_log ORDER BY created_at DESC LIMIT ?`).all(limit);
 }
 
+// --- Scrobbles ---
+
+function insertScrobbles(userId, scrobbles) {
+  const db = getDb();
+  const stmt = db.prepare(
+    'INSERT OR IGNORE INTO scrobbles (user_id, artist, album, track, played_at) VALUES (?, ?, ?, ?, ?)'
+  );
+  const tx = db.transaction(() => {
+    for (const s of scrobbles) {
+      stmt.run(userId, s.artist, s.album || '', s.track, s.played_at);
+    }
+  });
+  tx();
+}
+
+function getScrobbleCount(userId) {
+  return getDb().prepare('SELECT COUNT(*) as count FROM scrobbles WHERE user_id = ?').get(userId).count;
+}
+
+function rebuildArtistAffinity(userId) {
+  const db = getDb();
+  db.prepare('DELETE FROM artist_affinity WHERE user_id = ?').run(userId);
+  db.prepare(`
+    INSERT INTO artist_affinity (user_id, artist, play_count, last_played_at)
+    SELECT user_id, artist, COUNT(*) as play_count, MAX(played_at) as last_played_at
+    FROM scrobbles WHERE user_id = ? GROUP BY user_id, artist
+  `).run(userId);
+}
+
+function getArtistAffinity(userId) {
+  return getDb().prepare('SELECT * FROM artist_affinity WHERE user_id = ? ORDER BY play_count DESC').all(userId);
+}
+
+function getUniqueAlbumsSince(userId, days) {
+  const since = Math.floor(Date.now() / 1000) - (days * 86400);
+  return getDb().prepare(`
+    SELECT DISTINCT artist, album FROM scrobbles
+    WHERE user_id = ? AND played_at >= ? AND album != ''
+    ORDER BY artist, album
+  `).all(userId, since);
+}
+
+function searchArtistAffinity(userId, query) {
+  const pattern = '%' + query + '%';
+  return getDb().prepare(`
+    SELECT * FROM artist_affinity
+    WHERE user_id = ? AND artist LIKE ? AND play_count >= 2
+    ORDER BY play_count DESC LIMIT 3
+  `).all(userId, pattern);
+}
+
 // --- Cleanup ---
 
 function close() {
@@ -457,4 +527,11 @@ module.exports = {
   // Job log
   addJobLog,
   getJobLogs,
+  // Scrobbles
+  insertScrobbles,
+  getScrobbleCount,
+  rebuildArtistAffinity,
+  getArtistAffinity,
+  getUniqueAlbumsSince,
+  searchArtistAffinity,
 };
