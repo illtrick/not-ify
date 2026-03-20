@@ -214,6 +214,63 @@ function getStatus() {
   return { activeDownloads: _activeDownloads, lastCompletedAt: _lastCompletedAt, lastFailedAt: _lastFailedAt, lastError: _lastDownloadError };
 }
 
+/**
+ * Select audio files from an RD file list, optionally filtering to a target album
+ * folder when the torrent contains a discography.
+ *
+ * @param {Array<{id, path, bytes}>} rdFiles - files from rd.getTorrentInfo().files
+ * @param {string} targetArtist - expected artist
+ * @param {string} targetAlbum - expected album
+ * @returns {{ fileIds: number[], isDiscography: boolean, noMatch?: boolean }}
+ */
+function selectAlbumFiles(rdFiles, targetArtist, targetAlbum) {
+  const audioFiles = rdFiles.filter(f => isAudioFile(f.path));
+
+  // Group audio files by parent directory
+  const dirMap = new Map(); // dir -> [file]
+  for (const f of audioFiles) {
+    const parts = f.path.replace(/\\/g, '/').split('/');
+    const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
+    if (!dirMap.has(dir)) dirMap.set(dir, []);
+    dirMap.get(dir).push(f);
+  }
+
+  const dirs = [...dirMap.keys()];
+
+  // Single directory or flat files — not a discography
+  if (dirs.length <= 1) {
+    return { fileIds: audioFiles.map(f => f.id), isDiscography: false };
+  }
+
+  // Multiple directories — find the one matching target album
+  const normalizeDir = (d) => {
+    const leaf = d.split('/').pop() || d;
+    return leaf
+      .replace(/\[\d{4}\]/g, '')         // [1997]
+      .replace(/\(\d{4}\)/g, '')         // (1997)
+      .replace(/^\d{4}\s*[-–—]\s*/g, '') // 2004 -
+      .replace(/\[.*?\]/g, '')           // [FLAC], [WEB], etc.
+      .replace(/\(.*?\)/g, '')           // (Deluxe), etc.
+      .replace(/[_\-–—]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+  };
+
+  const targetTokens = targetAlbum.toLowerCase().split(/\s+/).filter(t => t.length > 1);
+
+  for (const [dir, files] of dirMap) {
+    const normalized = normalizeDir(dir);
+    const allTokensMatch = targetTokens.every(t => normalized.includes(t));
+    if (allTokensMatch) {
+      return { fileIds: files.map(f => f.id), isDiscography: true };
+    }
+  }
+
+  // No match found
+  return { fileIds: [], isDiscography: true, noMatch: true };
+}
+
 module.exports = {
   downloadFile,
   downloadAlbum,
@@ -224,4 +281,5 @@ module.exports = {
   parseArtistAlbum,
   sanitizePath,
   getStatus,
+  selectAlbumFiles,
 };
