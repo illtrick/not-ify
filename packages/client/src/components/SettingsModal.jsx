@@ -152,7 +152,7 @@ export function SettingsModal({
               <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 6, background: COLORS.hover, fontSize: 12 }}>
                 {syncStatus?.state === 'syncing' ? (
                   <span style={{ color: COLORS.textSecondary }}>
-                    Syncing Last.fm history… {syncStatus.fetched || 0} / {syncStatus.total || '?'} scrobbles
+                    Syncing Last.fm history… {(syncStatus.fetched || 0).toLocaleString()} / {(syncStatus.total || 0).toLocaleString()} scrobbles ({syncStatus.total ? Math.round((syncStatus.fetched / syncStatus.total) * 100) : 0}%)
                   </span>
                 ) : syncStatus?.state === 'complete' ? (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
@@ -160,13 +160,24 @@ export function SettingsModal({
                       {(() => {
                         const secsAgo = Math.floor(Date.now() / 1000) - (syncStatus.lastSyncedAt || 0);
                         const hrs = Math.floor(secsAgo / 3600);
-                        return hrs >= 1 ? `Last synced: ${hrs}h ago` : `Last synced: ${Math.floor(secsAgo / 60)}m ago`;
+                        const count = syncStatus.total ? `${syncStatus.total.toLocaleString()} scrobbles · ` : '';
+                        return hrs >= 1 ? `${count}Last synced: ${hrs}h ago` : `${count}Last synced: ${Math.floor(secsAgo / 60)}m ago`;
                       })()}
                     </span>
                     <button onClick={onSyncNow} style={{
                       padding: '4px 10px', borderRadius: 4, border: `1px solid ${COLORS.border}`,
                       background: 'transparent', color: COLORS.textPrimary, fontSize: 11, cursor: 'pointer',
                     }}>Sync Now</button>
+                  </div>
+                ) : syncStatus?.state === 'error' ? (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <span style={{ color: COLORS.error }}>
+                      Sync failed{syncStatus.fetched ? ` at ${syncStatus.fetched.toLocaleString()} scrobbles` : ''}: {syncStatus.error}
+                    </span>
+                    <button onClick={onSyncNow} style={{
+                      padding: '4px 10px', borderRadius: 4, border: `1px solid ${COLORS.border}`,
+                      background: 'transparent', color: COLORS.textPrimary, fontSize: 11, cursor: 'pointer',
+                    }}>Retry</button>
                   </div>
                 ) : (
                   <span style={{ color: COLORS.textSecondary }}>
