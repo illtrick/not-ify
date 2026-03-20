@@ -45,13 +45,13 @@ describe('search-ranking', () => {
 
   test('personal boost promotes listened-to artist', () => {
     const { rankResults } = ranking;
+    const now = Math.floor(Date.now() / 1000);
     const results = [
-      { artist: 'Unknown', matchScore: 0.8, bestQuality: 'flac', bestSeeders: 100 },
-      { artist: 'Known', matchScore: 0.7, bestQuality: 'mp3', bestSeeders: 10 },
+      { artist: 'Unknown', matchScore: 0.8, bestQuality: '320', bestSeeders: 80 },
+      { artist: 'Known',   matchScore: 0.7, bestQuality: '320', bestSeeders: 80 },
     ];
-    const affinityMap = new Map([['known', { play_count: 500, last_played_at: now }]]);
+    const affinityMap = new Map([['known', { play_count: 50, last_played_at: now }]]);
     const ranked = rankResults(results, affinityMap);
-    // Known artist gets boosted above Unknown despite lower raw score
     expect(ranked[0].artist).toBe('Known');
   });
 });

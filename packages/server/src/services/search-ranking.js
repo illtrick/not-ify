@@ -3,8 +3,6 @@ const MAX_BOOST = 0.3;
 const WEIGHT = 0.1;
 const HALF_LIFE_DAYS = 90;
 const MIN_PLAYS = 2;
-// Scale factor applied when ranking: allows personal affinity to overcome quality/source gaps
-const RANK_BOOST_SCALE = 5;
 
 function computeRelevanceScore({ textMatch = 0, quality = 'unknown', seeders = 0, maxSeeders = 1 }) {
   const sourceScore = QUALITY_SCORES[quality] || 0.1;
@@ -30,7 +28,7 @@ function rankResults(results, affinityMap) {
     });
     const affinity = affinityMap.get((r.artist || '').toLowerCase());
     const boost = computePersonalBoost(affinity);
-    return { ...r, _relevance: relevance, _boost: boost, _finalScore: relevance * (1 + boost * RANK_BOOST_SCALE) };
+    return { ...r, _relevance: relevance, _boost: boost, _finalScore: relevance * (1 + boost) };
   }).sort((a, b) => b._finalScore - a._finalScore);
 }
 
