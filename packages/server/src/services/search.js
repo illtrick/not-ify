@@ -1,4 +1,13 @@
+const { ProxyAgent, fetch: undiciFetch } = require('undici');
+
 const APIBAY_BASE = 'https://apibay.org';
+
+function getProxyFetch() {
+  const proxy = process.env.VPN_PROXY || '';
+  if (!proxy) return fetch;
+  const dispatcher = new ProxyAgent(proxy);
+  return (url, opts) => undiciFetch(url, { ...opts, dispatcher });
+}
 
 const torrentCache = new Map();
 const TORRENT_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
@@ -20,7 +29,8 @@ async function searchMusic(query) {
 
   try {
     const url = `${APIBAY_BASE}/q.php?q=${encodeURIComponent(query)}&cat=100`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    const proxyFetch = getProxyFetch();
+    const res = await proxyFetch(url, { signal: AbortSignal.timeout(10000) });
 
     if (!res.ok) {
       console.error(`ApiBay returned ${res.status}`);
