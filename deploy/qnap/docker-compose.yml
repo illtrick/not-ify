@@ -1,8 +1,12 @@
 # =============================================================================
-# Not-ify — QNAP Deployment (Staging + Production + Watchtower)
+# Not-ify — QNAP Deployment (Staging + Production + Watchtower + Gluetun VPN)
 # =============================================================================
 # Deploy: docker compose up -d
 # Update prod version: edit .env, then docker compose up -d
+#
+# IMPORTANT: Volume paths use absolute /share/CACHEDEV1_DATA/ paths.
+# Do NOT use relative paths or /share/DataVol1/ — that path resolves to a
+# 16MB tmpfs on QNAP when the storage pool isn't mounted, causing SQLITE_FULL.
 #
 # Staging (:3001) — auto-updates via Watchtower when CI pushes to "latest"
 # Production (:3000) — pinned to a version tag, only updates when you change .env
@@ -21,8 +25,8 @@ services:
     container_name: not-ify-prod
     network_mode: host
     volumes:
-      - ./prod/music:/app/music
-      - ./prod/config:/app/config
+      - /share/CACHEDEV1_DATA/not-ify/prod/music:/app/music
+      - /share/CACHEDEV1_DATA/not-ify/prod/config:/app/config
     environment:
       - NODE_ENV=production
       - PORT=3000
@@ -45,8 +49,8 @@ services:
     container_name: not-ify-staging
     network_mode: host
     volumes:
-      - ./staging/music:/app/music
-      - ./staging/config:/app/config
+      - /share/CACHEDEV1_DATA/not-ify/staging/music:/app/music
+      - /share/CACHEDEV1_DATA/not-ify/staging/config:/app/config
     environment:
       - NODE_ENV=staging
       - PORT=3001
