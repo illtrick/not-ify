@@ -146,6 +146,24 @@ describe('download-validator', () => {
       expect(mockSearchReleases).toHaveBeenCalled();
     });
 
+    test('uses rgid fallback when mbid absent but rgid provided', async () => {
+      mockSearchReleases.mockResolvedValue([{ mbid: 'found-from-rgid', artist: 'A', album: 'B' }]);
+      mockGetReleaseTracks.mockResolvedValue([
+        { position: 1, title: 'T1', lengthMs: 210000 },
+        { position: 2, title: 'T2', lengthMs: 270000 },
+      ]);
+      mockFfprobe([210, 270]);
+
+      const result = await validate({
+        files: ['/staging/01.flac', '/staging/02.flac'],
+        rgid: 'test-rgid',
+      });
+
+      expect(result.confidence).toBe('high');
+      expect(mockSearchReleases).toHaveBeenCalledWith('rgid:test-rgid');
+      expect(mockGetReleaseTracks).toHaveBeenCalledWith('found-from-rgid');
+    });
+
     test('returns fallback result when MB unavailable', async () => {
       mockGetReleaseTracks.mockRejectedValue(new Error('MB down'));
       mockSearchReleases.mockRejectedValue(new Error('MB down'));
