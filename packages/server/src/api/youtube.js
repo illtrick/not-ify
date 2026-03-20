@@ -268,24 +268,45 @@ router.post('/download/yt/album', async (req, res) => {
     try {
       // Search YouTube for this specific track
       const searchQuery = `${artist} ${trackTitle}`;
-      const ytResults = await yt.searchYouTube(searchQuery, 3).catch(() => []);
+      const ytResults = await yt.searchYouTube(searchQuery, 10).catch(() => []);
 
       if (ytResults.length === 0) {
         errors.push({ track: trackTitle, error: 'No YouTube results' });
         continue;
       }
 
-      // Pick the best result — prefer shorter videos (likely just the song, not a full album)
+      // Score results: prefer title/channel match + duration proximity
       const trackLengthSec = track.lengthMs ? track.lengthMs / 1000 : null;
-      let best = ytResults[0];
-      if (trackLengthSec) {
-        // Find the YT result closest to the expected track length
-        best = ytResults.reduce((a, b) => {
-          const diffA = Math.abs((a.duration || 0) - trackLengthSec);
-          const diffB = Math.abs((b.duration || 0) - trackLengthSec);
-          return diffA <= diffB ? a : b;
-        });
+      const artistLow = artist.toLowerCase();
+      const titleLow = trackTitle.toLowerCase();
+
+      function scoreResult(r) {
+        let score = 0;
+        const rTitle = (r.title || '').toLowerCase();
+        const rChannel = (r.channel || '').toLowerCase();
+        // Strong bonus: title or channel contains artist name
+        if (rTitle.includes(artistLow) || rChannel.includes(artistLow)) score += 50;
+        // Bonus: title contains track name
+        if (rTitle.includes(titleLow)) score += 30;
+        // Penalty: very long videos (likely compilations/mixes)
+        if (r.duration && r.duration > 600) score -= 20;
+        if (r.duration && r.duration > 1200) score -= 30;
+        // Duration proximity bonus (if we know expected length)
+        if (trackLengthSec && r.duration) {
+          const diff = Math.abs(r.duration - trackLengthSec);
+          if (diff < 5) score += 25;
+          else if (diff < 15) score += 15;
+          else if (diff < 30) score += 5;
+          else if (diff > 60) score -= 10;
+        }
+        return score;
       }
+
+      const scored = ytResults.map(r => ({ ...r, _score: scoreResult(r) }));
+      scored.sort((a, b) => b._score - a._score);
+      const best = scored[0];
+
+      activity.log('youtube', 'info', `Matched: "${trackTitle}" → "${best.title}" (score: ${best._score}, ${best.channel})`, { artist, title: trackTitle, ytTitle: best.title, score: best._score });
 
       const entry = ytQueueAdd({
         url: best.url || `https://www.youtube.com/watch?v=${best.id}`,

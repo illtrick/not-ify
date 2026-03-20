@@ -301,28 +301,15 @@ export function useDownload({ playTrack, loadLibrary, library = [] } = {}) {
     const tracks = albumInfo.mbTracks || [];
     if (tracks.length === 0) return;
     setBgDownloadStatus({ type: 'yt', message: `Saving ${albumInfo.album}...`, count: tracks.length, done: false });
-    (async () => {
-      const ytTracks = [];
-      for (const t of tracks) {
-        try {
-          const trackArtist = t.artist || albumInfo.artist;
-          const q = `${trackArtist} ${t.title} audio`;
-          const results = await api.ytSearch(q);
-          if (results.length) {
-            ytTracks.push({
-              url: `https://www.youtube.com/watch?v=${results[0].id}`,
-              title: t.title,
-              artist: trackArtist,
-              album: albumInfo.album,
-              coverArt: albumInfo.coverArt || null,
-            });
-          }
-        } catch {}
-      }
-      if (ytTracks.length) {
-        api.batchYtDownload({ tracks: ytTracks }).then(() => startBgPoll()).catch(() => {});
-      }
-    })();
+    // Use server-side album download (has better YT match scoring)
+    api.startYtAlbumDownload({
+      artist: albumInfo.artist,
+      album: albumInfo.album,
+      tracks: tracks.map(t => ({ title: t.title, position: t.position, lengthMs: t.lengthMs })),
+      rgid: albumInfo.rgid || null,
+      mbid: albumInfo.mbid || null,
+      coverArt: albumInfo.coverArt || null,
+    }).then(() => startBgPoll()).catch(() => {});
   }
 
   // -------------------------------------------------------------------------
