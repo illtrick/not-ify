@@ -63,18 +63,18 @@ router.post('/test', async (req, res) => {
 
   const proxyFetch = getProxyFetch();
 
-  const [ipResult, apibay, realdebrid, youtube] = await Promise.all([
+  // Only test services that actually route through VPN (ApiBay).
+  // RD and YouTube go direct — RD is IP-locked, YouTube blocks VPN IPs.
+  const [ipResult, apibay] = await Promise.all([
     checkService('ip', 'https://api.ipify.org?format=json', proxyFetch),
     checkService('apibay', 'https://apibay.org/q.php?q=test&cat=100', proxyFetch),
-    checkService('realdebrid', 'https://api.real-debrid.com/rest/1.0/time', proxyFetch),
-    checkService('youtube', 'https://www.youtube.com/robots.txt', proxyFetch),
   ]);
 
   const vpnIp = ipResult.ip || null;
   const config = db.getGlobalSetting('vpnConfig');
   const region = config?.region || 'unknown';
-  const services = { apibay, realdebrid, youtube };
-  const allOk = ipResult.status === 'ok' && Object.values(services).every(s => s.status === 'ok');
+  const services = { apibay };
+  const allOk = ipResult.status === 'ok' && apibay.status === 'ok';
 
   res.json({
     status: allOk ? 'ok' : 'degraded',
