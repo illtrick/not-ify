@@ -166,7 +166,7 @@ async function processDownload(job, payload) {
     try { fs.rmSync(stagingDir, { recursive: true, force: true }); } catch {}
     // Step 12: Cleanup RD torrent
     if (torrentId) {
-      try { rd.deleteTorrent(torrentId); } catch {}
+      try { await rd.deleteTorrent(torrentId); } catch {}
     }
   }
 }
