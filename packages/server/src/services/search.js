@@ -144,7 +144,9 @@ function scoreResult(torrentName, artist, album, targetQuality, seeders, maxSeed
   let qualityScore = 0;
   const targetRank = QUALITY_TOKENS[targetQuality.toLowerCase()] || 3;
   for (const [token, rank] of Object.entries(QUALITY_TOKENS)) {
-    if (lower.includes(token) && rank >= targetRank) {
+    // Use word-boundary match for short numeric tokens to avoid false positives (e.g. "1320MB")
+    const tokenRegex = new RegExp(`\\b${token}\\b`, 'i');
+    if (tokenRegex.test(lower) && rank >= targetRank) {
       qualityScore = 1.0;
       break;
     }
@@ -166,7 +168,7 @@ function scoreResult(torrentName, artist, album, targetQuality, seeders, maxSeed
  * @param {{ artist, album, targetQuality?, currentQuality? }} opts
  * @returns {Promise<{ magnetLink, name, seeders, score, isDiscography } | null>}
  */
-async function searchForUpgrade({ artist, album, targetQuality = 'flac', currentQuality }) {
+async function searchForUpgrade({ artist, album, targetQuality = 'flac', currentQuality /* reserved for future upgrade-vs-current comparison */ }) {
   const queries = await generateSearchQueries(artist, album, targetQuality);
 
   // Run all queries, collect unique results by magnet info_hash
