@@ -7,6 +7,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 - **MINOR** (0.x.0): New features, meaningful improvements
 - **PATCH** (0.0.x): Bug fixes, polish, iteration on current features
 
+## [1.4.0] - 2026-03-20
+
+### Added
+- Background job processor: wired stub into full download pipeline (magnet → RD → download → validate → replace)
+- Download validator: MusicBrainz-based post-download scoring (track count + duration matching with 10s grace)
+- LLM-enhanced search: Ollama query expansion generates 3-5 search variations, falls back to programmatic queries
+- Torrent result ranking: token-based artist/album matching + quality detection + seeder weighting
+- Discography extraction: selectAlbumFiles parses RD file paths to download only the target album
+- Staging directory pattern: downloads go to _staging/ first, moved to library only after validation
+- Orphaned staging cleanup on server startup (directories older than 1 hour)
+- Pipeline concurrency guard: job processor checks for active manual downloads before starting
+
+### Changed
+- Job worker timeout increased from 10 to 20 minutes for large FLAC downloads
+- Quality upgrader search now uses multi-query strategy instead of single query
+- handleDiscographyDownload payload keys standardized to artist/album
+
+### Fixed
+- Command injection vulnerability in ffprobe file duration check (now uses execFileSync)
+- Quality token matching uses word boundaries to prevent false positives (e.g. "1320MB" no longer matches "320")
+
 ## [1.3.0] - 2026-03-20
 
 ### Added
