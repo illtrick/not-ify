@@ -441,4 +441,7 @@ router.post('/download/background', async (req, res) => {
   })();
 });
 
+// Expose active download state for concurrency checks (used by job-processor)
+router.isDownloadActive = () => activeDownload !== null;
+
 module.exports = router;

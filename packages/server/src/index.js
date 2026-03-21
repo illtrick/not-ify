@@ -548,6 +548,27 @@ process.on('unhandledRejection', (reason) => {
 if (require.main === module) {
   // Run migration before starting server
   migrate();
+
+  // Clean up orphaned staging directories (from crashed jobs)
+  try {
+    const stagingDir = path.join(process.env.MUSIC_DIR || '/app/music', '_staging');
+    if (fs.existsSync(stagingDir)) {
+      const ONE_HOUR = 60 * 60 * 1000;
+      for (const entry of fs.readdirSync(stagingDir, { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+          const entryPath = path.join(stagingDir, entry.name);
+          const stat = fs.statSync(entryPath);
+          if (Date.now() - stat.mtimeMs > ONE_HOUR) {
+            fs.rmSync(entryPath, { recursive: true, force: true });
+            console.log(`[startup] Cleaned up stale staging dir: ${entry.name}`);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[startup] Staging cleanup failed:', err.message);
+  }
+
   // Start DLNA device discovery (disabled in CI/test via DLNA_ENABLED=false)
   if (process.env.DLNA_ENABLED !== 'false') {
     const dlna = require('./services/dlna');
@@ -556,15 +577,7 @@ if (require.main === module) {
 
   // Start job queue worker
   const jobWorker = require('./services/job-worker');
-  // NOTE: downloader.downloadAlbum expects (torrentInfo, rdService) — the pipeline API
-  // constructs those objects directly. The job queue worker uses a simplified payload
-  // with {artist, album, magnetLink, sourceMeta}. A dedicated processor will be wired
-  // when the full pipeline integration is implemented.
-  jobWorker.setProcessor(async (job) => {
-    const payload = JSON.parse(job.payload);
-    console.warn(`[job-worker] No processor implemented for job type "${job.type}" (artist: ${payload.artist}, album: ${payload.album}). Skipping.`);
-    return {};
-  });
+  jobWorker.setProcessor(require('./services/job-processor').process);
   jobWorker.start();
   console.log('[job-worker] Started polling for queued jobs');
 

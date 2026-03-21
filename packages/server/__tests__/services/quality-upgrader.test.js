@@ -310,8 +310,8 @@ describe('QualityUpgrader.handleDiscographyDownload', () => {
       'download',
       expect.objectContaining({
         magnetLink: 'magnet:?xt=urn:btih:disc123',
-        targetArtist: 'Artist A',
-        targetAlbum: 'Album 1',
+        artist: 'Artist A',
+        album: 'Album 1',
         isDiscography: true,
       }),
       expect.anything()

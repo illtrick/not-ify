@@ -7,7 +7,7 @@ const activity = require('./activity-log');
 
 const POLL_INTERVAL = 5000; // 5 seconds
 const BACKOFF = [60000, 300000, 900000]; // 1min, 5min, 15min
-const JOB_TIMEOUT = 600000; // 10 minutes
+const JOB_TIMEOUT = 1200000; // 20 minutes — large FLAC albums via RD need more time
 
 let running = false;
 let pollTimer = null;

@@ -82,12 +82,9 @@ async function getLibraryTracks() {
   return tracks;
 }
 
-async function searchForUpgrade({ artist, album }) {
-  const searchMusic = getSearchMusic();
-  const query = `${artist} ${album}`;
-  const results = await searchMusic(query);
-  if (!results || results.length === 0) return null;
-  return { magnetLink: results[0].magnetLink, sources: results };
+async function searchForUpgrade({ artist, album, currentQuality }) {
+  const { searchForUpgrade: search } = require('../services/search');
+  return search({ artist, album, targetQuality: 'flac', currentQuality });
 }
 
 module.exports = router;

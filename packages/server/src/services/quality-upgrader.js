@@ -131,7 +131,7 @@ class QualityUpgrader {
     const dedupeKey = `discography-dl:${targetArtist}|${targetAlbum}`;
     const jobId = this.jobQueue.enqueue(
       'download',
-      { magnetLink, targetArtist, targetAlbum, isDiscography: true },
+      { magnetLink, artist: targetArtist, album: targetAlbum, isDiscography: true },
       { dedupeKey, priority: 1 }
     );
     return jobId;
