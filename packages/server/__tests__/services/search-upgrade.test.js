@@ -18,6 +18,11 @@ jest.mock('../../src/services/search', () => {
   };
 });
 
+const mockSearchSolidTorrents = jest.fn();
+jest.mock('../../src/services/solidtorrents', () => ({
+  searchSolidTorrents: (...args) => mockSearchSolidTorrents(...args),
+}));
+
 // Import after mocks
 let searchForUpgrade, generateSearchQueries;
 beforeAll(() => {
@@ -50,7 +55,16 @@ describe('generateSearchQueries', () => {
     const queries = await generateSearchQueries('Radiohead', 'OK Computer', 'flac');
     expect(queries).toContain('Radiohead OK Computer flac');
     expect(queries.some(q => q.includes('discography'))).toBe(true);
+    expect(queries.length).toBeGreaterThanOrEqual(3);
     expect(mockPrompt).not.toHaveBeenCalled();
+  });
+
+  test('fallback cleans noisy album names', async () => {
+    mockCheckHealth.mockResolvedValue(false);
+
+    const queries = await generateSearchQueries('Daft Punk', 'Random Access Memories (Deluxe Edition)', 'flac');
+    expect(queries[0]).toBe('Daft Punk Random Access Memories flac');
+    expect(queries[0]).not.toContain('Deluxe');
   });
 
   test('falls back when LLM returns invalid response', async () => {
@@ -63,7 +77,10 @@ describe('generateSearchQueries', () => {
 });
 
 describe('searchForUpgrade', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockSearchSolidTorrents.mockResolvedValue([]);
+  });
 
   test('deduplicates results across multiple queries', async () => {
     mockCheckHealth.mockResolvedValue(false); // skip LLM
@@ -71,10 +88,29 @@ describe('searchForUpgrade', () => {
     mockSearchMusic.mockResolvedValue([torrent]);
 
     const result = await searchForUpgrade({ artist: 'Artist', album: 'Album', targetQuality: 'flac' });
-    // Called with multiple queries but same result deduped
-    expect(mockSearchMusic).toHaveBeenCalledTimes(2); // 2 fallback queries
+    // Called with 3+ fallback queries but same result deduped
+    expect(mockSearchMusic).toHaveBeenCalledTimes(3); // 3 fallback queries (no diacritics, short query not triggered)
     expect(result).not.toBeNull();
     expect(result.magnetLink).toBe('magnet:?xt=urn:btih:abc');
+  });
+
+  test('cleans noisy album names in fallback queries', async () => {
+    mockCheckHealth.mockResolvedValue(false);
+    mockSearchMusic.mockResolvedValue([]);
+
+    await searchForUpgrade({ artist: 'Hans Zimmer', album: 'Interstellar (Original Motion Picture Soundtrack)', targetQuality: 'flac' });
+    // First query should use the cleaned album name
+    const firstCall = mockSearchMusic.mock.calls[0][0];
+    expect(firstCall).toBe('Hans Zimmer Interstellar flac');
+    expect(firstCall).not.toContain('Soundtrack');
+  });
+
+  test('fallback generates at least 3 queries', async () => {
+    mockCheckHealth.mockResolvedValue(false);
+    mockSearchMusic.mockResolvedValue([]);
+
+    await searchForUpgrade({ artist: 'Radiohead', album: 'OK Computer', targetQuality: 'flac' });
+    expect(mockSearchMusic.mock.calls.length).toBeGreaterThanOrEqual(3);
   });
 
   test('returns null when no results found', async () => {

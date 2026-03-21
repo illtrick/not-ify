@@ -1,4 +1,5 @@
 const { getProxyFetch, recordFailure } = require('./proxy');
+const { cleanSearchQuery, foldDiacritics } = require('./query-utils');
 
 const APIBAY_BASE = 'https://apibay.org';
 
@@ -74,10 +75,30 @@ const SEARCH_QUERY_SCHEMA = {
  * Falls back to programmatic queries when LLM unavailable.
  */
 async function generateSearchQueries(artist, album, targetQuality = 'flac') {
-  const fallback = [
-    `${artist} ${album} ${targetQuality}`,
-    `${artist} discography ${targetQuality}`,
-  ];
+  const fallback = [];
+  const cleaned = cleanSearchQuery(album);
+  const searchAlbum = cleaned || album;
+
+  // 1. Standard: artist + cleaned album + quality
+  fallback.push(`${artist} ${searchAlbum} ${targetQuality}`);
+
+  // 2. Discography query
+  fallback.push(`${artist} discography ${targetQuality}`);
+
+  // 3. No quality filter (catches mixed-format torrents)
+  fallback.push(`${artist} ${searchAlbum}`);
+
+  // 4. Short query (first 3-4 significant words, for long album names)
+  const words = `${artist} ${searchAlbum}`.split(/\s+/).filter(w => w.length > 1);
+  if (words.length > 4) {
+    fallback.push(words.slice(0, 4).join(' ') + ' ' + targetQuality);
+  }
+
+  // 5. Diacritic-folded version (for ø, ä, ł etc.)
+  const folded = foldDiacritics(`${artist} ${searchAlbum} ${targetQuality}`);
+  if (folded !== fallback[0]) {
+    fallback.push(folded);
+  }
 
   try {
     const healthy = await llm.checkHealth();
@@ -178,9 +199,14 @@ async function searchForUpgrade({ artist, album, targetQuality = 'flac', current
   // Use require to allow Jest to intercept searchMusic in tests
   // eslint-disable-next-line import/no-self-import
   const { searchMusic: _searchMusic } = require('./search');
+  const { searchSolidTorrents } = require('./solidtorrents');
   for (const query of queries) {
     try {
-      const results = await _searchMusic(query);
+      const [apibayResults, solidResults] = await Promise.all([
+        _searchMusic(query).catch(() => []),
+        searchSolidTorrents(query).catch(() => []),
+      ]);
+      const results = [...apibayResults, ...solidResults];
       for (const r of results) {
         const hash = r.magnetLink?.match(/btih:([a-f0-9]+)/i)?.[1]?.toLowerCase();
         const dedupeKey = hash || r.id || r.magnetLink;
