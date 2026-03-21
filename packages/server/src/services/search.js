@@ -59,4 +59,161 @@ async function searchMusic(query) {
   }
 }
 
-module.exports = { searchMusic };
+const llm = require('./llm');
+
+const SEARCH_QUERY_SCHEMA = {
+  type: 'object',
+  properties: {
+    queries: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['queries'],
+};
+
+/**
+ * Generate multiple search queries for a target album using LLM.
+ * Falls back to programmatic queries when LLM unavailable.
+ */
+async function generateSearchQueries(artist, album, targetQuality = 'flac') {
+  const fallback = [
+    `${artist} ${album} ${targetQuality}`,
+    `${artist} discography ${targetQuality}`,
+  ];
+
+  try {
+    const healthy = await llm.checkHealth();
+    if (!healthy) return fallback;
+
+    const result = await llm.prompt(
+      `Generate 3-5 torrent search queries to find this music album in ${targetQuality} quality.\n` +
+      `Artist: ${artist}\nAlbum: ${album}\n\n` +
+      `Rules:\n` +
+      `- Include the standard query: "artist album ${targetQuality}"\n` +
+      `- Include a discography query: "artist discography ${targetQuality}" or "artist complete lossless"\n` +
+      `- Include abbreviated or alternate name forms if the artist/album has common shortenings\n` +
+      `- Include a year-tagged variant if you know the release year\n` +
+      `- Each query should be a plain search string, no operators\n` +
+      `- Return ONLY the queries array, no explanations`,
+      SEARCH_QUERY_SCHEMA
+    );
+
+    if (result?.queries?.length > 0) {
+      // Ensure fallback queries are always included
+      const set = new Set(result.queries.map(q => q.toLowerCase().trim()));
+      for (const f of fallback) {
+        if (!set.has(f.toLowerCase())) result.queries.push(f);
+      }
+      return result.queries;
+    }
+  } catch {
+    // LLM failed, use fallback
+  }
+
+  return fallback;
+}
+
+// Quality tokens to detect in torrent names
+const QUALITY_TOKENS = {
+  flac: 5, lossless: 5, '24bit': 5, '24-bit': 5,
+  '320': 3, '320kbps': 3, v0: 3, mp3: 1,
+};
+
+/**
+ * Score a torrent result against the target artist/album/quality.
+ * Returns 0.0 (no match) to 1.0 (perfect match).
+ */
+function scoreResult(torrentName, artist, album, targetQuality, seeders, maxSeeders) {
+  const lower = torrentName.toLowerCase();
+  const artistTokens = artist.toLowerCase().split(/\s+/).filter(t => t.length > 1);
+  const albumTokens = album.toLowerCase().split(/\s+/).filter(t => t.length > 1);
+
+  // Artist match (0.35)
+  const artistHits = artistTokens.filter(t => lower.includes(t)).length;
+  const artistScore = artistTokens.length > 0 ? artistHits / artistTokens.length : 0;
+
+  // Album match (0.35) — discography counts as partial match
+  const isDiscography = /discograph|complete|anthology|collection/i.test(lower);
+  let albumScore;
+  if (isDiscography) {
+    albumScore = 0.5; // partial credit for discographies
+  } else {
+    const albumHits = albumTokens.filter(t => lower.includes(t)).length;
+    albumScore = albumTokens.length > 0 ? albumHits / albumTokens.length : 0;
+  }
+
+  // Quality match (0.15)
+  let qualityScore = 0;
+  const targetRank = QUALITY_TOKENS[targetQuality.toLowerCase()] || 3;
+  for (const [token, rank] of Object.entries(QUALITY_TOKENS)) {
+    if (lower.includes(token) && rank >= targetRank) {
+      qualityScore = 1.0;
+      break;
+    }
+  }
+
+  // Seeders (0.15)
+  const clampedSeeders = Math.max(seeders, 1);
+  const clampedMax = Math.max(maxSeeders, 2);
+  const seederScore = Math.log2(clampedSeeders) / Math.log2(clampedMax);
+
+  const total = 0.35 * artistScore + 0.35 * albumScore + 0.15 * qualityScore + 0.15 * Math.min(seederScore, 1);
+  return { total, artistScore, albumScore, qualityScore, seederScore: Math.min(seederScore, 1), isDiscography };
+}
+
+/**
+ * Search for a better quality source for an album.
+ * Uses LLM query expansion when available, falls back to programmatic queries.
+ *
+ * @param {{ artist, album, targetQuality?, currentQuality? }} opts
+ * @returns {Promise<{ magnetLink, name, seeders, score, isDiscography } | null>}
+ */
+async function searchForUpgrade({ artist, album, targetQuality = 'flac', currentQuality }) {
+  const queries = await generateSearchQueries(artist, album, targetQuality);
+
+  // Run all queries, collect unique results by magnet info_hash
+  const seen = new Set();
+  const allResults = [];
+
+  // Use require to allow Jest to intercept searchMusic in tests
+  // eslint-disable-next-line import/no-self-import
+  const { searchMusic: _searchMusic } = require('./search');
+  for (const query of queries) {
+    try {
+      const results = await _searchMusic(query);
+      for (const r of results) {
+        const hash = r.magnetLink?.match(/btih:([a-f0-9]+)/i)?.[1]?.toLowerCase();
+        const dedupeKey = hash || r.id || r.magnetLink;
+        if (dedupeKey && !seen.has(dedupeKey)) {
+          seen.add(dedupeKey);
+          allResults.push(r);
+        }
+      }
+    } catch {
+      // Query failed, continue with others
+    }
+  }
+
+  if (allResults.length === 0) return null;
+
+  // Score and rank
+  const maxSeeders = Math.max(...allResults.map(r => r.seeders || 0), 1);
+  const scored = allResults.map(r => {
+    const s = scoreResult(r.name, artist, album, targetQuality, r.seeders || 0, maxSeeders);
+    return { ...r, score: s.total, isDiscography: s.isDiscography, scoring: s };
+  });
+
+  // Filter below threshold, sort descending
+  const viable = scored.filter(r => r.score >= 0.3).sort((a, b) => b.score - a.score);
+  if (viable.length === 0) return null;
+
+  const best = viable[0];
+  return {
+    magnetLink: best.magnetLink,
+    name: best.name,
+    seeders: best.seeders,
+    score: best.score,
+    isDiscography: best.isDiscography,
+    sources: [{ name: best.name, seeders: best.seeders, source: best.source }],
+  };
+}
+
+module.exports = { searchMusic, generateSearchQueries, searchForUpgrade, scoreResult };
