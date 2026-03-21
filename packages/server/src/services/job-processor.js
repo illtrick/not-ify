@@ -172,6 +172,42 @@ async function processDownload(job, payload) {
 }
 
 /**
+ * Process an upgrade job: search for a better quality source, then enqueue a download job.
+ */
+async function processUpgrade(job, payload) {
+  const { artist, album } = payload;
+  log('pipeline', 'info', `[job ${job.id}] Searching for upgrade: ${artist} - ${album}`);
+
+  const { searchForUpgrade } = require('./search');
+  const result = await searchForUpgrade({ artist, album, targetQuality: 'flac' });
+
+  if (!result) {
+    log('pipeline', 'info', `[job ${job.id}] No upgrade found for ${artist} - ${album}`);
+    return { skipped: true, reason: 'no upgrade source found' };
+  }
+
+  log('pipeline', 'info', `[job ${job.id}] Found upgrade: ${result.name} (score ${result.score?.toFixed(3)}, ${result.seeders} seeders)`);
+
+  // Enqueue a download job with the found magnet
+  const jobQueue = require('./job-queue');
+  const dedupeKey = `download:${artist}|${album}`;
+  const downloadJobId = jobQueue.enqueue(
+    'download',
+    {
+      magnetLink: result.magnetLink,
+      artist,
+      album,
+      isDiscography: result.isDiscography || false,
+      source_meta: { quality: 'flac', name: result.name, seeders: result.seeders, score: result.score },
+    },
+    { dedupeKey, priority: 5 }
+  );
+
+  log('pipeline', 'info', `[job ${job.id}] Enqueued download job ${downloadJobId} for ${artist} - ${album}`);
+  return { success: true, downloadJobId, source: result.name, score: result.score };
+}
+
+/**
  * Main job processor — dispatches by job type.
  * Registered with job-worker via setProcessor().
  */
@@ -181,6 +217,9 @@ async function process(job) {
   switch (job.type) {
     case 'download':
       return processDownload(job, payload);
+
+    case 'upgrade':
+      return processUpgrade(job, payload);
 
     default:
       log('pipeline', 'warn', `[job ${job.id}] Unknown job type: ${job.type}`);

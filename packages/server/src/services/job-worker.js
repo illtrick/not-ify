@@ -36,8 +36,8 @@ async function processNextJob() {
     ? getExistingQuality(payload.artist, payload.album)
     : null;
 
-  if (existingQuality !== null) {
-    // Album exists on disk — only proceed if incoming quality is strictly better
+  if (existingQuality !== null && job.type !== 'upgrade') {
+    // No-downgrade guard: skip for 'upgrade' jobs (they search for sources, don't have quality yet)
     const incomingQuality = (payload.source_meta?.quality || 'unknown').toLowerCase();
     if (!isUpgrade(existingQuality, incomingQuality)) {
       activity.log('upgrade', 'info', `Skipped (no upgrade): ${payload.artist} — ${payload.album} (have: ${existingQuality}, incoming: ${incomingQuality})`, { artist: payload.artist, album: payload.album, existing: existingQuality, incoming: incomingQuality });

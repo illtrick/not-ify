@@ -272,6 +272,16 @@ function selectAlbumFiles(rdFiles, targetArtist, targetAlbum) {
     }
   }
 
+  // Check for multi-CD/disc structure (CD1, CD2, Disc 1, etc.)
+  // These are a single album split across discs, not a discography
+  const allMultiDisc = dirs.every(d => {
+    const leaf = (d.split('/').pop() || d).toLowerCase();
+    return /^(cd|disc|disk)\s*\d+/i.test(leaf);
+  });
+  if (allMultiDisc) {
+    return { fileIds: audioFiles.map(f => f.id), isDiscography: false };
+  }
+
   // No match found
   return { fileIds: [], isDiscography: true, noMatch: true };
 }
