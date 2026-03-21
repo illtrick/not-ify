@@ -259,6 +259,11 @@ function selectAlbumFiles(rdFiles, targetArtist, targetAlbum) {
 
   const targetTokens = targetAlbum.toLowerCase().split(/\s+/).filter(t => t.length > 1);
 
+  // Guard: if no usable tokens (very short album name), can't match reliably
+  if (targetTokens.length === 0) {
+    return { fileIds: [], isDiscography: true, noMatch: true };
+  }
+
   for (const [dir, files] of dirMap) {
     const normalized = normalizeDir(dir);
     const allTokensMatch = targetTokens.every(t => normalized.includes(t));
