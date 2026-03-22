@@ -1,5 +1,6 @@
 const { getProxyFetch, recordFailure } = require('./proxy');
 const { cleanSearchQuery, foldDiacritics } = require('./query-utils');
+const { searchSoulseekCascade, checkHealth: slskHealth } = require('./soulseek');
 
 const APIBAY_BASE = 'https://apibay.org';
 
@@ -220,6 +221,31 @@ async function searchForUpgrade({ artist, album, targetQuality = 'flac', current
     }
   }
 
+  // Soulseek search (cascade is sequential, runs after torrent queries)
+  try {
+    const slskHealthy = await slskHealth();
+    if (slskHealthy) {
+      const slskResult = await searchSoulseekCascade(artist, album, { timeout: 15000 });
+      if (slskResult.responseCount > 0) {
+        const bestUser = pickBestSoulseekUser(slskResult.responses, artist, album);
+        if (bestUser) {
+          allResults.push({
+            id: `slsk_${bestUser.username}_${Date.now()}`,
+            name: `${artist} - ${album} [Soulseek: ${bestUser.username}]`,
+            seeders: bestUser.hasFreeSlot ? 10 : 1, // normalize for scoring
+            source: 'soulseek',
+            soulseekUser: bestUser.username,
+            files: bestUser.files,
+            hasFreeSlot: bestUser.hasFreeSlot,
+            speed: bestUser.speed,
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.error(`[search] Soulseek search failed: ${err.message}`);
+  }
+
   if (allResults.length === 0) return null;
 
   // Score and rank
@@ -234,6 +260,19 @@ async function searchForUpgrade({ artist, album, targetQuality = 'flac', current
   if (viable.length === 0) return null;
 
   const best = viable[0];
+
+  if (best.source === 'soulseek') {
+    return {
+      source: 'soulseek',
+      name: best.name,
+      score: best.score,
+      soulseekUser: best.soulseekUser,
+      files: best.files,
+      hasFreeSlot: best.hasFreeSlot,
+      isDiscography: false,
+    };
+  }
+
   return {
     magnetLink: best.magnetLink,
     name: best.name,
@@ -242,6 +281,56 @@ async function searchForUpgrade({ artist, album, targetQuality = 'flac', current
     isDiscography: best.isDiscography,
     sources: [{ name: best.name, seeders: best.seeders, source: best.source }],
   };
+}
+
+/**
+ * Pick the best Soulseek user from search results.
+ * Filters for users with enough FLAC files to be a full album,
+ * prefers free upload slots and higher speeds.
+ */
+function pickBestSoulseekUser(responses, artist, album) {
+  const candidates = responses
+    .map(r => {
+      // Group files by directory
+      const dirs = new Map();
+      for (const f of r.files) {
+        const parts = f.filename.split(/[\\/]/);
+        const dir = parts.slice(0, -1).join('/');
+        if (!dirs.has(dir)) dirs.set(dir, []);
+        dirs.get(dir).push(f);
+      }
+      // Find best directory (most audio files, prefer FLAC)
+      let bestDir = null;
+      let bestDirFiles = [];
+      for (const [dir, files] of dirs) {
+        const audioFiles = files.filter(f => /\.(flac|mp3|wav|ogg|m4a|aac|alac|wma|opus|ape|wv)$/i.test(f.filename));
+        if (audioFiles.length > bestDirFiles.length) {
+          bestDir = dir;
+          bestDirFiles = audioFiles;
+        }
+      }
+      const flacCount = bestDirFiles.filter(f => /\.flac$/i.test(f.filename)).length;
+      return {
+        username: r.username,
+        hasFreeSlot: r.hasFreeSlot,
+        speed: r.speed || 0,
+        files: bestDirFiles,
+        flacCount,
+        totalFiles: bestDirFiles.length,
+      };
+    })
+    .filter(c => c.totalFiles >= 3); // need at least 3 audio files to be a plausible album
+
+  if (candidates.length === 0) return null;
+
+  // Sort: prefer FLAC, free slots, high speed
+  candidates.sort((a, b) => {
+    if (b.flacCount !== a.flacCount) return b.flacCount - a.flacCount;
+    if (a.hasFreeSlot !== b.hasFreeSlot) return a.hasFreeSlot ? -1 : 1;
+    return b.speed - a.speed;
+  });
+
+  return candidates[0];
 }
 
 module.exports = { searchMusic, generateSearchQueries, searchForUpgrade, scoreResult };

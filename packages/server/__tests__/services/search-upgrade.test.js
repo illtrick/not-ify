@@ -23,6 +23,13 @@ jest.mock('../../src/services/solidtorrents', () => ({
   searchSolidTorrents: (...args) => mockSearchSolidTorrents(...args),
 }));
 
+const mockSearchSoulseekCascade = jest.fn();
+const mockSlskHealth = jest.fn();
+jest.mock('../../src/services/soulseek', () => ({
+  searchSoulseekCascade: (...a) => mockSearchSoulseekCascade(...a),
+  checkHealth: (...a) => mockSlskHealth(...a),
+}));
+
 // Import after mocks
 let searchForUpgrade, generateSearchQueries;
 beforeAll(() => {
@@ -80,6 +87,8 @@ describe('searchForUpgrade', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockSearchSolidTorrents.mockResolvedValue([]);
+    mockSlskHealth.mockResolvedValue(false); // off by default in existing tests
+    mockSearchSoulseekCascade.mockResolvedValue({ strategy: 'none', responseCount: 0, fileCount: 0, responses: [] });
   });
 
   test('deduplicates results across multiple queries', async () => {
@@ -132,5 +141,44 @@ describe('searchForUpgrade', () => {
     const result = await searchForUpgrade({ artist: 'Artist', album: 'Album', targetQuality: 'flac' });
     // FLAC album match should beat MP3 discography despite fewer seeders
     expect(result.magnetLink).toBe('magnet:2');
+  });
+
+  test('includes Soulseek results when torrents find nothing', async () => {
+    mockCheckHealth.mockResolvedValue(false);
+    mockSearchMusic.mockResolvedValue([]);
+    mockSearchSolidTorrents.mockResolvedValue([]);
+    mockSlskHealth.mockResolvedValue(true);
+    mockSearchSoulseekCascade.mockResolvedValue({
+      strategy: 'artist-only',
+      responseCount: 5,
+      fileCount: 42,
+      responses: [{
+        username: 'musicfan99',
+        hasFreeSlot: true,
+        speed: 5000000,
+        files: [
+          { filename: '\\\\music\\\\Artist\\\\Album\\\\01 Track.flac', size: 30000000, bitRate: 1411, sampleRate: 44100, bitDepth: 16 },
+          { filename: '\\\\music\\\\Artist\\\\Album\\\\02 Track.flac', size: 28000000, bitRate: 1411, sampleRate: 44100, bitDepth: 16 },
+          { filename: '\\\\music\\\\Artist\\\\Album\\\\03 Track.flac', size: 32000000, bitRate: 1411, sampleRate: 44100, bitDepth: 16 },
+        ],
+      }],
+    });
+
+    const result = await searchForUpgrade({ artist: 'Artist', album: 'Album' });
+    expect(result).not.toBeNull();
+    expect(result.source).toBe('soulseek');
+    expect(result.soulseekUser).toBe('musicfan99');
+    expect(result.files.length).toBe(3);
+  });
+
+  test('skips Soulseek when slskd is unhealthy', async () => {
+    mockCheckHealth.mockResolvedValue(false);
+    mockSearchMusic.mockResolvedValue([]);
+    mockSearchSolidTorrents.mockResolvedValue([]);
+    mockSlskHealth.mockResolvedValue(false);
+
+    const result = await searchForUpgrade({ artist: 'Artist', album: 'Album' });
+    expect(result).toBeNull();
+    expect(mockSearchSoulseekCascade).not.toHaveBeenCalled();
   });
 });
