@@ -89,6 +89,28 @@ async function ytQueueProcess() {
   }
 
   ytQueueProcessing = false;
+
+  // Auto-enqueue upgrade jobs for completed album downloads
+  try {
+    const jobQueue = require('../services/job-queue');
+    const completed = ytQueue.filter(e => e.status === 'done' && e.artist && e.album);
+    // Dedupe by artist+album
+    const albums = new Map();
+    for (const e of completed) {
+      const key = `${e.artist}|${e.album}`;
+      if (!albums.has(key)) albums.set(key, { artist: e.artist, album: e.album });
+    }
+    for (const { artist, album } of albums.values()) {
+      const dedupeKey = `upgrade:${artist}|${album}`;
+      const jobId = jobQueue.enqueue('upgrade', { artist, album }, { dedupeKey, priority: 10 });
+      if (jobId) {
+        activity.log('youtube', 'info', `Auto-queued upgrade for ${artist} — ${album}`, { artist, album });
+      }
+    }
+  } catch (err) {
+    console.error('[yt-queue] Failed to enqueue upgrades:', err.message);
+  }
+
   // Trim completed items older than 50 entries
   while (ytQueue.length > 50 && ytQueue[0].status !== 'queued' && ytQueue[0].status !== 'active') {
     ytQueue.shift();
