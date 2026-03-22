@@ -443,6 +443,10 @@ app.use('/api', upgradeRouter);
 const rdConfigRouter = require('./api/realdebrid-config');
 app.use('/api/realdebrid', adminGuard, rdConfigRouter);
 
+// Library config API (admin only) — music directory configuration + filesystem browser
+const libraryConfigRouter = require('./api/library-config');
+app.use('/api/library-config', adminGuard, libraryConfigRouter);
+
 // Soulseek config API (admin only)
 const soulseekConfigRouter = require('./api/soulseek-config');
 app.use('/api/soulseek', adminGuard, soulseekConfigRouter);
