@@ -214,7 +214,7 @@ async function processUpgrade(job, payload) {
         artist, album,
         mbid: payload.mbid,
         rgid: payload.rgid,
-        source_meta: { source: 'soulseek', name: result.name, score: result.score },
+        source_meta: { source: 'soulseek', quality: 'flac', name: result.name, score: result.score },
       },
       { dedupeKey: `slsk-dl:${artist}|${album}`, priority: 5 }
     );
@@ -377,7 +377,7 @@ async function processSoulseekDownload(job, payload) {
         source: 'soulseek',
         soulseekUser,
         importedAt: new Date().toISOString(),
-      }));
+      }, null, 2));
     } catch {}
 
     // Step 8: Pre-warm cover art cache (fire-and-forget)
