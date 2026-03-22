@@ -79,7 +79,26 @@ export function AlbumView({
   const { artist, album, year, coverArt, tracks, sources, fromSearch, trackCount } = selectedAlbum;
 
   const isLib = !fromSearch && tracks.length > 0;
-  const pl = tracks;
+
+  // Enrich tracks with latest format info from library (badges stay fresh after upgrades)
+  // Library is re-fetched via SSE on upgrade events — see App.jsx SSE listener
+  const libraryFormatMap = React.useMemo(() => {
+    const map = new Map();
+    if (library) {
+      library.filter(t => t.artist === artist || t.album === album).forEach(t => {
+        map.set(t.id, t.format);
+        // Also map by title for MB track matching
+        const key = `${(t.title || '').toLowerCase()}`;
+        if (!map.has(key)) map.set(key, t.format);
+      });
+    }
+    return map;
+  }, [library, artist, album]);
+
+  const pl = tracks.map(t => {
+    const liveFormat = libraryFormatMap.get(t.id) || libraryFormatMap.get((t.title || '').toLowerCase());
+    return liveFormat && liveFormat !== t.format ? { ...t, format: liveFormat } : t;
+  });
 
   const primarySrc = sources?.[0];
   const qualityLabel = primarySrc?.quality ? `${primarySrc.quality} · ${primarySrc.sizeFormatted}` : primarySrc?.sizeFormatted || '';

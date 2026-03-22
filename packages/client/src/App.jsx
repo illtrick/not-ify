@@ -549,6 +549,8 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
   }
 
   function openAlbumFromLibrary(artist, albumName, tracks, coverArt, mbid) {
+    // Refresh library to get latest format info (badges may be stale after upgrades)
+    loadLibrary();
     const pl = tracks.map(t => ({ ...t, path: buildTrackPath(t.id), coverArt }));
     setSelectedAlbum({ artist, album: albumName, tracks: pl, coverArt, mbid, sources: [], fromSearch: false });
     prevViewRef.current = view;
