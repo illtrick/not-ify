@@ -238,12 +238,6 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
   }, [fetchLibraryConfig]);
 
   // ── Server admin ───────────────────────────────────────────────────────────
-  const [serverActiveJobs, setServerActiveJobs] = useState(null);
-
-  const fetchActiveJobs = useCallback(() => {
-    api.getActiveJobs().then(setServerActiveJobs).catch(() => {});
-  }, []);
-
   const handleServerRestart = useCallback(async () => {
     try {
       await api.restartServer();
@@ -268,11 +262,6 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
       }
     }, 2000);
   }, []);
-
-  // Fetch active jobs when settings are opened
-  useEffect(() => {
-    if (showSettings && isAdmin) fetchActiveJobs();
-  }, [showSettings, isAdmin, fetchActiveJobs]);
 
   // ── Scrobble sync status polling ──────────────────────────────────────────
   const [syncStatus, setSyncStatus] = useState(null);
@@ -921,7 +910,6 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
         onSlskTest={handleSlskTest}
         libraryConfig={libraryConfig}
         onLibrarySave={handleLibrarySave}
-        serverActiveJobs={serverActiveJobs}
         onServerRestart={handleServerRestart}
       />
 

@@ -586,6 +586,40 @@ export function saveLibraryConfig(body) {
   return post('/api/library-config', body);
 }
 
+export function getLibraryFilesCount(dirPath) {
+  const params = dirPath ? `?path=${encodeURIComponent(dirPath)}` : '';
+  return get(`/api/library-config/files-count${params}`);
+}
+
+export function migrateLibrary(fromPath, toPath, onProgress) {
+  // Uses fetch + ReadableStream to consume SSE progress events
+  const url = `${_baseUrl}/api/library-config/migrate`;
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fromPath, toPath }),
+  }).then(async (response) => {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (onProgress) onProgress(data);
+          } catch {}
+        }
+      }
+    }
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Server Admin
 // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { COLORS } from '../constants';
 import { Icon } from './Icon';
-import { importFromLastfm, switchVpnRegion } from '@not-ify/shared';
+import { importFromLastfm, switchVpnRegion, getActiveJobs, getLibraryFilesCount, migrateLibrary } from '@not-ify/shared';
 import { FolderBrowser } from './FolderBrowser';
 
 function StatusDot({ status }) {
@@ -32,7 +32,6 @@ export function SettingsModal({
   onSlskTest,
   libraryConfig,
   onLibrarySave,
-  serverActiveJobs,
   onServerRestart,
 }) {
   const [rdToken, setRdToken] = useState('');
@@ -47,7 +46,92 @@ export function SettingsModal({
   // Library / folder browser state
   const [showFolderBrowser, setShowFolderBrowser] = useState(false);
   const [pendingLibraryPath, setPendingLibraryPath] = useState(null);
-  const [libraryConfirmOpen, setLibraryConfirmOpen] = useState(false);
+  // Steps: null | 'confirm' | 'migration' | 'restarting'
+  const [libraryStep, setLibraryStep] = useState(null);
+  const [libraryActiveJobs, setLibraryActiveJobs] = useState(null);
+  const [libraryFilesCount, setLibraryFilesCount] = useState(null);
+  const [migrationProgress, setMigrationProgress] = useState(null);
+  const [libraryError, setLibraryError] = useState(null);
+
+  // Handle path selected from folder browser — fetch active jobs + files count, then show confirm step
+  const handlePathSelected = useCallback(async (path) => {
+    setShowFolderBrowser(false);
+    setPendingLibraryPath(path);
+    setLibraryError(null);
+    setLibraryActiveJobs(null);
+    setLibraryFilesCount(null);
+    setMigrationProgress(null);
+
+    try {
+      const [jobs, files] = await Promise.all([
+        getActiveJobs().catch(() => ({ activeJobs: 0, types: [] })),
+        getLibraryFilesCount(libraryConfig?.musicDir).catch(() => ({ count: 0, totalSizeMB: 0 })),
+      ]);
+      setLibraryActiveJobs(jobs);
+      setLibraryFilesCount(files);
+      setLibraryStep('confirm');
+    } catch (err) {
+      setLibraryError(`Failed to check server state: ${err.message}`);
+      setLibraryStep('confirm');
+    }
+  }, [libraryConfig?.musicDir]);
+
+  // Save config + restart server, then poll for reconnect
+  const handleApplyAndRestart = useCallback(async () => {
+    setLibraryStep('restarting');
+    try {
+      if (onLibrarySave) await onLibrarySave(pendingLibraryPath);
+      if (onServerRestart) onServerRestart();
+      setPendingLibraryPath(null);
+    } catch (err) {
+      setLibraryError(`Failed to save: ${err.message}`);
+      setLibraryStep('confirm');
+    }
+  }, [pendingLibraryPath, onLibrarySave, onServerRestart]);
+
+  // Save config but defer restart (when jobs are active)
+  const handleWaitAndApply = useCallback(async () => {
+    try {
+      if (onLibrarySave) await onLibrarySave(pendingLibraryPath);
+      setLibraryStep(null);
+      setPendingLibraryPath(null);
+    } catch (err) {
+      setLibraryError(`Failed to save: ${err.message}`);
+    }
+  }, [pendingLibraryPath, onLibrarySave]);
+
+  // Proceed to migration step
+  const handleShowMigration = useCallback(() => {
+    setLibraryStep('migration');
+  }, []);
+
+  // Perform migration (copy files) then restart
+  const handleMigrate = useCallback(async () => {
+    setMigrationProgress({ copying: true, copied: 0, total: libraryFilesCount?.count || 0, progress: '0/? files' });
+    try {
+      await migrateLibrary(libraryConfig?.musicDir, pendingLibraryPath, (data) => {
+        setMigrationProgress(data);
+        if (data.done) {
+          // Migration complete — now save and restart
+          handleApplyAndRestart();
+        }
+      });
+    } catch (err) {
+      setLibraryError(`Migration failed: ${err.message}`);
+      setLibraryStep('migration');
+      setMigrationProgress(null);
+    }
+  }, [libraryConfig?.musicDir, pendingLibraryPath, libraryFilesCount, handleApplyAndRestart]);
+
+  // Cancel the library change flow
+  const handleLibraryCancel = useCallback(() => {
+    setLibraryStep(null);
+    setPendingLibraryPath(null);
+    setLibraryActiveJobs(null);
+    setLibraryFilesCount(null);
+    setMigrationProgress(null);
+    setLibraryError(null);
+  }, []);
 
   // Last.fm library import state
   const [importDays, setImportDays] = useState(60);
@@ -524,7 +608,9 @@ export function SettingsModal({
                 Running in Docker — make sure any new path is covered by a bind mount.
               </div>
             )}
-            {!showFolderBrowser && (
+
+            {/* Folder browser toggle */}
+            {!showFolderBrowser && libraryStep !== 'restarting' && (
               <button
                 onClick={() => setShowFolderBrowser(true)}
                 style={buttonSecondaryStyle}
@@ -536,56 +622,158 @@ export function SettingsModal({
               <FolderBrowser
                 initialPath={libraryConfig.musicDir}
                 onCancel={() => setShowFolderBrowser(false)}
-                onSelect={(path) => {
-                  setShowFolderBrowser(false);
-                  setPendingLibraryPath(path);
-                  setLibraryConfirmOpen(true);
-                }}
+                onSelect={handlePathSelected}
               />
             )}
-            {libraryConfirmOpen && pendingLibraryPath && (
+
+            {/* Error display */}
+            {libraryError && (
+              <div style={{ marginTop: 8, fontSize: 12, color: COLORS.error }}>
+                {libraryError}
+              </div>
+            )}
+
+            {/* Step 1: Confirmation dialog */}
+            {libraryStep === 'confirm' && pendingLibraryPath && (
               <div style={{
                 marginTop: 12, padding: '12px 14px', borderRadius: 6,
                 background: COLORS.hover, border: `1px solid ${COLORS.border}`,
               }}>
                 <div style={{ fontSize: 13, color: COLORS.textPrimary, marginBottom: 6 }}>
-                  Change library path to:
+                  Change music library to:
                 </div>
                 <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 10, wordBreak: 'break-all' }}>
                   {pendingLibraryPath}
                 </div>
-                {serverActiveJobs && serverActiveJobs.activeJobs > 0 && (
-                  <div style={{ fontSize: 12, color: COLORS.error, marginBottom: 8 }}>
-                    Warning: {serverActiveJobs.activeJobs} download{serverActiveJobs.activeJobs !== 1 ? 's' : ''} in progress
-                    {serverActiveJobs.types?.length > 0 ? ` (${serverActiveJobs.types.join(', ')})` : ''}.
-                    They will be re-queued on restart.
+
+                {/* Active jobs warning */}
+                {libraryActiveJobs && libraryActiveJobs.activeJobs > 0 ? (
+                  <>
+                    <div style={{ fontSize: 12, color: COLORS.error, marginBottom: 10 }}>
+                      {libraryActiveJobs.activeJobs} download{libraryActiveJobs.activeJobs !== 1 ? 's' : ''} in progress
+                      {libraryActiveJobs.types?.length > 0 ? ` (${libraryActiveJobs.types.join(', ')})` : ''}.
+                      What would you like to do?
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <button
+                        onClick={handleWaitAndApply}
+                        style={buttonSecondaryStyle}
+                        title="Save the new path but don't restart yet — downloads will finish first"
+                      >
+                        Wait &amp; Apply After
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (libraryFilesCount && libraryFilesCount.count > 0) {
+                            handleShowMigration();
+                          } else {
+                            handleApplyAndRestart();
+                          }
+                        }}
+                        style={buttonPrimaryStyle}
+                      >
+                        Cancel Downloads &amp; Restart Now
+                      </button>
+                      <button onClick={handleLibraryCancel} style={buttonSecondaryStyle}>Cancel</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 10 }}>
+                      This requires a server restart.
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        onClick={() => {
+                          if (libraryFilesCount && libraryFilesCount.count > 0) {
+                            handleShowMigration();
+                          } else {
+                            handleApplyAndRestart();
+                          }
+                        }}
+                        style={buttonPrimaryStyle}
+                      >
+                        Apply &amp; Restart
+                      </button>
+                      <button onClick={handleLibraryCancel} style={buttonSecondaryStyle}>Cancel</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Step 2: Migration offer */}
+            {libraryStep === 'migration' && pendingLibraryPath && (
+              <div style={{
+                marginTop: 12, padding: '12px 14px', borderRadius: 6,
+                background: COLORS.hover, border: `1px solid ${COLORS.border}`,
+              }}>
+                {migrationProgress ? (
+                  /* Migration in progress */
+                  <div>
+                    <div style={{ fontSize: 13, color: COLORS.textPrimary, marginBottom: 8 }}>
+                      Migrating files...
+                    </div>
+                    <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 8 }}>
+                      {migrationProgress.progress}
+                    </div>
+                    <div style={{
+                      height: 4, borderRadius: 2, background: COLORS.border, overflow: 'hidden',
+                    }}>
+                      <div style={{
+                        height: '100%', borderRadius: 2, background: COLORS.accent,
+                        width: migrationProgress.total > 0
+                          ? `${Math.round((migrationProgress.copied / migrationProgress.total) * 100)}%`
+                          : '0%',
+                        transition: 'width 0.3s ease',
+                      }} />
+                    </div>
+                  </div>
+                ) : (
+                  /* Migration offer */
+                  <div>
+                    <div style={{ fontSize: 13, color: COLORS.textPrimary, marginBottom: 6 }}>
+                      Migrate existing files?
+                    </div>
+                    <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 10 }}>
+                      Your current library has {libraryFilesCount.count} file{libraryFilesCount.count !== 1 ? 's' : ''} ({libraryFilesCount.totalSizeMB} MB).
+                      Would you like to copy them to the new location?
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={handleMigrate} style={buttonPrimaryStyle}>
+                        Migrate
+                      </button>
+                      <button onClick={handleApplyAndRestart} style={buttonSecondaryStyle}>
+                        Start Fresh
+                      </button>
+                      <button onClick={handleLibraryCancel} style={buttonSecondaryStyle}>
+                        Cancel
+                      </button>
+                    </div>
                   </div>
                 )}
-                <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 10 }}>
-                  This requires a server restart to take effect.
+              </div>
+            )}
+
+            {/* Step 3: Restarting spinner */}
+            {libraryStep === 'restarting' && (
+              <div style={{
+                marginTop: 12, padding: '16px 14px', borderRadius: 6,
+                background: COLORS.hover, border: `1px solid ${COLORS.border}`,
+                textAlign: 'center',
+              }}>
+                <div style={{ fontSize: 13, color: COLORS.textPrimary, marginBottom: 8 }}>
+                  Restarting server...
                 </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button
-                    onClick={async () => {
-                      setLibraryConfirmOpen(false);
-                      if (onLibrarySave) await onLibrarySave(pendingLibraryPath);
-                      if (onServerRestart) onServerRestart();
-                      setPendingLibraryPath(null);
-                    }}
-                    style={buttonPrimaryStyle}
-                  >
-                    Apply &amp; Restart
-                  </button>
-                  <button
-                    onClick={() => {
-                      setLibraryConfirmOpen(false);
-                      setPendingLibraryPath(null);
-                    }}
-                    style={buttonSecondaryStyle}
-                  >
-                    Cancel
-                  </button>
+                <div style={{ fontSize: 12, color: COLORS.textSecondary }}>
+                  Waiting for server to come back online
                 </div>
+                <div style={{
+                  marginTop: 10, width: 20, height: 20, borderRadius: '50%',
+                  border: `2px solid ${COLORS.border}`, borderTopColor: COLORS.accent,
+                  animation: 'spin 1s linear infinite',
+                  display: 'inline-block',
+                }} />
               </div>
             )}
           </div>
