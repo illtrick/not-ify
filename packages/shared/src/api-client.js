@@ -593,12 +593,19 @@ export function getLibraryFilesCount(dirPath) {
 
 export function migrateLibrary(fromPath, toPath, onProgress) {
   // Uses fetch + ReadableStream to consume SSE progress events
+  // Must include auth header manually since we can't use request() (need streaming)
   const url = `${_baseUrl}/api/library-config/migrate`;
+  const headers = { 'Content-Type': 'application/json' };
+  if (_userId) headers['X-User-Id'] = _userId;
   return fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ fromPath, toPath }),
   }).then(async (response) => {
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error(err.error || `HTTP ${response.status}`);
+    }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
