@@ -1,4 +1,5 @@
 module.exports = {
+  setupFiles: ['./jest.setup.js'],
   testEnvironment: 'node',
   testMatch: ['**/__tests__/**/*.test.js'],
   collectCoverageFrom: ['src/**/*.js'],
