@@ -15,9 +15,11 @@
  */
 
 const { cleanSearchQuery } = require('./query-utils');
+const db = require('./db');
 
-const SLSKD_URL = process.env.SLSKD_URL || 'http://slskd:5030';
-const SLSKD_API_KEY = process.env.SLSKD_API_KEY || '';
+const dbConfig = db.getGlobalSetting('soulseekConfig') || {};
+const SLSKD_URL = dbConfig.url || process.env.SLSKD_URL || 'http://slskd:5030';
+const SLSKD_API_KEY = dbConfig.apiKey || process.env.SLSKD_API_KEY || '';
 const SEARCH_TIMEOUT = 15000; // max time to wait for results
 const POLL_INTERVAL = 2000;
 const CASCADE_COOLDOWN = 1500; // ms between cascade attempts to avoid rate-limiting
