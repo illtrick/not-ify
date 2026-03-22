@@ -448,6 +448,14 @@ async function processSoulseekDownload(job, payload) {
   const stagingDir = path.join(getStagingDir(), downloader.sanitizePath(artist), downloader.sanitizePath(album));
 
   try {
+    // Step 0: Pre-clean downloads dir to avoid stale files from previous jobs
+    const dlDir = getSlskdDownloadsDir();
+    if (fs.existsSync(dlDir)) {
+      for (const entry of fs.readdirSync(dlDir)) {
+        try { fs.rmSync(path.join(dlDir, entry), { recursive: true, force: true }); } catch {}
+      }
+    }
+
     // Step 1: Enqueue download on slskd
     log('pipeline', 'info', `[job ${job.id}] Enqueuing ${files.length} files from Soulseek user ${soulseekUser}`);
     const enqueued = await enqueueDownload(soulseekUser, files);
@@ -511,7 +519,14 @@ async function processSoulseekDownload(job, payload) {
       throw new Error(`Soulseek downloads directory not found: ${dlBase}`);
     }
 
-    // Walk the downloads directory but only copy files matching our request
+    // Walk ONLY the specific user's directory to avoid grabbing files from other jobs
+    // slskd organizes: /downloads/{username}/{remote_path}/files
+    const userDir = path.join(dlBase, soulseekUser);
+    const searchDir = fs.existsSync(userDir) ? userDir : dlBase;
+    if (searchDir !== userDir) {
+      log('pipeline', 'info', `[job ${job.id}] User dir ${userDir} not found, falling back to ${dlBase}`);
+    }
+
     const walkDir = (dir) => {
       const entries = fs.readdirSync(dir, { withFileTypes: true });
       for (const entry of entries) {
@@ -521,12 +536,15 @@ async function processSoulseekDownload(job, payload) {
         } else if (downloader.isAudioFile(entry.name) && expectedBasenames.has(entry.name)) {
           const safeName = path.basename(entry.name);
           const destPath = path.join(stagingDir, downloader.sanitizePath(safeName));
-          fs.copyFileSync(fullPath, destPath);
-          downloadedFiles.push(destPath);
+          // Avoid duplicates — only copy if we haven't already copied this basename
+          if (!downloadedFiles.some(f => path.basename(f) === downloader.sanitizePath(safeName))) {
+            fs.copyFileSync(fullPath, destPath);
+            downloadedFiles.push(destPath);
+          }
         }
       }
     };
-    walkDir(dlBase);
+    walkDir(searchDir);
 
     if (downloadedFiles.length === 0) {
       throw new Error(`No matching audio files found in Soulseek downloads (expected ${expectedBasenames.size} files)`);
