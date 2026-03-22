@@ -248,8 +248,18 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
       es.onmessage = (event) => {
         try {
           const entry = JSON.parse(event.data);
-          if (entry.category === 'upgrade' && entry.level === 'success') {
-            loadLibrary?.();
+          // Refresh library on upgrade completion OR per-track upgrade events
+          if (
+            (entry.category === 'upgrade' && entry.level === 'success') ||
+            (entry.category === 'pipeline' && entry.level === 'info' && entry.message?.includes('upgraded'))
+          ) {
+            // Debounce rapid per-track updates — only refresh every 3s max
+            if (!connect._debounce) {
+              connect._debounce = setTimeout(() => {
+                loadLibrary?.();
+                connect._debounce = null;
+              }, 3000);
+            }
           }
         } catch {}
       };
