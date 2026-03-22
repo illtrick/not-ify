@@ -443,6 +443,10 @@ app.use('/api', upgradeRouter);
 const rdConfigRouter = require('./api/realdebrid-config');
 app.use('/api/realdebrid', adminGuard, rdConfigRouter);
 
+// Soulseek config API (admin only)
+const soulseekConfigRouter = require('./api/soulseek-config');
+app.use('/api/soulseek', adminGuard, soulseekConfigRouter);
+
 // VPN config API (admin only)
 const vpnConfigRouter = require('./api/vpn-config');
 app.use('/api/vpn', adminGuard, vpnConfigRouter);
