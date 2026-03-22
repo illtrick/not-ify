@@ -133,17 +133,51 @@ async function generateSearchQueries(artist, album, targetQuality = 'flac') {
   return fallback;
 }
 
-// Quality tokens to detect in torrent names
+// Quality tokens to detect in torrent names, ranked by quality level
+// Aligned with QUALITY_RANK in library-check.js
 const QUALITY_TOKENS = {
-  flac: 5, lossless: 5, '24bit': 5, '24-bit': 5,
-  '320': 3, '320kbps': 3, v0: 3, mp3: 1,
+  '24bit': 7, '24-bit': 7,
+  flac: 6, lossless: 6,
+  '320': 5, '320kbps': 5,
+  v0: 4,
+  '256': 3, '256kbps': 3,
+  mp3: 2, // generic mp3 — at least 128+
 };
 
+// Map from library-check quality names to ranks (same as QUALITY_RANK)
+const CURRENT_QUALITY_RANK = { flac: 6, '320': 5, v0: 4, '256': 3, '192': 2, '128': 1, unknown: 0 };
+
 /**
- * Score a torrent result against the target artist/album/quality.
+ * Detect the quality level advertised in a torrent/result name.
+ * Returns the quality key (e.g. 'flac', '320', 'mp3') or null.
+ */
+function detectQualityFromName(name) {
+  const lower = name.toLowerCase();
+  let bestToken = null;
+  let bestRank = 0;
+  for (const [token, rank] of Object.entries(QUALITY_TOKENS)) {
+    const tokenRegex = new RegExp(`\\b${token}\\b`, 'i');
+    if (tokenRegex.test(lower) && rank > bestRank) {
+      bestRank = rank;
+      bestToken = token;
+    }
+  }
+  // Normalize to library-check quality names
+  if (!bestToken) return null;
+  if (['24bit', '24-bit'].includes(bestToken)) return 'flac';
+  if (['flac', 'lossless'].includes(bestToken)) return 'flac';
+  if (['320', '320kbps'].includes(bestToken)) return '320';
+  if (bestToken === 'v0') return 'v0';
+  if (['256', '256kbps'].includes(bestToken)) return '256';
+  return 'unknown';
+}
+
+/**
+ * Score a torrent result against the target artist/album.
+ * Quality scoring rewards any source better than currentQuality.
  * Returns 0.0 (no match) to 1.0 (perfect match).
  */
-function scoreResult(torrentName, artist, album, targetQuality, seeders, maxSeeders) {
+function scoreResult(torrentName, artist, album, currentQuality, seeders, maxSeeders) {
   const lower = torrentName.toLowerCase();
   const artistTokens = artist.toLowerCase().split(/\s+/).filter(t => t.length > 1);
   const albumTokens = album.toLowerCase().split(/\s+/).filter(t => t.length > 1);
@@ -162,17 +196,19 @@ function scoreResult(torrentName, artist, album, targetQuality, seeders, maxSeed
     albumScore = albumTokens.length > 0 ? albumHits / albumTokens.length : 0;
   }
 
-  // Quality match (0.15)
+  // Quality match (0.15) — reward anything better than current quality
   let qualityScore = 0;
-  const targetRank = QUALITY_TOKENS[targetQuality.toLowerCase()] || 3;
-  for (const [token, rank] of Object.entries(QUALITY_TOKENS)) {
-    // Use word-boundary match for short numeric tokens to avoid false positives (e.g. "1320MB")
-    const tokenRegex = new RegExp(`\\b${token}\\b`, 'i');
-    if (tokenRegex.test(lower) && rank >= targetRank) {
-      qualityScore = 1.0;
-      break;
-    }
+  const currentRank = CURRENT_QUALITY_RANK[currentQuality] ?? 0;
+  const detected = detectQualityFromName(lower);
+  const detectedRank = CURRENT_QUALITY_RANK[detected] ?? 0;
+  if (detectedRank > currentRank) {
+    // Better quality than what we have — full credit
+    qualityScore = 1.0;
+  } else if (detectedRank === currentRank && detectedRank > 0) {
+    // Same quality — partial credit (might still be a better rip)
+    qualityScore = 0.5;
   }
+  // Worse or unknown quality — 0
 
   // Seeders (0.15)
   const clampedSeeders = Math.max(seeders, 1);
@@ -180,18 +216,20 @@ function scoreResult(torrentName, artist, album, targetQuality, seeders, maxSeed
   const seederScore = Math.log2(clampedSeeders) / Math.log2(clampedMax);
 
   const total = 0.35 * artistScore + 0.35 * albumScore + 0.15 * qualityScore + 0.15 * Math.min(seederScore, 1);
-  return { total, artistScore, albumScore, qualityScore, seederScore: Math.min(seederScore, 1), isDiscography };
+  return { total, artistScore, albumScore, qualityScore, seederScore: Math.min(seederScore, 1), isDiscography, detectedQuality: detected };
 }
 
 /**
  * Search for a better quality source for an album.
+ * Cascading upgrade: accepts any source better than currentQuality.
  * Uses LLM query expansion when available, falls back to programmatic queries.
  *
- * @param {{ artist, album, targetQuality?, currentQuality? }} opts
- * @returns {Promise<{ magnetLink, name, seeders, score, isDiscography } | null>}
+ * @param {{ artist, album, currentQuality? }} opts
+ * @returns {Promise<{ magnetLink, name, seeders, score, isDiscography, detectedQuality? } | null>}
  */
-async function searchForUpgrade({ artist, album, targetQuality = 'flac', currentQuality /* reserved for future upgrade-vs-current comparison */ }) {
-  const queries = await generateSearchQueries(artist, album, targetQuality);
+async function searchForUpgrade({ artist, album, currentQuality = 'unknown' }) {
+  // Search broadly — include FLAC and format-agnostic queries
+  const queries = await generateSearchQueries(artist, album, 'flac');
 
   // Run all queries, collect unique results by magnet info_hash
   const seen = new Set();
@@ -248,11 +286,11 @@ async function searchForUpgrade({ artist, album, targetQuality = 'flac', current
 
   if (allResults.length === 0) return null;
 
-  // Score and rank
+  // Score and rank — quality scoring is relative to currentQuality
   const maxSeeders = Math.max(...allResults.map(r => r.seeders || 0), 1);
   const scored = allResults.map(r => {
-    const s = scoreResult(r.name, artist, album, targetQuality, r.seeders || 0, maxSeeders);
-    return { ...r, score: s.total, isDiscography: s.isDiscography, scoring: s };
+    const s = scoreResult(r.name, artist, album, currentQuality, r.seeders || 0, maxSeeders);
+    return { ...r, score: s.total, isDiscography: s.isDiscography, detectedQuality: s.detectedQuality, scoring: s };
   });
 
   // Filter below threshold, sort descending
@@ -266,6 +304,7 @@ async function searchForUpgrade({ artist, album, targetQuality = 'flac', current
       source: 'soulseek',
       name: best.name,
       score: best.score,
+      detectedQuality: best.detectedQuality || 'flac',
       soulseekUser: best.soulseekUser,
       files: best.files,
       hasFreeSlot: best.hasFreeSlot,
@@ -278,6 +317,7 @@ async function searchForUpgrade({ artist, album, targetQuality = 'flac', current
     name: best.name,
     seeders: best.seeders,
     score: best.score,
+    detectedQuality: best.detectedQuality || 'unknown',
     isDiscography: best.isDiscography,
     sources: [{ name: best.name, seeders: best.seeders, source: best.source }],
   };

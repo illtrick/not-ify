@@ -216,10 +216,14 @@ async function processDownload(job, payload) {
  */
 async function processUpgrade(job, payload) {
   const { artist, album } = payload;
-  log('pipeline', 'info', `[job ${job.id}] Searching for upgrade: ${artist} - ${album}`);
+
+  // Detect current library quality to find any upgrade, not just FLAC
+  const { getExistingQuality } = require('./library-check');
+  const currentQuality = getExistingQuality(artist, album) || 'unknown';
+  log('pipeline', 'info', `[job ${job.id}] Searching for upgrade: ${artist} - ${album} (current: ${currentQuality})`);
 
   const { searchForUpgrade } = require('./search');
-  const result = await searchForUpgrade({ artist, album, targetQuality: 'flac' });
+  const result = await searchForUpgrade({ artist, album, currentQuality });
 
   if (!result) {
     log('pipeline', 'info', `[job ${job.id}] No upgrade found for ${artist} - ${album}`);
@@ -240,7 +244,7 @@ async function processUpgrade(job, payload) {
         artist, album,
         mbid: payload.mbid,
         rgid: payload.rgid,
-        source_meta: { source: 'soulseek', quality: 'flac', name: result.name, score: result.score },
+        source_meta: { source: 'soulseek', quality: result.detectedQuality || 'flac', name: result.name, score: result.score },
       },
       { dedupeKey: `slsk-dl:${artist}|${album}`, priority: 5 }
     );
@@ -257,7 +261,7 @@ async function processUpgrade(job, payload) {
       artist,
       album,
       isDiscography: result.isDiscography || false,
-      source_meta: { quality: 'flac', name: result.name, seeders: result.seeders, score: result.score },
+      source_meta: { quality: result.detectedQuality || 'unknown', name: result.name, seeders: result.seeders, score: result.score },
     },
     { dedupeKey, priority: 5 }
   );

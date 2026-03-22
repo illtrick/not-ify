@@ -96,7 +96,7 @@ describe('searchForUpgrade', () => {
     const torrent = { id: '1', name: 'Artist - Album FLAC', magnetLink: 'magnet:?xt=urn:btih:abc', seeders: 10, leechers: 2, size: '500000000', source: 'apibay' };
     mockSearchMusic.mockResolvedValue([torrent]);
 
-    const result = await searchForUpgrade({ artist: 'Artist', album: 'Album', targetQuality: 'flac' });
+    const result = await searchForUpgrade({ artist: 'Artist', album: 'Album', currentQuality: 'unknown' });
     // Called with 3+ fallback queries but same result deduped
     expect(mockSearchMusic).toHaveBeenCalledTimes(3); // 3 fallback queries (no diacritics, short query not triggered)
     expect(result).not.toBeNull();
@@ -107,7 +107,7 @@ describe('searchForUpgrade', () => {
     mockCheckHealth.mockResolvedValue(false);
     mockSearchMusic.mockResolvedValue([]);
 
-    await searchForUpgrade({ artist: 'Hans Zimmer', album: 'Interstellar (Original Motion Picture Soundtrack)', targetQuality: 'flac' });
+    await searchForUpgrade({ artist: 'Hans Zimmer', album: 'Interstellar (Original Motion Picture Soundtrack)', currentQuality: 'unknown' });
     // First query should use the cleaned album name
     const firstCall = mockSearchMusic.mock.calls[0][0];
     expect(firstCall).toBe('Hans Zimmer Interstellar flac');
@@ -118,7 +118,7 @@ describe('searchForUpgrade', () => {
     mockCheckHealth.mockResolvedValue(false);
     mockSearchMusic.mockResolvedValue([]);
 
-    await searchForUpgrade({ artist: 'Radiohead', album: 'OK Computer', targetQuality: 'flac' });
+    await searchForUpgrade({ artist: 'Radiohead', album: 'OK Computer', currentQuality: 'unknown' });
     expect(mockSearchMusic.mock.calls.length).toBeGreaterThanOrEqual(3);
   });
 
@@ -126,7 +126,7 @@ describe('searchForUpgrade', () => {
     mockCheckHealth.mockResolvedValue(false);
     mockSearchMusic.mockResolvedValue([]);
 
-    const result = await searchForUpgrade({ artist: 'Unknown', album: 'Nothing', targetQuality: 'flac' });
+    const result = await searchForUpgrade({ artist: 'Unknown', album: 'Nothing', currentQuality: 'unknown' });
     expect(result).toBeNull();
   });
 
@@ -138,7 +138,7 @@ describe('searchForUpgrade', () => {
     ];
     mockSearchMusic.mockResolvedValue(torrents);
 
-    const result = await searchForUpgrade({ artist: 'Artist', album: 'Album', targetQuality: 'flac' });
+    const result = await searchForUpgrade({ artist: 'Artist', album: 'Album', currentQuality: 'unknown' });
     // FLAC album match should beat MP3 discography despite fewer seeders
     expect(result.magnetLink).toBe('magnet:2');
   });
