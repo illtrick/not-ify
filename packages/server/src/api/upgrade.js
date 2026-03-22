@@ -27,6 +27,31 @@ router.get('/upgrade/status', (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/upgrade/album-history — last upgrade attempt for a specific album
+// query: ?artist=X&album=Y
+// ---------------------------------------------------------------------------
+router.get('/upgrade/album-history', (req, res) => {
+  const { artist, album } = req.query;
+  if (!artist || !album) return res.status(400).json({ error: 'Missing artist/album' });
+
+  const db = require('../services/db');
+  const log = db.getDb().prepare(
+    'SELECT outcome, fail_reason, quality, created_at FROM job_log WHERE artist = ? AND album = ? ORDER BY id DESC LIMIT 1'
+  ).get(artist, album);
+
+  if (!log) return res.json({ lastAttempt: null });
+
+  res.json({
+    lastAttempt: {
+      outcome: log.outcome,
+      reason: log.fail_reason,
+      quality: log.quality,
+      timestamp: log.created_at * 1000, // seconds → ms
+    },
+  });
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/upgrade/album — manual: upgrade specific album now
 // body: { artist, album }
 // ---------------------------------------------------------------------------

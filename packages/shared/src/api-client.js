@@ -496,6 +496,10 @@ export function triggerAlbumUpgrade(artist, album) {
   return post('/api/upgrade/album', { artist, album });
 }
 
+export function getAlbumUpgradeHistory(artist, album) {
+  return get(`/api/upgrade/album-history?artist=${encodeURIComponent(artist)}&album=${encodeURIComponent(album)}`);
+}
+
 export function triggerLibraryScan() {
   return post('/api/upgrade/scan');
 }

@@ -44,6 +44,7 @@ export function AlbumView({
   const albumHeaderRef = useRef(null);
   const [showStickyHeader, setShowStickyHeader] = useState(false);
   const [upgradeState, setUpgradeState] = useState(null); // null | 'triggering' | 'queued' | 'error'
+  const [lastUpgrade, setLastUpgrade] = useState(null); // { outcome, reason, quality, timestamp }
 
   const lossyFormats = ['mp3', 'aac', 'm4a', 'ogg', 'opus'];
   const hasLossyTracks = useCallback(
@@ -54,6 +55,7 @@ export function AlbumView({
   useEffect(() => {
     setShowStickyHeader(false);
     setUpgradeState(null);
+    setLastUpgrade(null);
     if (!albumHeaderRef.current || !mainContentRef?.current) return;
     const observer = new IntersectionObserver(
       ([entry]) => setShowStickyHeader(!entry.isIntersecting),
@@ -62,6 +64,16 @@ export function AlbumView({
     observer.observe(albumHeaderRef.current);
     return () => observer.disconnect();
   }, [selectedAlbum, mainContentRef]);
+
+  // Fetch last upgrade attempt for this album
+  useEffect(() => {
+    if (!selectedAlbum) return;
+    const { artist, album } = selectedAlbum;
+    if (!artist || !album) return;
+    api.getAlbumUpgradeHistory(artist, album)
+      .then(r => setLastUpgrade(r?.lastAttempt || null))
+      .catch(() => {});
+  }, [selectedAlbum]);
 
   if (!selectedAlbum) return null;
   const { artist, album, year, coverArt, tracks, sources, fromSearch, trackCount } = selectedAlbum;
@@ -262,10 +274,10 @@ export function AlbumView({
                   }}
                   onMouseEnter={e => { if (!upgradeState) { e.currentTarget.style.color = COLORS.textPrimary; e.currentTarget.style.borderColor = COLORS.textSecondary; } }}
                   onMouseLeave={e => { if (!upgradeState) { e.currentTarget.style.color = COLORS.textSecondary; e.currentTarget.style.borderColor = COLORS.border; } }}
-                  title="Queue this album for lossless upgrade"
+                  title={lastUpgrade ? `Last attempt: ${lastUpgrade.outcome}${lastUpgrade.reason ? ' — ' + lastUpgrade.reason : ''} (${(() => { const ago = Date.now() - lastUpgrade.timestamp; if (ago < 60000) return 'just now'; if (ago < 3600000) return Math.round(ago/60000) + 'm ago'; if (ago < 86400000) return Math.round(ago/3600000) + 'h ago'; return Math.round(ago/86400000) + 'd ago'; })()})` : 'Queue this album for quality upgrade'}
                 >
                   {upgradeState === 'triggering' && <span className="spin-slow" style={{ display: 'inline-flex' }}>{Icon.music(12, COLORS.textSecondary)}</span>}
-                  {upgradeState === 'queued' ? 'Upgrade queued' : upgradeState === 'error' ? 'Upgrade failed' : 'Upgrade to FLAC'}
+                  {upgradeState === 'queued' ? 'Upgrade queued' : upgradeState === 'error' ? 'Upgrade failed' : lastUpgrade ? `Upgrade (tried ${(() => { const ago = Date.now() - lastUpgrade.timestamp; if (ago < 60000) return 'just now'; if (ago < 3600000) return Math.round(ago/60000) + 'm ago'; if (ago < 86400000) return Math.round(ago/3600000) + 'h ago'; return Math.round(ago/86400000) + 'd ago'; })()})` : 'Upgrade'}
                 </button>
               )}
             </div>
