@@ -328,6 +328,10 @@ export function useDownload({ playTrack, loadLibrary, library = [] } = {}) {
           failed: stats.failed || 0,
           jobs: data.jobs || [],
         });
+        // Refresh library periodically while jobs are running (picks up completed upgrades)
+        libRefreshCountRef.current++;
+        if (libRefreshCountRef.current % 5 === 0) loadLibrary?.();
+
         // Stop polling when queue is idle
         if ((stats.pending || 0) === 0 && (stats.active || 0) === 0) {
           clearInterval(jobQueuePollRef.current);

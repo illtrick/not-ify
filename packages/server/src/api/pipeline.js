@@ -338,7 +338,7 @@ router.post('/download/background', async (req, res) => {
   const dedupeKey = metaArtist && metaAlbum
     ? `download:${metaArtist}|${metaAlbum}`
     : `download:${magnetLink.slice(0, 60)}`;
-  getJobQueue().enqueue('download', { magnetLink, name, mbid, coverArt, year, artist: metaArtist, albumName: metaAlbum }, { dedupeKey });
+  getJobQueue().enqueue('download', { magnetLink, name, mbid, coverArt, year, artist: metaArtist, album: metaAlbum }, { dedupeKey });
 
   res.json({ started: true });
 

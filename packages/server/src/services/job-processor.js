@@ -498,25 +498,27 @@ async function processSoulseekDownload(job, payload) {
       throw new Error(`Soulseek download timed out after ${getSlskDownloadTimeout() / 1000}s`);
     }
 
-    // Step 3: Copy files from shared volume to staging
+    // Step 3: Copy ONLY the files we requested from shared volume to staging
+    // Build a set of expected basenames from the enqueued files list
     fs.mkdirSync(stagingDir, { recursive: true });
     const downloadedFiles = [];
+    const expectedBasenames = new Set(
+      files.map(f => path.basename(f.filename.replace(/\\/g, '/')))
+    );
 
-    // slskd stores downloads as {downloads_dir}/{remote_path}/ — not under a
-    // username subdirectory. Walk the entire downloads dir for audio files.
     const dlBase = getSlskdDownloadsDir();
     if (!fs.existsSync(dlBase)) {
       throw new Error(`Soulseek downloads directory not found: ${dlBase}`);
     }
 
-    // Walk the downloads directory for audio files
+    // Walk the downloads directory but only copy files matching our request
     const walkDir = (dir) => {
       const entries = fs.readdirSync(dir, { withFileTypes: true });
       for (const entry of entries) {
         const fullPath = path.join(dir, entry.name);
         if (entry.isDirectory()) {
           walkDir(fullPath);
-        } else if (downloader.isAudioFile(entry.name)) {
+        } else if (downloader.isAudioFile(entry.name) && expectedBasenames.has(entry.name)) {
           const safeName = path.basename(entry.name);
           const destPath = path.join(stagingDir, downloader.sanitizePath(safeName));
           fs.copyFileSync(fullPath, destPath);
@@ -527,10 +529,10 @@ async function processSoulseekDownload(job, payload) {
     walkDir(dlBase);
 
     if (downloadedFiles.length === 0) {
-      throw new Error('No audio files found in Soulseek download');
+      throw new Error(`No matching audio files found in Soulseek downloads (expected ${expectedBasenames.size} files)`);
     }
 
-    log('pipeline', 'info', `[job ${job.id}] Copied ${downloadedFiles.length} files from Soulseek to staging`);
+    log('pipeline', 'info', `[job ${job.id}] Copied ${downloadedFiles.length}/${expectedBasenames.size} files from Soulseek to staging`);
 
     // Step 4: File validation (MIME + ffprobe + ClamAV)
     for (const filePath of downloadedFiles) {

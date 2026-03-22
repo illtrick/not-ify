@@ -204,11 +204,8 @@ function scoreResult(torrentName, artist, album, currentQuality, seeders, maxSee
   if (detectedRank > currentRank) {
     // Better quality than what we have — full credit
     qualityScore = 1.0;
-  } else if (detectedRank === currentRank && detectedRank > 0) {
-    // Same quality — partial credit (might still be a better rip)
-    qualityScore = 0.5;
   }
-  // Worse or unknown quality — 0
+  // Same quality or worse — no credit (don't re-download what we already have)
 
   // Seeders (0.15)
   const clampedSeeders = Math.max(seeders, 1);
