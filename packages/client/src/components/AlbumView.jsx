@@ -287,10 +287,10 @@ export function AlbumView({
           {pl.map((track, idx) => {
             // Match by unique track ID. For YT previews, match by title but only
             // highlight the first occurrence when duplicates exist (e.g., "Prison Sex" x3).
-            const isDuplicate = albumTracks.filter(t => t.title === track.title).length > 1;
+            const isDuplicate = pl.filter(t => t.title === track.title).length > 1;
             const isActive = currentTrack?.id === track.id
               || (currentTrack?.isYtPreview && currentTrack?.title === track.title
-                  && (!isDuplicate || idx === albumTracks.findIndex(t => t.title === track.title)));
+                  && (!isDuplicate || idx === pl.findIndex(t => t.title === track.title)));
             const isHovered = hoveredTrack === track.id;
             const trackArtist = track.artist || artist;
             return (
