@@ -70,6 +70,17 @@ async function searchSoulseek(query, opts = {}) {
       if (result.isComplete || result.responseCount >= minResults) break;
     }
 
+    // Fetch full responses with file details (main endpoint omits files)
+    let responses = [];
+    try {
+      const respRes = await fetch(`${SLSKD_URL}/api/v0/searches/${searchId}/responses`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (respRes.ok) {
+        responses = await respRes.json();
+      }
+    } catch {}
+
     // Clean up the search on slskd
     try {
       await fetch(`${SLSKD_URL}/api/v0/searches/${searchId}`, {
@@ -81,7 +92,7 @@ async function searchSoulseek(query, opts = {}) {
     return {
       responseCount: result.responseCount || 0,
       fileCount: result.fileCount || 0,
-      responses: (result.responses || []).map(r => ({
+      responses: (responses || []).map(r => ({
         username: r.username,
         fileCount: r.fileCount || 0,
         hasFreeSlot: r.hasFreeUploadSlot,
