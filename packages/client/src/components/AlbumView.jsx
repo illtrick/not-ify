@@ -317,7 +317,10 @@ export function AlbumView({
           </div>
           {pl.map((track, idx) => {
             const isActive = currentTrack?.id === track.id
-              || (currentTrack?.isYtPreview && currentTrack?.title === track.title);
+              || (currentTrack?.isYtPreview && (
+                currentTrack?.title === track.title
+                || currentTrack?.title?.toLowerCase() === track.title?.toLowerCase()
+              ));
             const isHovered = hoveredTrack === track.id;
             const trackArtist = track.artist || artist;
             return (
@@ -348,7 +351,7 @@ export function AlbumView({
                   </div>
                 </div>
                 {!isMobile && <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-                  <QualityBadge format={track.format || (isActive && currentTrack?.isYtPreview ? 'mp3' : undefined)} />
+                  <QualityBadge format={track.format || (isActive ? (currentTrack?.format || 'mp3') : undefined)} />
                 </span>}
                 {!isMobile && (
                   <span style={{ width: 50, textAlign: 'right', fontSize: 12, color: COLORS.textSecondary, flexShrink: 0, marginLeft: 12 }}>
