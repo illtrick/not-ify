@@ -26,7 +26,7 @@ const upgradeRouter = require('./api/upgrade');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const CONFIG_DIR = process.env.CONFIG_DIR || '/app/config';
-const MUSIC_DIR = process.env.MUSIC_DIR || '/app/music';
+const MUSIC_DIR = db.getGlobalSetting('musicDir') || process.env.MUSIC_DIR || '/app/music';
 const COVERS_DIR = path.join(CONFIG_DIR, 'covers');
 
 app.use(cors());
@@ -443,9 +443,21 @@ app.use('/api', upgradeRouter);
 const rdConfigRouter = require('./api/realdebrid-config');
 app.use('/api/realdebrid', adminGuard, rdConfigRouter);
 
+// Library config API (admin only) — music directory configuration + filesystem browser
+const libraryConfigRouter = require('./api/library-config');
+app.use('/api/library-config', adminGuard, libraryConfigRouter);
+
+// Soulseek config API (admin only)
+const soulseekConfigRouter = require('./api/soulseek-config');
+app.use('/api/soulseek', adminGuard, soulseekConfigRouter);
+
 // VPN config API (admin only)
 const vpnConfigRouter = require('./api/vpn-config');
 app.use('/api/vpn', adminGuard, vpnConfigRouter);
+
+// Server admin API (admin only) — active-jobs check + restart
+const serverAdminRouter = require('./api/server-admin');
+app.use('/api/server', adminGuard, serverAdminRouter);
 
 // Activity log API — verbose download/pipeline event stream for debugging UI
 const activityLog = require('./services/activity-log');

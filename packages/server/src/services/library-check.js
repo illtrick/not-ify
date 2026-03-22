@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const db = require('./db');
 
 const AUDIO_EXT = new Set(['.mp3', '.flac', '.ogg', '.m4a', '.aac', '.wav', '.opus']);
 
@@ -50,7 +51,7 @@ function detectFileQuality(filePath) {
 }
 
 function getExistingQuality(artist, album) {
-  const musicDir = process.env.MUSIC_DIR || '/app/music';
+  const musicDir = db.getGlobalSetting('musicDir') || process.env.MUSIC_DIR || '/app/music';
   const normArtist = normalize(artist);
   const normAlbum = normalize(album);
 
@@ -95,7 +96,7 @@ function normalize(s) {
 }
 
 function albumExistsInLibrary(artist, album) {
-  const musicDir = process.env.MUSIC_DIR || '/app/music';
+  const musicDir = db.getGlobalSetting('musicDir') || process.env.MUSIC_DIR || '/app/music';
   const normArtist = normalize(artist);
   const normAlbum = normalize(album);
 

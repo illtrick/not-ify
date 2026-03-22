@@ -558,6 +558,87 @@ export function getDiagnostics() {
   return get('/api/diagnostics');
 }
 
+// ---------------------------------------------------------------------------
+// Soulseek Config
+// ---------------------------------------------------------------------------
+
+export function getSlskStatus() {
+  return get('/api/soulseek/status');
+}
+
+export function saveSlskConfig(body) {
+  return post('/api/soulseek/config', body);
+}
+
+export function testSlskConnection() {
+  return post('/api/soulseek/test');
+}
+
+// ---------------------------------------------------------------------------
+// Library Config
+// ---------------------------------------------------------------------------
+
+export function getLibraryConfig() {
+  return get('/api/library-config');
+}
+
+export function saveLibraryConfig(body) {
+  return post('/api/library-config', body);
+}
+
+export function getLibraryFilesCount(dirPath) {
+  const params = dirPath ? `?path=${encodeURIComponent(dirPath)}` : '';
+  return get(`/api/library-config/files-count${params}`);
+}
+
+export function migrateLibrary(fromPath, toPath, onProgress) {
+  // Uses fetch + ReadableStream to consume SSE progress events
+  // Must include auth header manually since we can't use request() (need streaming)
+  const url = `${_baseUrl}/api/library-config/migrate`;
+  const headers = { 'Content-Type': 'application/json' };
+  if (_userId) headers['X-User-Id'] = _userId;
+  return fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ fromPath, toPath }),
+  }).then(async (response) => {
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error(err.error || `HTTP ${response.status}`);
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (onProgress) onProgress(data);
+          } catch {}
+        }
+      }
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Server Admin
+// ---------------------------------------------------------------------------
+
+export function getActiveJobs() {
+  return get('/api/server/active-jobs');
+}
+
+export function restartServer() {
+  return post('/api/server/restart');
+}
+
 // Activity log — verbose download/pipeline events for debugging
 export function getActivityLog({ since, category, limit } = {}) {
   const params = new URLSearchParams();

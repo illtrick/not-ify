@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { COLORS } from '../constants';
 import { Icon } from './Icon';
-import { importFromLastfm, switchVpnRegion } from '@not-ify/shared';
+import { importFromLastfm, switchVpnRegion, getActiveJobs, getLibraryFilesCount, migrateLibrary } from '@not-ify/shared';
+import { FolderBrowser } from './FolderBrowser';
 
 function StatusDot({ status }) {
   const color = status === 'ok' ? COLORS.success : status === 'error' ? COLORS.error : COLORS.textSecondary;
@@ -26,11 +27,129 @@ export function SettingsModal({
   vpnRegions,
   syncStatus,
   onSyncNow,
+  slskConfig,
+  onSlskSave,
+  onSlskTest,
+  libraryConfig,
+  onLibrarySave,
+  onServerRestart,
 }) {
   const [rdToken, setRdToken] = useState('');
   const [vpnUser, setVpnUser] = useState('');
   const [vpnPass, setVpnPass] = useState('');
   const [vpnRegion, setVpnRegion] = useState('US East');
+
+  // Soulseek inputs
+  const [slskUsername, setSlskUsername] = useState('');
+  const [slskPassword, setSlskPassword] = useState('');
+
+  // Library / folder browser state
+  const [showFolderBrowser, setShowFolderBrowser] = useState(false);
+  const [pendingLibraryPath, setPendingLibraryPath] = useState(null);
+  // Steps: null | 'confirm' | 'migration' | 'restarting'
+  const [libraryStep, setLibraryStep] = useState(null);
+  const [libraryActiveJobs, setLibraryActiveJobs] = useState(null);
+  const [libraryFilesCount, setLibraryFilesCount] = useState(null);
+  const [migrationProgress, setMigrationProgress] = useState(null);
+  const [libraryError, setLibraryError] = useState(null);
+
+  // Pre-fill Soulseek username from saved config
+  useEffect(() => {
+    if (slskConfig?.status?.username && !slskUsername) {
+      setSlskUsername(slskConfig.status.username);
+    }
+  }, [slskConfig?.status?.username]);
+
+  // Handle path selected from folder browser — fetch active jobs + files count, then show confirm step
+  const handlePathSelected = useCallback(async (path) => {
+    setShowFolderBrowser(false);
+
+    // Same path selected — no-op
+    const currentNorm = (libraryConfig?.musicDir || '').replace(/[\\/]+/g, '/').replace(/\/+$/, '');
+    const selectedNorm = (path || '').replace(/[\\/]+/g, '/').replace(/\/+$/, '');
+    if (currentNorm === selectedNorm) {
+      setLibraryError(null);
+      setPendingLibraryPath(null);
+      setLibraryStep(null);
+      return; // Already using this path, nothing to do
+    }
+
+    setPendingLibraryPath(path);
+    setLibraryError(null);
+    setLibraryActiveJobs(null);
+    setLibraryFilesCount(null);
+    setMigrationProgress(null);
+
+    try {
+      const [jobs, files] = await Promise.all([
+        getActiveJobs().catch(() => ({ activeJobs: 0, types: [] })),
+        getLibraryFilesCount(libraryConfig?.musicDir).catch(() => ({ count: 0, totalSizeMB: 0 })),
+      ]);
+      setLibraryActiveJobs(jobs);
+      setLibraryFilesCount(files);
+      setLibraryStep('confirm');
+    } catch (err) {
+      setLibraryError(`Failed to check server state: ${err.message}`);
+      setLibraryStep('confirm');
+    }
+  }, [libraryConfig?.musicDir]);
+
+  // Save config + restart server, then poll for reconnect
+  const handleApplyAndRestart = useCallback(async () => {
+    setLibraryStep('restarting');
+    try {
+      if (onLibrarySave) await onLibrarySave(pendingLibraryPath);
+      if (onServerRestart) onServerRestart();
+      setPendingLibraryPath(null);
+    } catch (err) {
+      setLibraryError(`Failed to save: ${err.message}`);
+      setLibraryStep('confirm');
+    }
+  }, [pendingLibraryPath, onLibrarySave, onServerRestart]);
+
+  // Save config but defer restart (when jobs are active)
+  const handleWaitAndApply = useCallback(async () => {
+    try {
+      if (onLibrarySave) await onLibrarySave(pendingLibraryPath);
+      setLibraryStep(null);
+      setPendingLibraryPath(null);
+    } catch (err) {
+      setLibraryError(`Failed to save: ${err.message}`);
+    }
+  }, [pendingLibraryPath, onLibrarySave]);
+
+  // Proceed to migration step
+  const handleShowMigration = useCallback(() => {
+    setLibraryStep('migration');
+  }, []);
+
+  // Perform migration (copy files) then restart
+  const handleMigrate = useCallback(async () => {
+    setMigrationProgress({ copying: true, copied: 0, total: libraryFilesCount?.count || 0, progress: '0/? files' });
+    try {
+      await migrateLibrary(libraryConfig?.musicDir, pendingLibraryPath, (data) => {
+        setMigrationProgress(data);
+        if (data.done) {
+          // Migration complete — now save and restart
+          handleApplyAndRestart();
+        }
+      });
+    } catch (err) {
+      setLibraryError(`Migration failed: ${err.message}`);
+      setLibraryStep('migration');
+      setMigrationProgress(null);
+    }
+  }, [libraryConfig?.musicDir, pendingLibraryPath, libraryFilesCount, handleApplyAndRestart]);
+
+  // Cancel the library change flow
+  const handleLibraryCancel = useCallback(() => {
+    setLibraryStep(null);
+    setPendingLibraryPath(null);
+    setLibraryActiveJobs(null);
+    setLibraryFilesCount(null);
+    setMigrationProgress(null);
+    setLibraryError(null);
+  }, []);
 
   // Last.fm library import state
   const [importDays, setImportDays] = useState(60);
@@ -419,6 +538,258 @@ export function SettingsModal({
                     )}
                   </>
                 )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Soulseek section — admin only */}
+        {isAdmin && slskConfig && (
+          <div style={{ ...sectionStyle, marginTop: 24 }}>
+            <div style={sectionHeaderStyle}>
+              <span style={sectionTitleStyle}>Soulseek</span>
+              <StatusDot status={slskConfig.status?.connected ? 'ok' : slskConfig.status?.configured ? 'error' : null} />
+            </div>
+            {slskConfig.status?.configured && (
+              <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 8 }}>
+                Logged in as <strong style={{ color: COLORS.textPrimary }}>{slskConfig.status.username}</strong>
+                {slskConfig.status.state && <span> — {slskConfig.status.state}</span>}
+              </div>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 8 }}>
+              <input
+                type="text"
+                placeholder="Soulseek username"
+                value={slskUsername}
+                onChange={e => setSlskUsername(e.target.value)}
+                style={inputStyle}
+              />
+              <input
+                type="password"
+                placeholder={slskConfig.status?.configured ? 'Enter new password to update' : 'Soulseek password'}
+                value={slskPassword}
+                onChange={e => setSlskPassword(e.target.value)}
+                style={inputStyle}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <button
+                onClick={() => onSlskSave && onSlskSave(slskUsername, slskPassword)}
+                disabled={slskConfig.saving || (!slskUsername && !slskPassword)}
+                style={slskConfig.saving || (!slskUsername && !slskPassword) ? buttonDisabledStyle : buttonPrimaryStyle}
+              >
+                {slskConfig.saving ? 'Saving...' : 'Save'}
+              </button>
+              <button
+                onClick={() => onSlskTest && onSlskTest()}
+                disabled={slskConfig.testing}
+                style={slskConfig.testing ? buttonDisabledStyle : buttonSecondaryStyle}
+              >
+                {slskConfig.testing ? 'Testing...' : 'Test Connection'}
+              </button>
+            </div>
+            {slskConfig.testResult && (
+              <div style={{ marginTop: 8, fontSize: 12, color: slskConfig.testResult.status === 'ok' ? COLORS.success : COLORS.error }}>
+                {slskConfig.testResult.status === 'ok'
+                  ? `Connected as ${slskConfig.testResult.username || 'unknown'}${slskConfig.testResult.version ? ` — slskd v${slskConfig.testResult.version}` : ''}`
+                  : slskConfig.testResult.error}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Music Library section — admin only */}
+        {isAdmin && libraryConfig && (
+          <div style={{ ...sectionStyle, marginTop: 24 }}>
+            <div style={sectionHeaderStyle}>
+              <span style={sectionTitleStyle}>Music Library</span>
+            </div>
+            <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 4 }}>
+              Current path:
+            </div>
+            <div style={{ fontSize: 13, color: COLORS.textPrimary, marginBottom: 4, wordBreak: 'break-all' }}>
+              {libraryConfig.musicDir}
+            </div>
+            <div style={{ fontSize: 11, color: COLORS.textSecondary, marginBottom: 10 }}>
+              Source:{' '}
+              {libraryConfig.source === 'db' ? 'saved setting'
+                : libraryConfig.source === 'env' ? 'environment variable'
+                : 'default'}
+            </div>
+            {libraryConfig.isDocker && (
+              <div style={{
+                padding: '8px 10px', borderRadius: 5, background: COLORS.hover,
+                fontSize: 11, color: COLORS.textSecondary, marginBottom: 10,
+              }}>
+                Running in Docker — make sure any new path is covered by a bind mount.
+              </div>
+            )}
+
+            {/* Folder browser toggle */}
+            {!showFolderBrowser && libraryStep !== 'restarting' && (
+              <button
+                onClick={() => setShowFolderBrowser(true)}
+                style={buttonSecondaryStyle}
+              >
+                Change Location
+              </button>
+            )}
+            {showFolderBrowser && (
+              <FolderBrowser
+                initialPath={libraryConfig.musicDir}
+                onCancel={() => setShowFolderBrowser(false)}
+                onSelect={handlePathSelected}
+              />
+            )}
+
+            {/* Error display */}
+            {libraryError && (
+              <div style={{ marginTop: 8, fontSize: 12, color: COLORS.error }}>
+                {libraryError}
+              </div>
+            )}
+
+            {/* Step 1: Confirmation dialog */}
+            {libraryStep === 'confirm' && pendingLibraryPath && (
+              <div style={{
+                marginTop: 12, padding: '12px 14px', borderRadius: 6,
+                background: COLORS.hover, border: `1px solid ${COLORS.border}`,
+              }}>
+                <div style={{ fontSize: 13, color: COLORS.textPrimary, marginBottom: 6 }}>
+                  Change music library to:
+                </div>
+                <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 10, wordBreak: 'break-all' }}>
+                  {pendingLibraryPath}
+                </div>
+
+                {/* Active jobs warning */}
+                {libraryActiveJobs && libraryActiveJobs.activeJobs > 0 ? (
+                  <>
+                    <div style={{ fontSize: 12, color: COLORS.error, marginBottom: 10 }}>
+                      {libraryActiveJobs.activeJobs} download{libraryActiveJobs.activeJobs !== 1 ? 's' : ''} in progress
+                      {libraryActiveJobs.types?.length > 0 ? ` (${libraryActiveJobs.types.join(', ')})` : ''}.
+                      What would you like to do?
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <button
+                        onClick={handleWaitAndApply}
+                        style={buttonSecondaryStyle}
+                        title="Save the new path but don't restart yet — downloads will finish first"
+                      >
+                        Wait &amp; Apply After
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (libraryFilesCount && libraryFilesCount.count > 0) {
+                            handleShowMigration();
+                          } else {
+                            handleApplyAndRestart();
+                          }
+                        }}
+                        style={buttonPrimaryStyle}
+                      >
+                        Cancel Downloads &amp; Restart Now
+                      </button>
+                      <button onClick={handleLibraryCancel} style={buttonSecondaryStyle}>Cancel</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 10 }}>
+                      This requires a server restart.
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        onClick={() => {
+                          if (libraryFilesCount && libraryFilesCount.count > 0) {
+                            handleShowMigration();
+                          } else {
+                            handleApplyAndRestart();
+                          }
+                        }}
+                        style={buttonPrimaryStyle}
+                      >
+                        Apply &amp; Restart
+                      </button>
+                      <button onClick={handleLibraryCancel} style={buttonSecondaryStyle}>Cancel</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Step 2: Migration offer */}
+            {libraryStep === 'migration' && pendingLibraryPath && (
+              <div style={{
+                marginTop: 12, padding: '12px 14px', borderRadius: 6,
+                background: COLORS.hover, border: `1px solid ${COLORS.border}`,
+              }}>
+                {migrationProgress ? (
+                  /* Migration in progress */
+                  <div>
+                    <div style={{ fontSize: 13, color: COLORS.textPrimary, marginBottom: 8 }}>
+                      Migrating files...
+                    </div>
+                    <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 8 }}>
+                      {migrationProgress.progress}
+                    </div>
+                    <div style={{
+                      height: 4, borderRadius: 2, background: COLORS.border, overflow: 'hidden',
+                    }}>
+                      <div style={{
+                        height: '100%', borderRadius: 2, background: COLORS.accent,
+                        width: migrationProgress.total > 0
+                          ? `${Math.round((migrationProgress.copied / migrationProgress.total) * 100)}%`
+                          : '0%',
+                        transition: 'width 0.3s ease',
+                      }} />
+                    </div>
+                  </div>
+                ) : (
+                  /* Migration offer */
+                  <div>
+                    <div style={{ fontSize: 13, color: COLORS.textPrimary, marginBottom: 6 }}>
+                      Migrate existing files?
+                    </div>
+                    <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 10 }}>
+                      Your current library has {libraryFilesCount.count} file{libraryFilesCount.count !== 1 ? 's' : ''} ({libraryFilesCount.totalSizeMB} MB).
+                      Would you like to copy them to the new location?
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={handleMigrate} style={buttonPrimaryStyle}>
+                        Migrate
+                      </button>
+                      <button onClick={handleApplyAndRestart} style={buttonSecondaryStyle}>
+                        Start Fresh
+                      </button>
+                      <button onClick={handleLibraryCancel} style={buttonSecondaryStyle}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Step 3: Restarting spinner */}
+            {libraryStep === 'restarting' && (
+              <div style={{
+                marginTop: 12, padding: '16px 14px', borderRadius: 6,
+                background: COLORS.hover, border: `1px solid ${COLORS.border}`,
+                textAlign: 'center',
+              }}>
+                <div style={{ fontSize: 13, color: COLORS.textPrimary, marginBottom: 8 }}>
+                  Restarting server...
+                </div>
+                <div style={{ fontSize: 12, color: COLORS.textSecondary }}>
+                  Waiting for server to come back online
+                </div>
+                <div style={{
+                  marginTop: 10, width: 20, height: 20, borderRadius: '50%',
+                  border: `2px solid ${COLORS.border}`, borderTopColor: COLORS.accent,
+                  animation: 'spin 1s linear infinite',
+                  display: 'inline-block',
+                }} />
               </div>
             )}
           </div>

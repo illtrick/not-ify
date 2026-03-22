@@ -40,6 +40,12 @@ jest.mock('../../src/services/db', () => ({
   saveUserSession: jest.fn(),
 }));
 jest.mock('../../src/services/migrate', () => ({ migrate: jest.fn() }));
+jest.mock('../../src/services/job-queue', () => ({
+  enqueue: jest.fn(), dequeue: jest.fn(), complete: jest.fn(), fail: jest.fn(),
+  skip: jest.fn(), getByType: jest.fn().mockReturnValue([]),
+  getByStatus: jest.fn().mockReturnValue([]),
+  getAll: jest.fn().mockReturnValue([]), getStats: jest.fn().mockReturnValue({}),
+}));
 jest.mock('../../src/services/realdebrid', () => ({}));
 jest.mock('../../src/services/search', () => ({ searchMusic: jest.fn().mockResolvedValue([]) }));
 jest.mock('../../src/services/musicbrainz', () => ({

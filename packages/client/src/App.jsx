@@ -205,6 +205,64 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
     if (isAdmin) api.getVpnRegions().then(setVpnRegions).catch(() => {});
   }, [isAdmin]);
 
+  // ── Soulseek config ────────────────────────────────────────────────────────
+  const slskConfig = useServiceConfig({
+    getStatus: api.getSlskStatus,
+    saveConfig: api.saveSlskConfig,
+    testConn: api.testSlskConnection,
+    enabled: isAdmin,
+  });
+
+  const handleSlskSave = useCallback(async (username, password) => {
+    if (!username || !password) return;
+    await slskConfig.save({ username, password });
+  }, [slskConfig]);
+
+  const handleSlskTest = useCallback(() => {
+    slskConfig.test();
+  }, [slskConfig]);
+
+  // ── Library config ─────────────────────────────────────────────────────────
+  const [libraryConfig, setLibraryConfig] = useState(null);
+
+  const fetchLibraryConfig = useCallback(() => {
+    if (!isAdmin) return;
+    api.getLibraryConfig().then(setLibraryConfig).catch(() => {});
+  }, [isAdmin]);
+
+  useEffect(() => { fetchLibraryConfig(); }, [fetchLibraryConfig]);
+
+  const handleLibrarySave = useCallback(async (newPath) => {
+    await api.saveLibraryConfig({ musicDir: newPath });
+    fetchLibraryConfig();
+  }, [fetchLibraryConfig]);
+
+  // ── Server admin ───────────────────────────────────────────────────────────
+  const handleServerRestart = useCallback(async () => {
+    try {
+      await api.restartServer();
+    } catch {
+      // Server exits immediately — connection error is expected
+    }
+    // Poll /api/health until server comes back, then reload
+    const start = Date.now();
+    const poll = setInterval(async () => {
+      if (Date.now() - start > 60000) {
+        clearInterval(poll);
+        return;
+      }
+      try {
+        const result = await api.checkHealth();
+        if (!result.error) {
+          clearInterval(poll);
+          window.location.reload();
+        }
+      } catch {
+        // still down
+      }
+    }, 2000);
+  }, []);
+
   // ── Scrobble sync status polling ──────────────────────────────────────────
   const [syncStatus, setSyncStatus] = useState(null);
   useEffect(() => {
@@ -847,6 +905,12 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
         vpnRegions={vpnRegions}
         syncStatus={syncStatus}
         onSyncNow={handleSyncNow}
+        slskConfig={slskConfig}
+        onSlskSave={handleSlskSave}
+        onSlskTest={handleSlskTest}
+        libraryConfig={libraryConfig}
+        onLibrarySave={handleLibrarySave}
+        onServerRestart={handleServerRestart}
       />
 
       <audio

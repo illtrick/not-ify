@@ -71,6 +71,10 @@ jest.mock('../../src/api/pipeline', () => ({
   isDownloadActive: jest.fn().mockReturnValue(false),
 }));
 
+jest.mock('../../src/services/db', () => ({
+  getGlobalSetting: () => null,
+}));
+
 const fs = require('fs');
 jest.mock('fs');
 
