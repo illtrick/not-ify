@@ -266,11 +266,14 @@ router.post('/import/lastfm', async (req, res) => {
       continue;
     }
 
-    // Enqueue as a background-priority download job (worker handles source discovery)
+    // Enqueue as upgrade job — searches for best source (torrent, Soulseek),
+    // then enqueues the appropriate download type. Falls through to existing
+    // YT download if no better source found.
+    // See job-processor.js:processUpgrade() for the full flow.
     try {
       jobQueue.enqueue(
-        'download',
-        { artist, album, source_meta: {} },
+        'upgrade',
+        { artist, album },
         { priority: 0, dedupeKey }
       );
       queued++;
