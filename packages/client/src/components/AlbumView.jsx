@@ -348,7 +348,7 @@ export function AlbumView({
                   </div>
                 </div>
                 {!isMobile && <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-                  <QualityBadge format={track.format} />
+                  <QualityBadge format={track.format || (isActive && currentTrack?.isYtPreview ? 'mp3' : undefined)} />
                 </span>}
                 {!isMobile && (
                   <span style={{ width: 50, textAlign: 'right', fontSize: 12, color: COLORS.textSecondary, flexShrink: 0, marginLeft: 12 }}>
