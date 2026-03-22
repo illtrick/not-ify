@@ -41,6 +41,23 @@ jest.mock('../../src/services/activity-log', () => ({
   log: (...a) => mockLog(...a),
 }));
 
+const mockEnqueueDownload = jest.fn();
+const mockPollDownloads = jest.fn();
+jest.mock('../../src/services/soulseek', () => ({
+  enqueueDownload: (...a) => mockEnqueueDownload(...a),
+  pollDownloads: (...a) => mockPollDownloads(...a),
+}));
+
+const mockSearchForUpgrade = jest.fn();
+jest.mock('../../src/services/search', () => ({
+  searchForUpgrade: (...a) => mockSearchForUpgrade(...a),
+}));
+
+const mockJobQueueEnqueue = jest.fn().mockReturnValue(42);
+jest.mock('../../src/services/job-queue', () => ({
+  enqueue: (...a) => mockJobQueueEnqueue(...a),
+}));
+
 jest.mock('../../src/api/pipeline', () => ({
   isDownloadActive: jest.fn().mockReturnValue(false),
 }));
@@ -113,5 +130,80 @@ describe('job-processor', () => {
     const job = { id: 3, type: 'unknown', payload: '{}' };
     const result = await processJob(job);
     expect(result.skipped).toBe(true);
+  });
+
+  test('processes soulseek-download job end-to-end', async () => {
+    // Use tiny poll interval for test speed
+    process.env.SLSK_POLL_INTERVAL = '0';
+    process.env.SLSKD_DOWNLOADS_DIR = '/slskd-downloads';
+
+    const job = {
+      id: 10,
+      type: 'soulseek-download',
+      payload: JSON.stringify({
+        artist: 'Daft Punk',
+        album: 'Discovery',
+        soulseekUser: 'musicfan99',
+        files: [
+          { filename: '\\\\music\\\\Daft Punk\\\\Discovery\\\\01 One More Time.flac', size: 35000000 },
+          { filename: '\\\\music\\\\Daft Punk\\\\Discovery\\\\02 Aerodynamic.flac', size: 30000000 },
+        ],
+      }),
+    };
+
+    mockEnqueueDownload.mockResolvedValue(true);
+    mockPollDownloads.mockResolvedValueOnce([{
+      username: 'musicfan99',
+      directories: [{
+        directory: 'Discovery',
+        files: [
+          { filename: '01 One More Time.flac', state: 'Completed, Succeeded', size: 35000000 },
+          { filename: '02 Aerodynamic.flac', state: 'Completed, Succeeded', size: 30000000 },
+        ],
+      }],
+    }]);
+
+    // Mock fs to simulate files in shared volume
+    fs.existsSync.mockReturnValue(true);
+    fs.readdirSync.mockImplementation((dir, opts) => {
+      if (opts?.withFileTypes) {
+        return [
+          { name: '01 One More Time.flac', isDirectory: () => false },
+          { name: '02 Aerodynamic.flac', isDirectory: () => false },
+        ];
+      }
+      return ['01 One More Time.flac', '02 Aerodynamic.flac'];
+    });
+    fs.copyFileSync = jest.fn();
+
+    mockValidateFile.mockResolvedValue({ passed: true, checks: [] });
+    mockDownloadValidate.mockResolvedValue({ score: 0.05, confidence: 'high', details: 'ok' });
+
+    const result = await processJob(job);
+    expect(result.success).toBe(true);
+    expect(result.source).toBe('soulseek');
+    expect(result.files).toBe(2);
+    expect(mockEnqueueDownload).toHaveBeenCalledWith('musicfan99', expect.any(Array));
+  });
+
+  test('upgrade enqueues soulseek-download when source is soulseek', async () => {
+    const job = { id: 20, type: 'upgrade', payload: JSON.stringify({ artist: 'Artist', album: 'Album' }) };
+
+    mockSearchForUpgrade.mockResolvedValue({
+      source: 'soulseek',
+      name: 'Artist - Album [Soulseek: user1]',
+      score: 0.85,
+      soulseekUser: 'user1',
+      files: [{ filename: 'track.flac', size: 30000000 }],
+    });
+
+    const result = await processJob(job);
+    expect(result.success).toBe(true);
+    expect(result.source).toBe('Artist - Album [Soulseek: user1]');
+    expect(mockJobQueueEnqueue).toHaveBeenCalledWith(
+      'soulseek-download',
+      expect.objectContaining({ soulseekUser: 'user1' }),
+      expect.any(Object)
+    );
   });
 });

@@ -7,6 +7,20 @@ const downloader = require('./downloader');
 const fileValidator = require('./file-validator');
 const downloadValidator = require('./download-validator');
 const activityLog = require('./activity-log');
+const { enqueueDownload, pollDownloads } = require('./soulseek');
+
+// Read lazily so tests can set process.env before each test case
+// Use globalThis.process to avoid shadowing by the module's own process() function
+const _env = () => globalThis.process.env;
+function getSlskdDownloadsDir() {
+  return _env().SLSKD_DOWNLOADS_DIR || '/app/slskd-downloads';
+}
+function getSlskDownloadTimeout() {
+  return parseInt(_env().SLSK_DOWNLOAD_TIMEOUT || '1800000', 10); // 30 minutes
+}
+function getSlskPollInterval() {
+  return parseInt(_env().SLSK_POLL_INTERVAL || '5000', 10); // 5 seconds
+}
 
 // Read lazily so that tests can set process.env.MUSIC_DIR before each test case.
 // In production this is effectively read-once on first job, which is fine.
@@ -188,8 +202,27 @@ async function processUpgrade(job, payload) {
 
   log('pipeline', 'info', `[job ${job.id}] Found upgrade: ${result.name} (score ${result.score?.toFixed(3)}, ${result.seeders} seeders)`);
 
-  // Enqueue a download job with the found magnet
   const jobQueue = require('./job-queue');
+
+  // Route Soulseek results to soulseek-download job type
+  if (result.source === 'soulseek') {
+    const downloadJobId = jobQueue.enqueue(
+      'soulseek-download',
+      {
+        soulseekUser: result.soulseekUser,
+        files: result.files,
+        artist, album,
+        mbid: payload.mbid,
+        rgid: payload.rgid,
+        source_meta: { source: 'soulseek', name: result.name, score: result.score },
+      },
+      { dedupeKey: `slsk-dl:${artist}|${album}`, priority: 5 }
+    );
+    log('pipeline', 'info', `[job ${job.id}] Enqueued soulseek-download job ${downloadJobId}`);
+    return { success: true, downloadJobId, source: result.name, score: result.score };
+  }
+
+  // Enqueue a torrent download job with the found magnet
   const dedupeKey = `download:${artist}|${album}`;
   const downloadJobId = jobQueue.enqueue(
     'download',
@@ -208,6 +241,152 @@ async function processUpgrade(job, payload) {
 }
 
 /**
+ * Process a Soulseek download job:
+ * enqueue on slskd → poll until complete → copy from shared volume → validate → library
+ */
+async function processSoulseekDownload(job, payload) {
+  const { soulseekUser, files, artist, album, mbid, rgid } = payload;
+  const stagingDir = path.join(getStagingDir(), downloader.sanitizePath(artist), downloader.sanitizePath(album));
+
+  try {
+    // Step 1: Enqueue download on slskd
+    log('pipeline', 'info', `[job ${job.id}] Enqueuing ${files.length} files from Soulseek user ${soulseekUser}`);
+    const enqueued = await enqueueDownload(soulseekUser, files);
+    if (!enqueued) {
+      throw new Error(`Failed to enqueue download from ${soulseekUser}`);
+    }
+
+    // Step 2: Poll until all files complete or timeout
+    const deadline = Date.now() + getSlskDownloadTimeout();
+    let allComplete = false;
+
+    const getBasename = (f) => f.split(/[\\/]/).pop();
+
+    while (Date.now() < deadline && !allComplete) {
+      await new Promise(r => setTimeout(r, getSlskPollInterval()));
+      const transfers = await pollDownloads(soulseekUser);
+
+      const fileStates = new Map();
+      for (const t of transfers) {
+        for (const dir of (t.directories || [])) {
+          for (const f of (dir.files || [])) {
+            fileStates.set(getBasename(f.filename), f.state || '');
+          }
+        }
+      }
+
+      const completed = files.filter(f => {
+        const state = fileStates.get(getBasename(f.filename)) || '';
+        return state.includes('Succeeded');
+      });
+
+      const failed = files.filter(f => {
+        const state = fileStates.get(getBasename(f.filename)) || '';
+        return state.includes('Errored') || state.includes('Cancelled');
+      });
+
+      if (failed.length > 0) {
+        throw new Error(`${failed.length} files failed to download from ${soulseekUser}`);
+      }
+
+      allComplete = completed.length >= files.length;
+      if (!allComplete) {
+        log('pipeline', 'info', `[job ${job.id}] Soulseek download progress: ${completed.length}/${files.length}`);
+      }
+    }
+
+    if (!allComplete) {
+      throw new Error(`Soulseek download timed out after ${getSlskDownloadTimeout() / 1000}s`);
+    }
+
+    // Step 3: Copy files from shared volume to staging
+    fs.mkdirSync(stagingDir, { recursive: true });
+    const downloadedFiles = [];
+
+    const userDir = path.join(getSlskdDownloadsDir(), soulseekUser);
+    if (!fs.existsSync(userDir)) {
+      throw new Error(`Soulseek downloads directory not found: ${userDir}`);
+    }
+
+    // Walk the user's download directory for audio files
+    const walkDir = (dir) => {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walkDir(fullPath);
+        } else if (downloader.isAudioFile(entry.name)) {
+          const safeName = path.basename(entry.name);
+          const destPath = path.join(stagingDir, downloader.sanitizePath(safeName));
+          fs.copyFileSync(fullPath, destPath);
+          downloadedFiles.push(destPath);
+        }
+      }
+    };
+    walkDir(userDir);
+
+    if (downloadedFiles.length === 0) {
+      throw new Error('No audio files found in Soulseek download');
+    }
+
+    log('pipeline', 'info', `[job ${job.id}] Copied ${downloadedFiles.length} files from Soulseek to staging`);
+
+    // Step 4: File validation (MIME + ffprobe + ClamAV)
+    for (const filePath of downloadedFiles) {
+      const validation = await fileValidator.validateFile(filePath);
+      if (!validation.passed) {
+        const failedChecks = validation.checks.filter(c => !c.passed && !c.skipped).map(c => c.name).join(', ');
+        throw new Error(`File validation failed for ${path.basename(filePath)}: ${failedChecks}`);
+      }
+    }
+    log('pipeline', 'info', `[job ${job.id}] All ${downloadedFiles.length} files passed validation`);
+
+    // Step 5: Download validation (MusicBrainz track matching)
+    const existingDir = path.join(getMusicDir(), downloader.sanitizePath(artist), downloader.sanitizePath(album));
+    let existingTrackCount;
+    try {
+      if (fs.existsSync(existingDir)) {
+        existingTrackCount = fs.readdirSync(existingDir).filter(f => downloader.isAudioFile(f)).length;
+      }
+    } catch { /* no existing files */ }
+
+    const validation = await downloadValidator.validate({
+      files: downloadedFiles,
+      mbid, rgid, artist, album, existingTrackCount,
+    });
+
+    log('pipeline', 'info', `[job ${job.id}] Validation: ${validation.confidence} confidence (score ${validation.score})`);
+
+    if (validation.confidence === 'low') {
+      throw new Error(`Download validation failed (score ${validation.score}): ${validation.details}`);
+    }
+
+    // Step 6: Move from staging to library
+    const destDir = path.join(getMusicDir(), downloader.sanitizePath(artist), downloader.sanitizePath(album));
+    fs.mkdirSync(destDir, { recursive: true });
+    for (const filePath of downloadedFiles) {
+      const destPath = path.join(destDir, path.basename(filePath));
+      fs.renameSync(filePath, destPath);
+    }
+
+    log('pipeline', 'success', `[job ${job.id}] ${artist} - ${album}: ${downloadedFiles.length} files from Soulseek (${validation.confidence} confidence)`);
+
+    return {
+      success: true,
+      source: 'soulseek',
+      artist, album,
+      files: downloadedFiles.length,
+      confidence: validation.confidence,
+      score: validation.score,
+      soulseekUser,
+    };
+  } finally {
+    // Cleanup staging
+    try { fs.rmSync(stagingDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+/**
  * Main job processor — dispatches by job type.
  * Registered with job-worker via setProcessor().
  */
@@ -217,6 +396,9 @@ async function process(job) {
   switch (job.type) {
     case 'download':
       return processDownload(job, payload);
+
+    case 'soulseek-download':
+      return processSoulseekDownload(job, payload);
 
     case 'upgrade':
       return processUpgrade(job, payload);
