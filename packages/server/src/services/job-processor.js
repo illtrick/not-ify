@@ -358,12 +358,14 @@ async function processSoulseekDownload(job, payload) {
     fs.mkdirSync(stagingDir, { recursive: true });
     const downloadedFiles = [];
 
-    const userDir = path.join(getSlskdDownloadsDir(), soulseekUser);
-    if (!fs.existsSync(userDir)) {
-      throw new Error(`Soulseek downloads directory not found: ${userDir}`);
+    // slskd stores downloads as {downloads_dir}/{remote_path}/ — not under a
+    // username subdirectory. Walk the entire downloads dir for audio files.
+    const dlBase = getSlskdDownloadsDir();
+    if (!fs.existsSync(dlBase)) {
+      throw new Error(`Soulseek downloads directory not found: ${dlBase}`);
     }
 
-    // Walk the user's download directory for audio files
+    // Walk the downloads directory for audio files
     const walkDir = (dir) => {
       const entries = fs.readdirSync(dir, { withFileTypes: true });
       for (const entry of entries) {
@@ -378,7 +380,7 @@ async function processSoulseekDownload(job, payload) {
         }
       }
     };
-    walkDir(userDir);
+    walkDir(dlBase);
 
     if (downloadedFiles.length === 0) {
       throw new Error('No audio files found in Soulseek download');
@@ -493,9 +495,15 @@ async function processSoulseekDownload(job, payload) {
   } finally {
     // Cleanup staging
     try { fs.rmSync(stagingDir, { recursive: true, force: true }); } catch {}
-    // Cleanup slskd downloads for this user (via shared bind mount)
-    const slskdUserDir = path.join(getSlskdDownloadsDir(), soulseekUser);
-    try { fs.rmSync(slskdUserDir, { recursive: true, force: true }); } catch {}
+    // Cleanup slskd downloads (via shared bind mount) — remove all contents
+    try {
+      const dlDir = getSlskdDownloadsDir();
+      if (fs.existsSync(dlDir)) {
+        for (const entry of fs.readdirSync(dlDir)) {
+          fs.rmSync(path.join(dlDir, entry), { recursive: true, force: true });
+        }
+      }
+    } catch {}
   }
 }
 
