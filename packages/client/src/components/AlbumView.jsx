@@ -383,6 +383,7 @@ export function AlbumView({
                   { label: 'Play', action: () => { const remaining = mbTracks.slice(i); playAllFromYouTube(remaining, artist, album, coverArt); } },
                   { label: 'Play Next', action: () => { setQueue(prev => [{ id: `yt-pending-${t.position}`, title: t.title, artist: t.artist || artist, trackArtist: t.artist, album, coverArt, isYtPreview: true, ytPending: true }, ...prev]); } },
                   { label: 'Add to Queue', action: () => { setQueue(prev => [...prev, { id: `yt-pending-${t.position}`, title: t.title, artist: t.artist || artist, trackArtist: t.artist, album, coverArt, isYtPreview: true, ytPending: true }]); } },
+                  ...(libTrack ? [{ divider: true }, { label: 'Remove Track', danger: true, action: () => removeTrackFromLibrary(libTrack.id) }] : []),
                 ]))}
               >
                 <span style={{ width: isMobile ? 28 : 32, textAlign: 'right', marginRight: isMobile ? 12 : 16, flexShrink: 0, fontSize: 14, color: isActive ? COLORS.accent : isPending ? COLORS.accent : isHovered ? COLORS.accent : COLORS.textSecondary, cursor: ytSearching ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
