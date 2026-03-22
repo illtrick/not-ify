@@ -17,9 +17,17 @@
 const { cleanSearchQuery } = require('./query-utils');
 
 const SLSKD_URL = process.env.SLSKD_URL || 'http://slskd:5030';
+const SLSKD_API_KEY = process.env.SLSKD_API_KEY || '';
 const SEARCH_TIMEOUT = 15000; // max time to wait for results
 const POLL_INTERVAL = 2000;
 const CASCADE_COOLDOWN = 1500; // ms between cascade attempts to avoid rate-limiting
+
+/** Build headers for slskd API requests (includes API key if configured). */
+function slskHeaders(extra = {}) {
+  const h = { ...extra };
+  if (SLSKD_API_KEY) h['X-API-Key'] = SLSKD_API_KEY;
+  return h;
+}
 
 /**
  * Search Soulseek for music files.
@@ -39,7 +47,7 @@ async function searchSoulseek(query, opts = {}) {
     // Start search
     const startRes = await fetch(`${SLSKD_URL}/api/v0/searches`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: slskHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ searchText: query }),
       signal: AbortSignal.timeout(5000),
     });
@@ -60,6 +68,7 @@ async function searchSoulseek(query, opts = {}) {
       await new Promise(r => setTimeout(r, POLL_INTERVAL));
 
       const pollRes = await fetch(`${SLSKD_URL}/api/v0/searches/${searchId}`, {
+        headers: slskHeaders(),
         signal: AbortSignal.timeout(5000),
       });
 
@@ -76,7 +85,7 @@ async function searchSoulseek(query, opts = {}) {
       try {
         await fetch(`${SLSKD_URL}/api/v0/searches/${searchId}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: slskHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ isComplete: true }),
           signal: AbortSignal.timeout(3000),
         });
@@ -89,6 +98,7 @@ async function searchSoulseek(query, opts = {}) {
     let responses = [];
     try {
       const respRes = await fetch(`${SLSKD_URL}/api/v0/searches/${searchId}/responses`, {
+        headers: slskHeaders(),
         signal: AbortSignal.timeout(5000),
       });
       if (respRes.ok) {
@@ -100,6 +110,7 @@ async function searchSoulseek(query, opts = {}) {
     try {
       await fetch(`${SLSKD_URL}/api/v0/searches/${searchId}`, {
         method: 'DELETE',
+        headers: slskHeaders(),
         signal: AbortSignal.timeout(3000),
       });
     } catch {}
@@ -133,6 +144,7 @@ async function searchSoulseek(query, opts = {}) {
 async function checkHealth() {
   try {
     const res = await fetch(`${SLSKD_URL}/api/v0/server`, {
+      headers: slskHeaders(),
       signal: AbortSignal.timeout(3000),
     });
     if (!res.ok) return false;
@@ -204,7 +216,7 @@ async function enqueueDownload(username, files) {
   try {
     const res = await fetch(`${SLSKD_URL}/api/v0/transfers/downloads/${encodeURIComponent(username)}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: slskHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(files),
       signal: AbortSignal.timeout(10000),
     });
@@ -229,7 +241,7 @@ async function pollDownloads(username) {
   try {
     const res = await fetch(
       `${SLSKD_URL}/api/v0/transfers/downloads/${encodeURIComponent(username)}`,
-      { signal: AbortSignal.timeout(5000) }
+      { headers: slskHeaders(), signal: AbortSignal.timeout(5000) }
     );
     if (!res.ok) return [];
     const data = await res.json();
@@ -249,6 +261,7 @@ async function pollDownloads(username) {
 async function getDownloadedFiles() {
   try {
     const res = await fetch(`${SLSKD_URL}/api/v0/files/downloads`, {
+      headers: slskHeaders(),
       signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) return [];
