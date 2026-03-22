@@ -558,6 +558,46 @@ export function getDiagnostics() {
   return get('/api/diagnostics');
 }
 
+// ---------------------------------------------------------------------------
+// Soulseek Config
+// ---------------------------------------------------------------------------
+
+export function getSlskStatus() {
+  return get('/api/soulseek/status');
+}
+
+export function saveSlskConfig(body) {
+  return post('/api/soulseek/config', body);
+}
+
+export function testSlskConnection() {
+  return post('/api/soulseek/test');
+}
+
+// ---------------------------------------------------------------------------
+// Library Config
+// ---------------------------------------------------------------------------
+
+export function getLibraryConfig() {
+  return get('/api/library-config');
+}
+
+export function saveLibraryConfig(body) {
+  return post('/api/library-config', body);
+}
+
+// ---------------------------------------------------------------------------
+// Server Admin
+// ---------------------------------------------------------------------------
+
+export function getActiveJobs() {
+  return get('/api/server/active-jobs');
+}
+
+export function restartServer() {
+  return post('/api/server/restart');
+}
+
 // Activity log — verbose download/pipeline events for debugging
 export function getActivityLog({ since, category, limit } = {}) {
   const params = new URLSearchParams();

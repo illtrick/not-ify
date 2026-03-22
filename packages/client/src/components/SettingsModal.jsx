@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { COLORS } from '../constants';
 import { Icon } from './Icon';
 import { importFromLastfm, switchVpnRegion } from '@not-ify/shared';
+import { FolderBrowser } from './FolderBrowser';
 
 function StatusDot({ status }) {
   const color = status === 'ok' ? COLORS.success : status === 'error' ? COLORS.error : COLORS.textSecondary;
@@ -26,11 +27,27 @@ export function SettingsModal({
   vpnRegions,
   syncStatus,
   onSyncNow,
+  slskConfig,
+  onSlskSave,
+  onSlskTest,
+  libraryConfig,
+  onLibrarySave,
+  serverActiveJobs,
+  onServerRestart,
 }) {
   const [rdToken, setRdToken] = useState('');
   const [vpnUser, setVpnUser] = useState('');
   const [vpnPass, setVpnPass] = useState('');
   const [vpnRegion, setVpnRegion] = useState('US East');
+
+  // Soulseek inputs
+  const [slskUrl, setSlskUrl] = useState('');
+  const [slskApiKey, setSlskApiKey] = useState('');
+
+  // Library / folder browser state
+  const [showFolderBrowser, setShowFolderBrowser] = useState(false);
+  const [pendingLibraryPath, setPendingLibraryPath] = useState(null);
+  const [libraryConfirmOpen, setLibraryConfirmOpen] = useState(false);
 
   // Last.fm library import state
   const [importDays, setImportDays] = useState(60);
@@ -419,6 +436,156 @@ export function SettingsModal({
                     )}
                   </>
                 )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Soulseek section — admin only */}
+        {isAdmin && slskConfig && (
+          <div style={{ ...sectionStyle, marginTop: 24 }}>
+            <div style={sectionHeaderStyle}>
+              <span style={sectionTitleStyle}>Soulseek</span>
+              <StatusDot status={slskConfig.status?.configured ? 'ok' : null} />
+            </div>
+            {slskConfig.status?.configured && slskConfig.status?.urlPreview && (
+              <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 8 }}>
+                URL: {slskConfig.status.urlPreview}
+              </div>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 8 }}>
+              <input
+                type="text"
+                placeholder="slskd URL (e.g. http://localhost:5030)"
+                value={slskUrl}
+                onChange={e => setSlskUrl(e.target.value)}
+                style={inputStyle}
+              />
+              <input
+                type="password"
+                placeholder={slskConfig.status?.configured ? 'Enter new API key to update' : 'API Key'}
+                value={slskApiKey}
+                onChange={e => setSlskApiKey(e.target.value)}
+                style={inputStyle}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <button
+                onClick={() => onSlskSave && onSlskSave(slskUrl, slskApiKey)}
+                disabled={slskConfig.saving || (!slskUrl && !slskApiKey)}
+                style={slskConfig.saving || (!slskUrl && !slskApiKey) ? buttonDisabledStyle : buttonPrimaryStyle}
+              >
+                {slskConfig.saving ? 'Saving...' : 'Save'}
+              </button>
+              <button
+                onClick={() => onSlskTest && onSlskTest()}
+                disabled={slskConfig.testing || !slskConfig.status?.configured}
+                style={slskConfig.testing || !slskConfig.status?.configured ? buttonDisabledStyle : buttonSecondaryStyle}
+              >
+                {slskConfig.testing ? 'Testing...' : 'Test Connection'}
+              </button>
+            </div>
+            {slskConfig.testResult && (
+              <div style={{ marginTop: 8, fontSize: 12, color: slskConfig.testResult.status === 'ok' ? COLORS.success : COLORS.error }}>
+                {slskConfig.testResult.status === 'ok'
+                  ? `Connected${slskConfig.testResult.version ? ` — slskd v${slskConfig.testResult.version}` : ''}${slskConfig.testResult.isConnected === false ? ' (Soulseek offline)' : ''}`
+                  : slskConfig.testResult.error}
+              </div>
+            )}
+            <div style={{ marginTop: 8, fontSize: 11, color: COLORS.textSecondary }}>
+              Requires restart to apply changes.
+            </div>
+          </div>
+        )}
+
+        {/* Music Library section — admin only */}
+        {isAdmin && libraryConfig && (
+          <div style={{ ...sectionStyle, marginTop: 24 }}>
+            <div style={sectionHeaderStyle}>
+              <span style={sectionTitleStyle}>Music Library</span>
+            </div>
+            <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 4 }}>
+              Current path:
+            </div>
+            <div style={{ fontSize: 13, color: COLORS.textPrimary, marginBottom: 4, wordBreak: 'break-all' }}>
+              {libraryConfig.musicDir}
+            </div>
+            <div style={{ fontSize: 11, color: COLORS.textSecondary, marginBottom: 10 }}>
+              Source:{' '}
+              {libraryConfig.source === 'db' ? 'saved setting'
+                : libraryConfig.source === 'env' ? 'environment variable'
+                : 'default'}
+            </div>
+            {libraryConfig.isDocker && (
+              <div style={{
+                padding: '8px 10px', borderRadius: 5, background: COLORS.hover,
+                fontSize: 11, color: COLORS.textSecondary, marginBottom: 10,
+              }}>
+                Running in Docker — make sure any new path is covered by a bind mount.
+              </div>
+            )}
+            {!showFolderBrowser && (
+              <button
+                onClick={() => setShowFolderBrowser(true)}
+                style={buttonSecondaryStyle}
+              >
+                Change Location
+              </button>
+            )}
+            {showFolderBrowser && (
+              <FolderBrowser
+                initialPath={libraryConfig.musicDir}
+                onCancel={() => setShowFolderBrowser(false)}
+                onSelect={(path) => {
+                  setShowFolderBrowser(false);
+                  setPendingLibraryPath(path);
+                  setLibraryConfirmOpen(true);
+                }}
+              />
+            )}
+            {libraryConfirmOpen && pendingLibraryPath && (
+              <div style={{
+                marginTop: 12, padding: '12px 14px', borderRadius: 6,
+                background: COLORS.hover, border: `1px solid ${COLORS.border}`,
+              }}>
+                <div style={{ fontSize: 13, color: COLORS.textPrimary, marginBottom: 6 }}>
+                  Change library path to:
+                </div>
+                <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 10, wordBreak: 'break-all' }}>
+                  {pendingLibraryPath}
+                </div>
+                {serverActiveJobs && serverActiveJobs.activeJobs > 0 && (
+                  <div style={{ fontSize: 12, color: COLORS.error, marginBottom: 8 }}>
+                    Warning: {serverActiveJobs.activeJobs} download{serverActiveJobs.activeJobs !== 1 ? 's' : ''} in progress
+                    {serverActiveJobs.types?.length > 0 ? ` (${serverActiveJobs.types.join(', ')})` : ''}.
+                    They will be re-queued on restart.
+                  </div>
+                )}
+                <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 10 }}>
+                  This requires a server restart to take effect.
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={async () => {
+                      setLibraryConfirmOpen(false);
+                      if (onLibrarySave) await onLibrarySave(pendingLibraryPath);
+                      if (onServerRestart) onServerRestart();
+                      setPendingLibraryPath(null);
+                    }}
+                    style={buttonPrimaryStyle}
+                  >
+                    Apply &amp; Restart
+                  </button>
+                  <button
+                    onClick={() => {
+                      setLibraryConfirmOpen(false);
+                      setPendingLibraryPath(null);
+                    }}
+                    style={buttonSecondaryStyle}
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             )}
           </div>

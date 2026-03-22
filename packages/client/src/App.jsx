@@ -205,6 +205,75 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
     if (isAdmin) api.getVpnRegions().then(setVpnRegions).catch(() => {});
   }, [isAdmin]);
 
+  // ── Soulseek config ────────────────────────────────────────────────────────
+  const slskConfig = useServiceConfig({
+    getStatus: api.getSlskStatus,
+    saveConfig: api.saveSlskConfig,
+    testConn: api.testSlskConnection,
+    enabled: isAdmin,
+  });
+
+  const handleSlskSave = useCallback(async (url, apiKey) => {
+    if (!url || !apiKey) return;
+    await slskConfig.save({ url, apiKey });
+  }, [slskConfig]);
+
+  const handleSlskTest = useCallback(() => {
+    slskConfig.test();
+  }, [slskConfig]);
+
+  // ── Library config ─────────────────────────────────────────────────────────
+  const [libraryConfig, setLibraryConfig] = useState(null);
+
+  const fetchLibraryConfig = useCallback(() => {
+    if (!isAdmin) return;
+    api.getLibraryConfig().then(setLibraryConfig).catch(() => {});
+  }, [isAdmin]);
+
+  useEffect(() => { fetchLibraryConfig(); }, [fetchLibraryConfig]);
+
+  const handleLibrarySave = useCallback(async (newPath) => {
+    await api.saveLibraryConfig({ musicDir: newPath });
+    fetchLibraryConfig();
+  }, [fetchLibraryConfig]);
+
+  // ── Server admin ───────────────────────────────────────────────────────────
+  const [serverActiveJobs, setServerActiveJobs] = useState(null);
+
+  const fetchActiveJobs = useCallback(() => {
+    api.getActiveJobs().then(setServerActiveJobs).catch(() => {});
+  }, []);
+
+  const handleServerRestart = useCallback(async () => {
+    try {
+      await api.restartServer();
+    } catch {
+      // Server exits immediately — connection error is expected
+    }
+    // Poll /api/health until server comes back, then reload
+    const start = Date.now();
+    const poll = setInterval(async () => {
+      if (Date.now() - start > 60000) {
+        clearInterval(poll);
+        return;
+      }
+      try {
+        const result = await api.checkHealth();
+        if (!result.error) {
+          clearInterval(poll);
+          window.location.reload();
+        }
+      } catch {
+        // still down
+      }
+    }, 2000);
+  }, []);
+
+  // Fetch active jobs when settings are opened
+  useEffect(() => {
+    if (showSettings && isAdmin) fetchActiveJobs();
+  }, [showSettings, isAdmin, fetchActiveJobs]);
+
   // ── Scrobble sync status polling ──────────────────────────────────────────
   const [syncStatus, setSyncStatus] = useState(null);
   useEffect(() => {
@@ -847,6 +916,13 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
         vpnRegions={vpnRegions}
         syncStatus={syncStatus}
         onSyncNow={handleSyncNow}
+        slskConfig={slskConfig}
+        onSlskSave={handleSlskSave}
+        onSlskTest={handleSlskTest}
+        libraryConfig={libraryConfig}
+        onLibrarySave={handleLibrarySave}
+        serverActiveJobs={serverActiveJobs}
+        onServerRestart={handleServerRestart}
       />
 
       <audio
