@@ -14,13 +14,38 @@ services:
       - ./packages/client/src:/app/packages/client/src
       - ./packages/client/public:/app/packages/client/public
       - ./packages/shared/src:/app/packages/shared/src
+      # Soulseek: read access to slskd downloads via shared bind mount
+      - ./slskd-downloads:/app/slskd-downloads:ro
     environment:
       - NODE_ENV=development
       - OLLAMA_URL=http://ollama:11434
       - LOG_LEVEL=debug
+      - SLSKD_DOWNLOADS_DIR=/app/slskd-downloads
+      - CLAM_ENABLED=true
+      - CLAM_HOST=clamav
+      - CLAM_PORT=3310
     depends_on:
       ollama:
         condition: service_healthy
+      clamav:
+        condition: service_healthy
+
+  clamav:
+    profiles: []  # override security profile to always-on in dev
+
+  slskd:
+    image: slskd/slskd:latest
+    ports:
+      - "5030:5030"
+      - "50300:50300"
+    volumes:
+      - slskd_data:/app
+      # Bind mount so downloads are accessible from host and not-ify
+      - ./slskd-downloads:/app/downloads
+      - ./music:/music:ro
+    environment:
+      - SLSKD_REMOTE_CONFIGURATION=true
+    restart: unless-stopped
 
   ollama:
     image: ollama/ollama:latest
@@ -41,3 +66,4 @@ services:
 
 volumes:
   ollama_data:
+  slskd_data:

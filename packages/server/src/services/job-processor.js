@@ -369,6 +369,24 @@ async function processSoulseekDownload(job, payload) {
       fs.renameSync(filePath, destPath);
     }
 
+    // Step 7: Write .metadata.json (matches torrent pipeline behavior)
+    const metadataPath = path.join(destDir, '.metadata.json');
+    try {
+      fs.writeFileSync(metadataPath, JSON.stringify({
+        mbid: mbid || null,
+        source: 'soulseek',
+        soulseekUser,
+        importedAt: new Date().toISOString(),
+      }));
+    } catch {}
+
+    // Step 8: Pre-warm cover art cache (fire-and-forget)
+    try {
+      fetch(`http://localhost:${globalThis.process.env.PORT || 3000}/api/cover/search?artist=${encodeURIComponent(artist)}&album=${encodeURIComponent(album)}`, {
+        signal: AbortSignal.timeout(10000),
+      }).catch(() => {});
+    } catch {}
+
     log('pipeline', 'success', `[job ${job.id}] ${artist} - ${album}: ${downloadedFiles.length} files from Soulseek (${validation.confidence} confidence)`);
 
     return {
@@ -383,6 +401,9 @@ async function processSoulseekDownload(job, payload) {
   } finally {
     // Cleanup staging
     try { fs.rmSync(stagingDir, { recursive: true, force: true }); } catch {}
+    // Cleanup slskd downloads for this user (via shared bind mount)
+    const slskdUserDir = path.join(getSlskdDownloadsDir(), soulseekUser);
+    try { fs.rmSync(slskdUserDir, { recursive: true, force: true }); } catch {}
   }
 }
 
