@@ -613,8 +613,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
   async function removeTrackFromLibrary(trackId) {
     try {
       await api.removeTrack(trackId);
-      const newLibrary = await api.getLibrary();
-      setLibrary(newLibrary);
+      await loadLibrary();
       // Update selected album's track list to reflect the deletion
       if (selectedAlbum && selectedAlbum.tracks) {
         setSelectedAlbum(prev => prev ? {
