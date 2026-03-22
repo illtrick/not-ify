@@ -21,7 +21,7 @@ function cleanFolderName(s) {
 }
 
 const router = express.Router();
-const MUSIC_DIR = process.env.MUSIC_DIR || '/app/music';
+const MUSIC_DIR = db.getGlobalSetting('musicDir') || process.env.MUSIC_DIR || '/app/music';
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.flac', '.ogg', '.m4a', '.aac', '.wav', '.opus']);
 
 // ---------------------------------------------------------------------------
