@@ -8,7 +8,13 @@ const AUDIO_EXT = new Set(['.mp3', '.flac', '.ogg', '.m4a', '.aac', '.wav', '.op
 
 const QUALITY_RANK = { flac: 6, '320': 5, v0: 4, '256': 3, '192': 2, '128': 1, unknown: 0 };
 
-function detectFileQuality(filePath) {
+/**
+ * Probe an audio file with ffprobe, returning quality tier and duration.
+ * Single ffprobe call extracts both codec/bitrate (for quality) and duration.
+ * @param {string} filePath
+ * @returns {{ quality: string, duration: number }} quality tier + duration in seconds
+ */
+function probeFile(filePath) {
   try {
     const out = execSync(
       `ffprobe -v quiet -print_format json -show_format "${filePath}"`,
@@ -17,17 +23,30 @@ function detectFileQuality(filePath) {
     const info = JSON.parse(out);
     const codec = info.format?.format_name || '';
     const bitrate = parseInt(info.format?.bit_rate || '0', 10);
+    const duration = parseFloat(info.format?.duration || '0');
 
-    if (codec.includes('flac')) return 'flac';
-    if (bitrate >= 310000) return '320';
-    if (bitrate >= 245000) return '256';
-    if (bitrate >= 220000) return 'v0';
-    if (bitrate >= 185000) return '192';
-    if (bitrate >= 120000) return '128';
-    return 'unknown';
+    let quality;
+    if (codec.includes('flac')) quality = 'flac';
+    else if (bitrate >= 310000) quality = '320';
+    else if (bitrate >= 245000) quality = '256';
+    else if (bitrate >= 220000) quality = 'v0';
+    else if (bitrate >= 185000) quality = '192';
+    else if (bitrate >= 120000) quality = '128';
+    else quality = 'unknown';
+
+    return { quality, duration };
   } catch {
-    return 'unknown';
+    return { quality: 'unknown', duration: 0 };
   }
+}
+
+/**
+ * Detect quality tier of an audio file (backward-compatible wrapper).
+ * @param {string} filePath
+ * @returns {string} quality tier
+ */
+function detectFileQuality(filePath) {
+  return probeFile(filePath).quality;
 }
 
 function getExistingQuality(artist, album) {
@@ -121,4 +140,4 @@ function albumExistsInLibrary(artist, album) {
   return false;
 }
 
-module.exports = { albumExistsInLibrary, normalize, QUALITY_RANK, getExistingQuality, isUpgrade };
+module.exports = { albumExistsInLibrary, normalize, QUALITY_RANK, getExistingQuality, isUpgrade, probeFile, detectFileQuality };

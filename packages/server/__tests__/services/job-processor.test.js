@@ -53,6 +53,15 @@ jest.mock('../../src/services/search', () => ({
   searchForUpgrade: (...a) => mockSearchForUpgrade(...a),
 }));
 
+const mockProbeFile = jest.fn();
+const mockGetExistingQuality = jest.fn();
+jest.mock('../../src/services/library-check', () => ({
+  probeFile: (...a) => mockProbeFile(...a),
+  isUpgrade: jest.requireActual('../../src/services/library-check').isUpgrade,
+  QUALITY_RANK: jest.requireActual('../../src/services/library-check').QUALITY_RANK,
+  getExistingQuality: (...a) => mockGetExistingQuality(...a),
+}));
+
 const mockJobQueueEnqueue = jest.fn().mockReturnValue(42);
 jest.mock('../../src/services/job-queue', () => ({
   enqueue: (...a) => mockJobQueueEnqueue(...a),
@@ -74,8 +83,11 @@ describe('job-processor', () => {
     fs.mkdirSync.mockReturnValue(undefined);
     fs.renameSync.mockReturnValue(undefined);
     fs.rmSync.mockReturnValue(undefined);
+    fs.unlinkSync.mockReturnValue(undefined);
     fs.existsSync.mockReturnValue(false);
     fs.readdirSync.mockReturnValue([]);
+    // Default: incoming files are flac quality
+    mockProbeFile.mockReturnValue({ quality: 'flac', duration: 240 });
   });
 
   test('processes download job end-to-end', async () => {
@@ -166,13 +178,19 @@ describe('job-processor', () => {
     // Mock fs to simulate files in shared volume
     fs.existsSync.mockReturnValue(true);
     fs.readdirSync.mockImplementation((dir, opts) => {
-      if (opts?.withFileTypes) {
+      // Downloads directory — has files with withFileTypes
+      if (dir && dir.includes('slskd-downloads') && opts?.withFileTypes) {
         return [
           { name: '01 One More Time.flac', isDirectory: () => false },
           { name: '02 Aerodynamic.flac', isDirectory: () => false },
         ];
       }
-      return ['01 One More Time.flac', '02 Aerodynamic.flac'];
+      // Dest directory for replaceTracksIfBetter — no existing tracks (fresh album)
+      if (dir && dir.includes('Daft Punk') && !dir.includes('slskd')) {
+        return [];
+      }
+      if (opts?.withFileTypes) return [];
+      return [];
     });
     fs.copyFileSync = jest.fn();
 
@@ -205,5 +223,210 @@ describe('job-processor', () => {
       expect.objectContaining({ soulseekUser: 'user1' }),
       expect.any(Object)
     );
+  });
+});
+
+describe('replaceTracksIfBetter (per-track upgrade)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    process.env.MUSIC_DIR = '/test/music';
+    fs.mkdirSync.mockReturnValue(undefined);
+    fs.renameSync.mockReturnValue(undefined);
+    fs.rmSync.mockReturnValue(undefined);
+    fs.unlinkSync.mockReturnValue(undefined);
+    fs.existsSync.mockReturnValue(false);
+    fs.readdirSync.mockReturnValue([]);
+  });
+
+  // Helper: set up a download job that reaches the replacement step
+  async function runDownloadToReplacement({ existingFiles, existingQualities, incomingFiles, incomingQualities, metadata }) {
+    const job = {
+      id: 100,
+      type: 'download',
+      payload: JSON.stringify({ magnetLink: 'magnet:?xt=urn:btih:test', artist: 'Test', album: 'Album' }),
+    };
+
+    mockAddMagnet.mockResolvedValue({ id: 'rd-test' });
+    mockGetTorrentInfo
+      .mockResolvedValueOnce({
+        status: 'waiting_files_selection',
+        files: incomingFiles.map((f, i) => ({ id: i + 1, path: f, bytes: 30000000 })),
+      })
+      .mockResolvedValueOnce({
+        status: 'downloaded',
+        links: incomingFiles.map((_, i) => `https://rd.io/f${i}`),
+      });
+    mockSelectAlbumFiles.mockReturnValue({ fileIds: incomingFiles.map((_, i) => i + 1), isDiscography: false });
+    mockSelectFiles.mockResolvedValue(undefined);
+
+    // Mock unrestrict + download for each incoming file
+    incomingFiles.forEach((f, i) => {
+      mockUnrestrictLink.mockResolvedValueOnce({ download: `https://dl.rd.io/f${i}`, filename: f });
+      mockDownloadFile.mockResolvedValueOnce(`/test/music/_staging/Test/Album/${f}`);
+    });
+
+    mockValidateFile.mockResolvedValue({ passed: true, checks: [] });
+    mockDownloadValidate.mockResolvedValue({ score: 0.05, confidence: 'high', details: 'ok' });
+
+    // Mock fs for replaceTracksIfBetter
+    fs.existsSync.mockImplementation((p) => {
+      if (p.includes('.metadata.json') && metadata) return true;
+      if (p.includes('_staging')) return true;
+      return existingFiles.length > 0;
+    });
+    fs.readFileSync.mockImplementation((p) => {
+      if (p.includes('.metadata.json') && metadata) return JSON.stringify(metadata);
+      return '';
+    });
+    fs.readdirSync.mockImplementation((dir) => {
+      // Destination dir — return existing files
+      if (dir.includes('Test') && dir.includes('Album') && !dir.includes('_staging')) {
+        return existingFiles;
+      }
+      return [];
+    });
+
+    // Mock probeFile to return different qualities for existing vs incoming
+    mockProbeFile.mockImplementation((filePath) => {
+      const basename = require('path').basename(filePath);
+      // Check if it's an existing file
+      const existIdx = existingFiles.indexOf(basename);
+      if (existIdx >= 0) {
+        return { quality: existingQualities[existIdx], duration: 240 + existIdx };
+      }
+      // It's an incoming file (in staging)
+      const inIdx = incomingFiles.indexOf(basename);
+      if (inIdx >= 0) {
+        return { quality: incomingQualities[inIdx], duration: 240 + inIdx };
+      }
+      return { quality: 'unknown', duration: 0 };
+    });
+
+    return processJob(job);
+  }
+
+  test('all upgrades — replaces all tracks when incoming is better', async () => {
+    const result = await runDownloadToReplacement({
+      existingFiles: ['01-Song A.mp3', '02-Song B.mp3', '03-Song C.mp3'],
+      existingQualities: ['128', '128', '128'],
+      incomingFiles: ['01 Song A.flac', '02 Song B.flac', '03 Song C.flac'],
+      incomingQualities: ['flac', 'flac', 'flac'],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.files).toBe(3);
+    expect(result.filesSkipped).toBe(0);
+    // Old files should be deleted
+    expect(fs.unlinkSync).toHaveBeenCalledTimes(3);
+  });
+
+  test('no upgrades — skips all when existing is better', async () => {
+    const result = await runDownloadToReplacement({
+      existingFiles: ['01-Song A.flac', '02-Song B.flac', '03-Song C.flac'],
+      existingQualities: ['flac', 'flac', 'flac'],
+      incomingFiles: ['01 Song A.mp3', '02 Song B.mp3', '03 Song C.mp3'],
+      incomingQualities: ['128', '128', '128'],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.files).toBe(0);
+    expect(result.filesSkipped).toBe(3);
+    // No old files should be deleted
+    expect(fs.unlinkSync).not.toHaveBeenCalled();
+  });
+
+  test('mixed quality — replaces only better tracks', async () => {
+    const result = await runDownloadToReplacement({
+      existingFiles: ['01-Song A.mp3', '02-Song B.flac', '03-Song C.mp3'],
+      existingQualities: ['128', 'flac', '256'],
+      incomingFiles: ['01 Song A.flac', '02 Song B.mp3', '03 Song C.flac'],
+      incomingQualities: ['flac', '320', 'flac'],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.files).toBe(2);      // tracks 01 and 03 upgraded
+    expect(result.filesSkipped).toBe(1); // track 02 skipped (320 < flac)
+  });
+
+  test('partial album — upgrades matching tracks, leaves others alone', async () => {
+    const result = await runDownloadToReplacement({
+      existingFiles: ['01-Song A.mp3', '02-Song B.mp3', '03-Song C.mp3'],
+      existingQualities: ['128', '128', '128'],
+      incomingFiles: ['01 Song A.flac', '02 Song B.flac'],
+      incomingQualities: ['flac', 'flac'],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.files).toBe(2);
+    // Track 03 should not be touched
+    expect(fs.unlinkSync).toHaveBeenCalledTimes(2);
+  });
+
+  test('excluded tracks — skips tracks in metadata excluded list', async () => {
+    const result = await runDownloadToReplacement({
+      existingFiles: ['01-Song A.mp3', '02-Song B.mp3'],
+      existingQualities: ['128', '128'],
+      incomingFiles: ['01 Song A.flac', '02 Song B.flac'],
+      incomingQualities: ['flac', 'flac'],
+      metadata: { excluded: ['01-Song A.mp3'] },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.files).toBe(1);      // only track 02
+    expect(fs.unlinkSync).toHaveBeenCalledTimes(1);
+  });
+
+  test('fresh album — moves all files with no quality checks', async () => {
+    const result = await runDownloadToReplacement({
+      existingFiles: [],
+      existingQualities: [],
+      incomingFiles: ['01 Song A.flac', '02 Song B.flac'],
+      incomingQualities: ['flac', 'flac'],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.files).toBe(2);
+    // No deletions (no existing files)
+    expect(fs.unlinkSync).not.toHaveBeenCalled();
+    // probeFile should not be called for quality comparison (fast path)
+    // (it may still be called for other purposes, but not for existing tracks)
+  });
+
+  test('title-based match — matches by normalized title when no track number in existing', async () => {
+    const result = await runDownloadToReplacement({
+      existingFiles: ['Better Give U Up.mp3', 'Skyline.mp3'],
+      existingQualities: ['256', '256'],
+      incomingFiles: ['03-Better Give U Up.flac', '04-Skyline.flac'],
+      incomingQualities: ['flac', 'flac'],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.files).toBe(2);
+    expect(fs.unlinkSync).toHaveBeenCalledTimes(2);
+  });
+
+  test('same quality — skips when incoming is not strictly better', async () => {
+    const result = await runDownloadToReplacement({
+      existingFiles: ['01-Song A.mp3'],
+      existingQualities: ['320'],
+      incomingFiles: ['01 Song A.mp3'],
+      incomingQualities: ['320'],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.files).toBe(0);
+    expect(result.filesSkipped).toBe(1);
+  });
+
+  test('unmatched incoming track — accepted as new', async () => {
+    const result = await runDownloadToReplacement({
+      existingFiles: ['01-Song A.mp3'],
+      existingQualities: ['128'],
+      incomingFiles: ['01 Song A.flac', '99 Bonus Track.flac'],
+      incomingQualities: ['flac', 'flac'],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.files).toBe(2); // both: track 01 upgraded + track 99 added as new
   });
 });

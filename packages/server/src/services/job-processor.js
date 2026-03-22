@@ -8,6 +8,7 @@ const fileValidator = require('./file-validator');
 const downloadValidator = require('./download-validator');
 const activityLog = require('./activity-log');
 const { enqueueDownload, pollDownloads } = require('./soulseek');
+const { probeFile, isUpgrade, QUALITY_RANK } = require('./library-check');
 
 // Read lazily so tests can set process.env before each test case
 // Use globalThis.process to avoid shadowing by the module's own process() function
@@ -53,6 +54,189 @@ async function pollRd(torrentId, targetStatus, timeoutMs) {
     await new Promise(r => setTimeout(r, POLL_INTERVAL));
   }
   throw new Error(`RD timeout waiting for ${targetStatus} (${timeoutMs}ms)`);
+}
+
+/**
+ * Extract a normalized title from a filename for matching.
+ * Strips track number prefix, extension, punctuation, and whitespace.
+ * E.g. "03-Better Give U Up.flac" → "bettergiveuup"
+ *      "Better Give U Up.mp3"     → "bettergiveuup"
+ */
+function extractTitle(filename) {
+  const base = path.basename(filename);
+  // Strip extension
+  const noExt = base.replace(/\.[^.]+$/, '');
+  // Strip leading track number + separator (01-, 01 , 01_, etc.)
+  const noTrackNum = noExt.replace(/^\d+[\s\-_]*/, '');
+  // Normalize: lowercase, remove non-alphanumeric
+  return noTrackNum.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Extract track number prefix from filename.
+ * Returns the leading digits as a string, or null if none.
+ * E.g. "01-Benzin.flac" → "01", "Benzin.mp3" → null
+ */
+function extractTrackNum(filename) {
+  const base = path.basename(filename);
+  const match = base.match(/^(\d+)/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Replace library tracks with incoming files only if they're better quality.
+ * Uses a matching cascade: track number → normalized title → duration proximity.
+ * Same logic for torrent and Soulseek sources.
+ *
+ * @param {Object} opts
+ * @param {string[]} opts.incomingFiles - Absolute paths to incoming audio files
+ * @param {string} opts.destDir - Library destination directory
+ * @param {number|string} opts.jobId - Job ID for logging
+ * @returns {{ upgraded: string[], skippedWorse: string[], skippedExcluded: string[], skippedUnmatched: string[] }}
+ */
+function replaceTracksIfBetter({ incomingFiles, destDir, jobId }) {
+  const upgraded = [];
+  const skippedWorse = [];
+  const skippedExcluded = [];
+  const skippedUnmatched = [];
+
+  // Load excluded list from .metadata.json
+  let excludedTrackNums = [];
+  let excludedTitles = [];
+  try {
+    const metaPath = path.join(destDir, '.metadata.json');
+    if (fs.existsSync(metaPath)) {
+      const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+      const excluded = meta.excluded || [];
+      excludedTrackNums = excluded.map(f => extractTrackNum(f)).filter(Boolean);
+      excludedTitles = excluded.map(f => extractTitle(f)).filter(Boolean);
+    }
+  } catch { /* no metadata */ }
+
+  // Build map of existing tracks in the destination directory
+  const existingTracks = [];
+  try {
+    const existingFiles = fs.readdirSync(destDir).filter(f => downloader.isAudioFile(f));
+    for (const file of existingFiles) {
+      const filePath = path.join(destDir, file);
+      const { quality, duration } = probeFile(filePath);
+      existingTracks.push({
+        path: filePath,
+        filename: file,
+        trackNum: extractTrackNum(file),
+        normalizedTitle: extractTitle(file),
+        quality,
+        duration,
+      });
+    }
+  } catch { /* directory may not exist yet — fresh album */ }
+
+  // Fast path: no existing tracks → move everything (skip quality checks)
+  if (existingTracks.length === 0) {
+    for (const filePath of incomingFiles) {
+      const basename = path.basename(filePath);
+      const trackNum = extractTrackNum(basename);
+      const normTitle = extractTitle(basename);
+
+      // Still respect excluded list
+      if ((trackNum && excludedTrackNums.includes(trackNum)) ||
+          (normTitle && excludedTitles.includes(normTitle))) {
+        log('pipeline', 'info', `[job ${jobId}] Track ${trackNum || '??'}: skipped-excluded — ${basename}`);
+        skippedExcluded.push(basename);
+        continue;
+      }
+
+      const destPath = path.join(destDir, basename);
+      fs.renameSync(filePath, destPath);
+      upgraded.push(basename);
+      log('pipeline', 'info', `[job ${jobId}] Track ${trackNum || '??'}: added (new) — ${basename}`);
+    }
+    return { upgraded, skippedWorse, skippedExcluded, skippedUnmatched };
+  }
+
+  // Process each incoming file
+  for (const filePath of incomingFiles) {
+    const basename = path.basename(filePath);
+    const incomingTrackNum = extractTrackNum(basename);
+    const incomingTitle = extractTitle(basename);
+
+    // Check excluded list
+    if ((incomingTrackNum && excludedTrackNums.includes(incomingTrackNum)) ||
+        (incomingTitle && excludedTitles.includes(incomingTitle))) {
+      log('pipeline', 'info', `[job ${jobId}] Track ${incomingTrackNum || '??'}: skipped-excluded — ${basename}`);
+      skippedExcluded.push(basename);
+      continue;
+    }
+
+    // Match cascade: track number + title → track number alone → title alone → duration
+    let matched = null;
+
+    // 1. Track number match — prefer match where title also agrees
+    if (incomingTrackNum) {
+      const trackNumMatches = existingTracks.filter(t => t.trackNum && t.trackNum === incomingTrackNum);
+      if (trackNumMatches.length === 1) {
+        matched = trackNumMatches[0];
+      } else if (trackNumMatches.length > 1 && incomingTitle) {
+        // Multiple files with same track number (compilation/merged albums)
+        // Use title to disambiguate
+        const withTitle = trackNumMatches.find(t => t.normalizedTitle === incomingTitle);
+        matched = withTitle || trackNumMatches[0]; // fall back to first if no title match
+      }
+    }
+
+    // 2. Normalized title match (if track number didn't match or wasn't present)
+    if (!matched && incomingTitle) {
+      const titleMatches = existingTracks.filter(t => t.normalizedTitle === incomingTitle);
+      if (titleMatches.length === 1) {
+        matched = titleMatches[0];
+      } else if (titleMatches.length > 1) {
+        // Ambiguous title (e.g. remix album with multiple "Eyesdown" tracks)
+        // Use duration proximity as tiebreaker
+        const { duration: incomingDuration } = probeFile(filePath);
+        if (incomingDuration > 0) {
+          const withDeltas = titleMatches.map(t => ({
+            ...t,
+            delta: Math.abs(t.duration - incomingDuration),
+          }));
+          withDeltas.sort((a, b) => a.delta - b.delta);
+          // Accept if closest match is within 5 seconds
+          if (withDeltas[0].delta <= 5) {
+            matched = withDeltas[0];
+          }
+        }
+      }
+    }
+
+    if (!matched) {
+      // No match — accept as new track
+      const destPath = path.join(destDir, basename);
+      fs.renameSync(filePath, destPath);
+      upgraded.push(basename);
+      log('pipeline', 'info', `[job ${jobId}] Track ${incomingTrackNum || '??'}: added (new) — ${basename}`);
+      continue;
+    }
+
+    // Probe incoming file for quality comparison
+    const { quality: incomingQuality } = probeFile(filePath);
+
+    if (isUpgrade(matched.quality, incomingQuality)) {
+      // Better quality — replace
+      try { fs.unlinkSync(matched.path); } catch { /* already gone */ }
+      const destPath = path.join(destDir, basename);
+      fs.renameSync(filePath, destPath);
+      upgraded.push(basename);
+      log('pipeline', 'info', `[job ${jobId}] Track ${incomingTrackNum || '??'}: upgraded (${matched.quality} → ${incomingQuality}) — ${basename}`);
+
+      // Remove from existingTracks so it can't match again
+      const idx = existingTracks.indexOf(matched);
+      if (idx >= 0) existingTracks.splice(idx, 1);
+    } else {
+      skippedWorse.push(basename);
+      log('pipeline', 'info', `[job ${jobId}] Track ${incomingTrackNum || '??'}: skipped-worse (${incomingQuality} vs existing ${matched.quality}) — ${basename}`);
+    }
+  }
+
+  return { upgraded, skippedWorse, skippedExcluded, skippedUnmatched };
 }
 
 /**
@@ -167,62 +351,20 @@ async function processDownload(job, payload) {
       throw new Error(`Download validation failed (score ${validation.score}): ${validation.details}`);
     }
 
-    // Move files from staging to library, removing superseded lower-quality versions
+    // Move files from staging to library — per-track quality comparison
     const destDir = path.join(getMusicDir(), downloader.sanitizePath(artist), downloader.sanitizePath(album));
     fs.mkdirSync(destDir, { recursive: true });
 
-    // Load excluded list — tracks the user manually deleted (should not be re-added)
-    let excludedTracks = [];
-    try {
-      const metaPath = path.join(destDir, '.metadata.json');
-      if (fs.existsSync(metaPath)) {
-        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
-        excludedTracks = (meta.excluded || []).map(f => f.match(/^(\d+)/)?.[1]).filter(Boolean);
-      }
-    } catch { /* no metadata */ }
+    const result = replaceTracksIfBetter({ incomingFiles: downloadedFiles, destDir, jobId: job.id });
 
-    // Filter out excluded tracks (by track number prefix)
-    const filteredFiles = downloadedFiles.filter(f => {
-      const trackNum = path.basename(f).match(/^(\d+)/)?.[1];
-      if (trackNum && excludedTracks.includes(trackNum)) {
-        log('pipeline', 'info', `[job ${job.id}] Skipped excluded track: ${path.basename(f)}`);
-        return false;
-      }
-      return true;
-    });
-
-    // Remove existing files that share a track number prefix with an incoming file
-    // e.g. incoming "01 Armee der Tristen.flac" supersedes "01-Armee Der Tristen.mp3"
-    try {
-      const existing = fs.readdirSync(destDir).filter(f => downloader.isAudioFile(f));
-      for (const oldFile of existing) {
-        const oldTrackNum = oldFile.match(/^(\d+)/)?.[1];
-        if (!oldTrackNum) continue;
-        const superseded = filteredFiles.some(f => {
-          const newName = path.basename(f);
-          return newName.match(/^(\d+)/)?.[1] === oldTrackNum;
-        });
-        if (superseded) {
-          const oldPath = path.join(destDir, oldFile);
-          fs.unlinkSync(oldPath);
-          log('pipeline', 'info', `[job ${job.id}] Removed superseded: ${oldFile}`);
-        }
-      }
-    } catch { /* directory may not exist yet */ }
-
-    for (const filePath of filteredFiles) {
-      const destPath = path.join(destDir, path.basename(filePath));
-      fs.renameSync(filePath, destPath);
-    }
-
-    const skippedCount = downloadedFiles.length - filteredFiles.length;
-    log('pipeline', 'success', `[job ${job.id}] ${artist} - ${album}: ${filteredFiles.length} files replaced${skippedCount ? ` (${skippedCount} excluded)` : ''} (${validation.confidence} confidence, ${upgradeFrom ? upgradeFrom + ' → ' : ''}upgraded)`);
+    log('pipeline', 'success', `[job ${job.id}] ${artist} - ${album}: ${result.upgraded.length} upgraded, ${result.skippedWorse.length} skipped (worse), ${result.skippedExcluded.length} excluded (${validation.confidence} confidence${upgradeFrom ? ', ' + upgradeFrom + ' → upgraded' : ''})`);
 
     return {
       success: true,
       artist,
       album,
-      files: filteredFiles.length,
+      files: result.upgraded.length,
+      filesSkipped: result.skippedWorse.length,
       confidence: validation.confidence,
       score: validation.score,
     };
@@ -418,50 +560,11 @@ async function processSoulseekDownload(job, payload) {
       throw new Error(`Download validation failed (score ${validation.score}): ${validation.details}`);
     }
 
-    // Step 6: Move from staging to library, removing superseded lower-quality versions
+    // Step 6: Move from staging to library — per-track quality comparison
     const destDir = path.join(getMusicDir(), downloader.sanitizePath(artist), downloader.sanitizePath(album));
     fs.mkdirSync(destDir, { recursive: true });
 
-    // Load excluded list — tracks the user manually deleted
-    let slskExcluded = [];
-    try {
-      const metaPath = path.join(destDir, '.metadata.json');
-      if (fs.existsSync(metaPath)) {
-        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
-        slskExcluded = (meta.excluded || []).map(f => f.match(/^(\d+)/)?.[1]).filter(Boolean);
-      }
-    } catch { /* no metadata */ }
-
-    const slskFilteredFiles = downloadedFiles.filter(f => {
-      const trackNum = path.basename(f).match(/^(\d+)/)?.[1];
-      if (trackNum && slskExcluded.includes(trackNum)) {
-        log('pipeline', 'info', `[job ${job.id}] Skipped excluded track: ${path.basename(f)}`);
-        return false;
-      }
-      return true;
-    });
-
-    // Remove existing files that share a track number prefix with an incoming file
-    try {
-      const existing = fs.readdirSync(destDir).filter(f => downloader.isAudioFile(f));
-      for (const oldFile of existing) {
-        const oldTrackNum = oldFile.match(/^(\d+)/)?.[1];
-        if (!oldTrackNum) continue;
-        const superseded = slskFilteredFiles.some(f => {
-          const newName = path.basename(f);
-          return newName.match(/^(\d+)/)?.[1] === oldTrackNum;
-        });
-        if (superseded) {
-          fs.unlinkSync(path.join(destDir, oldFile));
-          log('pipeline', 'info', `[job ${job.id}] Removed superseded: ${oldFile}`);
-        }
-      }
-    } catch { /* directory may not exist yet */ }
-
-    for (const filePath of slskFilteredFiles) {
-      const destPath = path.join(destDir, path.basename(filePath));
-      fs.renameSync(filePath, destPath);
-    }
+    const result = replaceTracksIfBetter({ incomingFiles: downloadedFiles, destDir, jobId: job.id });
 
     // Step 7: Write .metadata.json (matches torrent pipeline behavior)
     const metadataPath = path.join(destDir, '.metadata.json');
@@ -481,13 +584,14 @@ async function processSoulseekDownload(job, payload) {
       }).catch(() => {});
     } catch {}
 
-    log('pipeline', 'success', `[job ${job.id}] ${artist} - ${album}: ${downloadedFiles.length} files from Soulseek (${validation.confidence} confidence)`);
+    log('pipeline', 'success', `[job ${job.id}] ${artist} - ${album}: ${result.upgraded.length} upgraded, ${result.skippedWorse.length} skipped (worse), ${result.skippedExcluded.length} excluded from Soulseek (${validation.confidence} confidence)`);
 
     return {
       success: true,
       source: 'soulseek',
       artist, album,
-      files: downloadedFiles.length,
+      files: result.upgraded.length,
+      filesSkipped: result.skippedWorse.length,
       confidence: validation.confidence,
       score: validation.score,
       soulseekUser,
