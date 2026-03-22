@@ -451,6 +451,10 @@ app.use('/api/soulseek', adminGuard, soulseekConfigRouter);
 const vpnConfigRouter = require('./api/vpn-config');
 app.use('/api/vpn', adminGuard, vpnConfigRouter);
 
+// Server admin API (admin only) — active-jobs check + restart
+const serverAdminRouter = require('./api/server-admin');
+app.use('/api/server', adminGuard, serverAdminRouter);
+
 // Activity log API — verbose download/pipeline event stream for debugging UI
 const activityLog = require('./services/activity-log');
 app.get('/api/activity', (req, res) => {
