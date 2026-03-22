@@ -256,7 +256,7 @@ function StatusTab() {
   );
 }
 
-export function ActivityLog({ open, onClose }) {
+export function ActivityLog({ open, onClose, onUpgradeComplete }) {
   const [entries, setEntries] = useState([]);
   const [filter, setFilter] = useState('all');
   const [tab, setTab] = useState('log'); // log, status
@@ -291,6 +291,10 @@ export function ActivityLog({ open, onClose }) {
             const next = [...prev, entry];
             return next.length > 200 ? next.slice(-200) : next;
           });
+        }
+        // Trigger library refresh when an upgrade job completes successfully
+        if (entry.category === 'upgrade' && entry.level === 'success') {
+          onUpgradeComplete?.();
         }
       } catch {}
     }

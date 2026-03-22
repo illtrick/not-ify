@@ -237,6 +237,31 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
     fetchLibraryConfig();
   }, [fetchLibraryConfig]);
 
+  // ── Persistent SSE listener for upgrade completions ────────────────────────
+  // Runs independently of the activity log panel — refreshes library when
+  // background upgrades complete so format badges update in real time.
+  useEffect(() => {
+    const url = api.getActivityStreamUrl();
+    let es;
+    function connect() {
+      es = new EventSource(url);
+      es.onmessage = (event) => {
+        try {
+          const entry = JSON.parse(event.data);
+          if (entry.category === 'upgrade' && entry.level === 'success') {
+            loadLibrary?.();
+          }
+        } catch {}
+      };
+      es.onerror = () => {
+        es.close();
+        setTimeout(connect, 5000);
+      };
+    }
+    connect();
+    return () => { if (es) es.close(); };
+  }, [loadLibrary]);
+
   // ── Server admin ───────────────────────────────────────────────────────────
   const handleServerRestart = useCallback(async () => {
     try {
@@ -865,7 +890,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
         </main>
       </div>
 
-      <ActivityLog open={showActivityLog} onClose={() => setShowActivityLog(false)} />
+      <ActivityLog open={showActivityLog} onClose={() => setShowActivityLog(false)} onUpgradeComplete={loadLibrary} />
 
       <PlayerBar
         currentTrack={currentTrack} currentAlbumInfo={currentAlbumInfo} currentCoverArt={currentCoverArt}
