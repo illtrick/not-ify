@@ -232,7 +232,10 @@ async function pollDownloads(username) {
       { signal: AbortSignal.timeout(5000) }
     );
     if (!res.ok) return [];
-    return await res.json();
+    const data = await res.json();
+    // Per-user endpoint returns a single object {username, directories},
+    // not an array. Normalize to array for consistent iteration.
+    return Array.isArray(data) ? data : [data];
   } catch {
     return [];
   }

@@ -255,7 +255,7 @@ async function processUpgrade(job, payload) {
     return { skipped: true, reason: 'no upgrade source found' };
   }
 
-  log('pipeline', 'info', `[job ${job.id}] Found upgrade: ${result.name} (score ${result.score?.toFixed(3)}, ${result.seeders} seeders)`);
+  log('pipeline', 'info', `[job ${job.id}] Found upgrade: ${result.name} (score ${result.score?.toFixed(3)}${result.seeders != null ? `, ${result.seeders} seeders` : ''})`);
 
   const jobQueue = require('./job-queue');
 

@@ -339,14 +339,23 @@ function pickBestSoulseekUser(responses, artist, album) {
         if (!dirs.has(dir)) dirs.set(dir, []);
         dirs.get(dir).push(f);
       }
-      // Find best directory (most audio files, prefer FLAC)
+      // Find best directory: prefer dirs whose path contains the album name,
+      // then pick the one with the most audio files (capped at 30 to avoid
+      // grabbing entire discographies).
+      const normAlbum = album.toLowerCase().replace(/[^a-z0-9]/g, '');
       let bestDir = null;
       let bestDirFiles = [];
+      let bestDirMatchesAlbum = false;
       for (const [dir, files] of dirs) {
         const audioFiles = files.filter(f => /\.(flac|mp3|wav|ogg|m4a|aac|alac|wma|opus|ape|wv)$/i.test(f.filename));
-        if (audioFiles.length > bestDirFiles.length) {
-          bestDir = dir;
-          bestDirFiles = audioFiles;
+        if (audioFiles.length < 3 || audioFiles.length > 30) continue; // skip tiny or discography-sized dirs
+        const normDir = dir.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const dirMatchesAlbum = normDir.includes(normAlbum);
+        // Prefer album-matching dirs; among same-match level, prefer more files
+        if (dirMatchesAlbum && !bestDirMatchesAlbum) {
+          bestDir = dir; bestDirFiles = audioFiles; bestDirMatchesAlbum = true;
+        } else if (dirMatchesAlbum === bestDirMatchesAlbum && audioFiles.length > bestDirFiles.length) {
+          bestDir = dir; bestDirFiles = audioFiles; bestDirMatchesAlbum = dirMatchesAlbum;
         }
       }
       const flacCount = bestDirFiles.filter(f => /\.flac$/i.test(f.filename)).length;
