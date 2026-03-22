@@ -279,11 +279,8 @@ export function ActivityLog({ open, onClose }) {
     let historicalLoaded = false;
 
     const url = api.getActivityStreamUrl();
-    const es = new EventSource(url);
-    eventSourceRef.current = es;
-    trackSseOpen('activity');
 
-    es.onmessage = (event) => {
+    function handleMessage(event) {
       trackSseEvent('activity');
       try {
         const entry = JSON.parse(event.data);
@@ -296,25 +293,26 @@ export function ActivityLog({ open, onClose }) {
           });
         }
       } catch {}
-    };
+    }
 
-    // Reconnect on SSE error (network drop, server restart)
-    es.onerror = () => {
-      trackSseClose('activity');
-      es.close();
-      // Retry after 3 seconds
-      const retryTimer = setTimeout(() => {
-        if (!eventSourceRef.current || eventSourceRef.current === es) {
-          const newEs = new EventSource(url);
-          eventSourceRef.current = newEs;
-          trackSseOpen('activity');
-          newEs.onmessage = es.onmessage;
-          newEs.onerror = es.onerror;
-        }
-      }, 3000);
-      // Clean up retry timer on unmount
-      es._retryTimer = retryTimer;
-    };
+    function connectSse() {
+      const es = new EventSource(url);
+      eventSourceRef.current = es;
+      trackSseOpen('activity');
+      es.onmessage = handleMessage;
+      es.onerror = () => {
+        trackSseClose('activity');
+        es.close();
+        // Retry after 3 seconds — creates a fresh EventSource
+        setTimeout(() => {
+          if (eventSourceRef.current === es || !eventSourceRef.current) {
+            connectSse();
+          }
+        }, 3000);
+      };
+    }
+
+    connectSse();
 
     // Fetch historical entries, then flush any buffered SSE events
     api.getActivityLog({ limit: 100 }).then(historical => {
