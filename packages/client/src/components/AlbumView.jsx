@@ -85,7 +85,7 @@ export function AlbumView({
   const libraryFormatMap = React.useMemo(() => {
     const map = new Map();
     if (library) {
-      library.filter(t => t.artist === artist || t.album === album).forEach(t => {
+      library.filter(t => t.artist === artist && t.album === album).forEach(t => {
         map.set(t.id, t.format);
         // Also map by title for MB track matching
         const key = `${(t.title || '').toLowerCase()}`;
@@ -317,10 +317,7 @@ export function AlbumView({
           </div>
           {pl.map((track, idx) => {
             const isActive = currentTrack?.id === track.id
-              || (currentTrack?.isYtPreview && (
-                currentTrack?.title === track.title
-                || currentTrack?.title?.toLowerCase() === track.title?.toLowerCase()
-              ));
+              || (currentTrack?.isYtPreview && currentTrack?.title === track.title);
             const isHovered = hoveredTrack === track.id;
             const trackArtist = track.artist || artist;
             return (
@@ -351,7 +348,7 @@ export function AlbumView({
                   </div>
                 </div>
                 {!isMobile && <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-                  <QualityBadge format={track.format || (isActive ? (currentTrack?.format || 'mp3') : undefined)} />
+                  <QualityBadge format={track.format} />
                 </span>}
                 {!isMobile && (
                   <span style={{ width: 50, textAlign: 'right', fontSize: 12, color: COLORS.textSecondary, flexShrink: 0, marginLeft: 12 }}>
