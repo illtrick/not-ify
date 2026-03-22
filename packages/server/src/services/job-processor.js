@@ -1,5 +1,20 @@
 'use strict';
 
+// ─── Pipeline Architecture ─────────────────────────────────────────────────
+// Three download paths share the same post-download logic:
+//
+//   1. processDownload()       — Torrent via Real-Debrid (magnet → RD → download → validate → replace)
+//   2. processSoulseekDownload() — Soulseek via slskd (enqueue → poll → copy → validate → replace)
+//   3. youtube.js:ytQueueProcess() — YouTube via yt-dlp (see api/youtube.js)
+//
+// All three use replaceTracksIfBetter() for per-track quality comparison.
+// Changes to post-download logic (validation, library move, badge refresh,
+// metadata, cleanup) must be applied to ALL paths.
+//
+// The client refreshes library/badges via SSE — see App.jsx SSE listener
+// which watches for 'upgrade' and 'pipeline' events with 'upgraded' in message.
+// ────────────────────────────────────────────────────────────────────────────
+
 const fs = require('fs');
 const path = require('path');
 const rd = require('./realdebrid');

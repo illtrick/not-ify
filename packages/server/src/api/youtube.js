@@ -47,6 +47,9 @@ router.get('/sc/search', async (req, res) => {
 
 // ---------------------------------------------------------------------------
 // YT download queue system — processes sequentially, accepts multiple requests
+// PIPELINE NOTE: This is one of three download paths. See job-processor.js header
+// for the full list. Post-download logic (validation, library move, badge refresh)
+// must stay consistent across all paths. Badge refresh happens via SSE → client.
 // ---------------------------------------------------------------------------
 const ytQueue = [];       // [{id, url, title, artist, album, coverArt, status, progress, error}]
 let ytQueueProcessing = false;
