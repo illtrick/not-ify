@@ -213,9 +213,9 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
     enabled: isAdmin,
   });
 
-  const handleSlskSave = useCallback(async (url, apiKey) => {
-    if (!url || !apiKey) return;
-    await slskConfig.save({ url, apiKey });
+  const handleSlskSave = useCallback(async (username, password) => {
+    if (!username || !password) return;
+    await slskConfig.save({ username, password });
   }, [slskConfig]);
 
   const handleSlskTest = useCallback(() => {

@@ -40,8 +40,8 @@ export function SettingsModal({
   const [vpnRegion, setVpnRegion] = useState('US East');
 
   // Soulseek inputs
-  const [slskUrl, setSlskUrl] = useState('');
-  const [slskApiKey, setSlskApiKey] = useState('');
+  const [slskUsername, setSlskUsername] = useState('');
+  const [slskPassword, setSlskPassword] = useState('');
 
   // Library / folder browser state
   const [showFolderBrowser, setShowFolderBrowser] = useState(false);
@@ -530,41 +530,42 @@ export function SettingsModal({
           <div style={{ ...sectionStyle, marginTop: 24 }}>
             <div style={sectionHeaderStyle}>
               <span style={sectionTitleStyle}>Soulseek</span>
-              <StatusDot status={slskConfig.status?.configured ? 'ok' : null} />
+              <StatusDot status={slskConfig.status?.connected ? 'ok' : slskConfig.status?.configured ? 'error' : null} />
             </div>
-            {slskConfig.status?.configured && slskConfig.status?.urlPreview && (
+            {slskConfig.status?.configured && (
               <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 8 }}>
-                URL: {slskConfig.status.urlPreview}
+                Logged in as <strong style={{ color: COLORS.textPrimary }}>{slskConfig.status.username}</strong>
+                {slskConfig.status.state && <span> — {slskConfig.status.state}</span>}
               </div>
             )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 8 }}>
               <input
                 type="text"
-                placeholder="slskd URL (e.g. http://localhost:5030)"
-                value={slskUrl}
-                onChange={e => setSlskUrl(e.target.value)}
+                placeholder="Soulseek username"
+                value={slskUsername}
+                onChange={e => setSlskUsername(e.target.value)}
                 style={inputStyle}
               />
               <input
                 type="password"
-                placeholder={slskConfig.status?.configured ? 'Enter new API key to update' : 'API Key'}
-                value={slskApiKey}
-                onChange={e => setSlskApiKey(e.target.value)}
+                placeholder={slskConfig.status?.configured ? 'Enter new password to update' : 'Soulseek password'}
+                value={slskPassword}
+                onChange={e => setSlskPassword(e.target.value)}
                 style={inputStyle}
               />
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <button
-                onClick={() => onSlskSave && onSlskSave(slskUrl, slskApiKey)}
-                disabled={slskConfig.saving || (!slskUrl && !slskApiKey)}
-                style={slskConfig.saving || (!slskUrl && !slskApiKey) ? buttonDisabledStyle : buttonPrimaryStyle}
+                onClick={() => onSlskSave && onSlskSave(slskUsername, slskPassword)}
+                disabled={slskConfig.saving || (!slskUsername && !slskPassword)}
+                style={slskConfig.saving || (!slskUsername && !slskPassword) ? buttonDisabledStyle : buttonPrimaryStyle}
               >
                 {slskConfig.saving ? 'Saving...' : 'Save'}
               </button>
               <button
                 onClick={() => onSlskTest && onSlskTest()}
-                disabled={slskConfig.testing || !slskConfig.status?.configured}
-                style={slskConfig.testing || !slskConfig.status?.configured ? buttonDisabledStyle : buttonSecondaryStyle}
+                disabled={slskConfig.testing}
+                style={slskConfig.testing ? buttonDisabledStyle : buttonSecondaryStyle}
               >
                 {slskConfig.testing ? 'Testing...' : 'Test Connection'}
               </button>
@@ -572,13 +573,10 @@ export function SettingsModal({
             {slskConfig.testResult && (
               <div style={{ marginTop: 8, fontSize: 12, color: slskConfig.testResult.status === 'ok' ? COLORS.success : COLORS.error }}>
                 {slskConfig.testResult.status === 'ok'
-                  ? `Connected${slskConfig.testResult.version ? ` — slskd v${slskConfig.testResult.version}` : ''}${slskConfig.testResult.isConnected === false ? ' (Soulseek offline)' : ''}`
+                  ? `Connected as ${slskConfig.testResult.username || 'unknown'}${slskConfig.testResult.version ? ` — slskd v${slskConfig.testResult.version}` : ''}`
                   : slskConfig.testResult.error}
               </div>
             )}
-            <div style={{ marginTop: 8, fontSize: 11, color: COLORS.textSecondary }}>
-              Requires restart to apply changes.
-            </div>
           </div>
         )}
 

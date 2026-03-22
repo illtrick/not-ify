@@ -2,37 +2,79 @@ const express = require('express');
 const router = express.Router();
 const db = require('../services/db');
 
-// GET /api/soulseek/status
-router.get('/status', (req, res) => {
+// slskd connection details (infrastructure, not user-facing)
+function getSlskdUrl() {
   const config = db.getGlobalSetting('soulseekConfig');
-  const url = config?.url || null;
-  const apiKey = config?.apiKey || null;
+  return config?.slskdUrl || process.env.SLSKD_URL || 'http://slskd:5030';
+}
+function getSlskdApiKey() {
+  const config = db.getGlobalSetting('soulseekConfig');
+  return config?.slskdApiKey || process.env.SLSKD_API_KEY || '';
+}
+
+// GET /api/soulseek/status — return Soulseek login state
+router.get('/status', async (req, res) => {
+  const config = db.getGlobalSetting('soulseekConfig');
+  const username = config?.username || null;
+
+  // Try to get live status from slskd
+  let connected = false;
+  let state = null;
+  try {
+    const response = await fetch(`${getSlskdUrl()}/api/v0/application`, {
+      headers: { 'X-API-Key': getSlskdApiKey() },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (response.ok) {
+      const data = await response.json();
+      connected = data.server?.isConnected || false;
+      state = data.server?.state || null;
+    }
+  } catch { /* slskd unavailable */ }
+
   res.json({
-    configured: !!(url && apiKey),
-    urlPreview: url ? url : null,
-    connected: false, // static; test endpoint does live check
+    configured: !!username,
+    username,
+    connected,
+    state,
   });
 });
 
-// POST /api/soulseek/config — save url + apiKey
-router.post('/config', (req, res) => {
-  const { url, apiKey } = req.body;
-  if (!url || !apiKey) return res.status(400).json({ error: 'Missing url or apiKey' });
-  db.setGlobalSetting('soulseekConfig', { url, apiKey });
-  res.json({ saved: true });
+// POST /api/soulseek/config — save Soulseek username + password
+router.post('/config', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).json({ error: 'Missing username or password' });
+
+  // Save to our DB
+  const existing = db.getGlobalSetting('soulseekConfig') || {};
+  db.setGlobalSetting('soulseekConfig', { ...existing, username, password });
+
+  // Push credentials to slskd via PATCH /api/v0/options
+  try {
+    const response = await fetch(`${getSlskdUrl()}/api/v0/options`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': getSlskdApiKey(),
+      },
+      body: JSON.stringify({ soulseek: { username, password } }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!response.ok) {
+      return res.json({ saved: true, slskdSync: false, error: `slskd returned HTTP ${response.status}` });
+    }
+    res.json({ saved: true, slskdSync: true });
+  } catch (err) {
+    // Saved to our DB but couldn't push to slskd
+    res.json({ saved: true, slskdSync: false, error: err.message });
+  }
 });
 
-// POST /api/soulseek/test — verify url + apiKey work by hitting slskd server endpoint
+// POST /api/soulseek/test — verify connection to Soulseek network
 router.post('/test', async (req, res) => {
-  const config = db.getGlobalSetting('soulseekConfig');
-  if (!config?.url || !config?.apiKey) {
-    return res.json({ status: 'error', error: 'Not configured' });
-  }
-
-  const { url, apiKey } = config;
   try {
-    const response = await fetch(`${url}/api/v0/server`, {
-      headers: { 'X-API-Key': apiKey },
+    const response = await fetch(`${getSlskdUrl()}/api/v0/application`, {
+      headers: { 'X-API-Key': getSlskdApiKey() },
       signal: AbortSignal.timeout(8000),
     });
     if (!response.ok) {
@@ -40,10 +82,11 @@ router.post('/test', async (req, res) => {
     }
     const data = await response.json();
     res.json({
-      status: 'ok',
-      isConnected: data.isConnected ?? null,
-      state: data.state ?? null,
-      version: data.version ?? null,
+      status: data.server?.isConnected ? 'ok' : 'error',
+      isConnected: data.server?.isConnected ?? false,
+      state: data.server?.state ?? null,
+      username: data.user?.username ?? null,
+      version: data.version?.current ?? null,
     });
   } catch (err) {
     res.json({ status: 'error', error: err.message });

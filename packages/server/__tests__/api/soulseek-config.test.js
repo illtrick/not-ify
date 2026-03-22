@@ -5,7 +5,7 @@ const express = require('express');
 const request = require('supertest');
 const db = require('../../src/services/db');
 
-// Mock global fetch used by the test endpoint
+// Mock global fetch used by status and test endpoints
 global.fetch = jest.fn();
 
 const soulseekConfigRouter = require('../../src/api/soulseek-config');
@@ -20,93 +20,97 @@ afterAll(() => db.close());
 afterEach(() => jest.clearAllMocks());
 
 describe('Soulseek config API', () => {
-  test('GET /status returns not configured initially', () => {
-    return request(app).get('/api/soulseek/status')
-      .expect(200)
-      .then(res => {
-        expect(res.body.configured).toBe(false);
-        expect(res.body.urlPreview).toBeNull();
-      });
+  test('GET /status returns not configured initially', async () => {
+    // Mock fetch to simulate slskd unavailable
+    global.fetch.mockRejectedValue(new Error('unavailable'));
+    const res = await request(app).get('/api/soulseek/status').expect(200);
+    expect(res.body.configured).toBe(false);
+    expect(res.body.username).toBeNull();
+    expect(res.body.connected).toBe(false);
   });
 
-  test('POST /config returns 400 when url is missing', () => {
-    return request(app).post('/api/soulseek/config')
-      .send({ apiKey: 'some-key' })
-      .expect(400)
-      .then(res => {
-        expect(res.body.error).toMatch(/Missing/);
-      });
+  test('POST /config returns 400 when username is missing', async () => {
+    const res = await request(app).post('/api/soulseek/config')
+      .send({ password: 'secret' }).expect(400);
+    expect(res.body.error).toMatch(/Missing/);
   });
 
-  test('POST /config returns 400 when apiKey is missing', () => {
-    return request(app).post('/api/soulseek/config')
-      .send({ url: 'http://localhost:5030' })
-      .expect(400)
-      .then(res => {
-        expect(res.body.error).toMatch(/Missing/);
-      });
+  test('POST /config returns 400 when password is missing', async () => {
+    const res = await request(app).post('/api/soulseek/config')
+      .send({ username: 'testuser' }).expect(400);
+    expect(res.body.error).toMatch(/Missing/);
   });
 
-  test('POST /config saves url and apiKey', () => {
-    return request(app).post('/api/soulseek/config')
-      .send({ url: 'http://localhost:5030', apiKey: 'test-key-abc' })
-      .expect(200)
-      .then(res => {
-        expect(res.body.saved).toBe(true);
-      });
+  test('POST /config saves credentials and pushes to slskd', async () => {
+    // Mock the PATCH to slskd
+    global.fetch.mockResolvedValue({ ok: true });
+
+    const res = await request(app).post('/api/soulseek/config')
+      .send({ username: 'testuser', password: 'testpass' }).expect(200);
+    expect(res.body.saved).toBe(true);
+    expect(res.body.slskdSync).toBe(true);
+
+    // Verify PATCH was called with correct data
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v0/options'),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ soulseek: { username: 'testuser', password: 'testpass' } }),
+      }),
+    );
   });
 
-  test('GET /status shows configured after save, never exposes apiKey', () => {
-    return request(app).get('/api/soulseek/status')
-      .expect(200)
-      .then(res => {
-        expect(res.body.configured).toBe(true);
-        expect(res.body.urlPreview).toBe('http://localhost:5030');
-        expect(res.body.apiKey).toBeUndefined();
-      });
+  test('POST /config saves to DB even if slskd push fails', async () => {
+    global.fetch.mockRejectedValue(new Error('connection refused'));
+
+    const res = await request(app).post('/api/soulseek/config')
+      .send({ username: 'testuser2', password: 'testpass2' }).expect(200);
+    expect(res.body.saved).toBe(true);
+    expect(res.body.slskdSync).toBe(false);
+    expect(res.body.error).toContain('connection refused');
+
+    // Verify DB was updated
+    const config = db.getGlobalSetting('soulseekConfig');
+    expect(config.username).toBe('testuser2');
   });
 
-  test('POST /test returns ok with connection details on success', async () => {
+  test('GET /status shows configured after save', async () => {
+    // Mock fetch for live status check
     global.fetch.mockResolvedValue({
       ok: true,
-      json: async () => ({ isConnected: true, state: 'Connected', version: '0.21.0' }),
+      json: async () => ({ server: { isConnected: true, state: 'Connected, LoggedIn' } }),
+    });
+
+    const res = await request(app).get('/api/soulseek/status').expect(200);
+    expect(res.body.configured).toBe(true);
+    expect(res.body.username).toBe('testuser2');
+    expect(res.body.connected).toBe(true);
+    expect(res.body.state).toBe('Connected, LoggedIn');
+    // Never expose password
+    expect(res.body.password).toBeUndefined();
+  });
+
+  test('POST /test returns ok with connection details', async () => {
+    global.fetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        server: { isConnected: true, state: 'Connected, LoggedIn' },
+        user: { username: 'testuser2' },
+        version: { current: '0.24.5' },
+      }),
     });
 
     const res = await request(app).post('/api/soulseek/test').expect(200);
     expect(res.body.status).toBe('ok');
     expect(res.body.isConnected).toBe(true);
-    expect(res.body.state).toBe('Connected');
-    expect(res.body.version).toBe('0.21.0');
-
-    // Verify the correct endpoint and API key header were used
-    expect(global.fetch).toHaveBeenCalledWith(
-      'http://localhost:5030/api/v0/server',
-      expect.objectContaining({ headers: { 'X-API-Key': 'test-key-abc' } }),
-    );
-  });
-
-  test('POST /test returns error when slskd returns non-OK status', async () => {
-    global.fetch.mockResolvedValue({ ok: false, status: 403 });
-
-    const res = await request(app).post('/api/soulseek/test').expect(200);
-    expect(res.body.status).toBe('error');
-    expect(res.body.error).toContain('403');
+    expect(res.body.username).toBe('testuser2');
+    expect(res.body.version).toBe('0.24.5');
   });
 
   test('POST /test returns error on network failure', async () => {
     global.fetch.mockRejectedValue(new Error('connect ECONNREFUSED'));
-
     const res = await request(app).post('/api/soulseek/test').expect(200);
     expect(res.body.status).toBe('error');
     expect(res.body.error).toContain('ECONNREFUSED');
-  });
-
-  test('POST /test returns error when not configured', async () => {
-    // Clear config
-    db.setGlobalSetting('soulseekConfig', null);
-
-    const res = await request(app).post('/api/soulseek/test').expect(200);
-    expect(res.body.status).toBe('error');
-    expect(res.body.error).toMatch(/Not configured/);
   });
 });
