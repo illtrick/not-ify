@@ -157,9 +157,35 @@ async function processDownload(job, payload) {
       throw new Error(`Download validation failed (score ${validation.score}): ${validation.details}`);
     }
 
-    // Move files from staging to library
+    // Move files from staging to library, removing superseded lower-quality versions
     const destDir = path.join(getMusicDir(), downloader.sanitizePath(artist), downloader.sanitizePath(album));
     fs.mkdirSync(destDir, { recursive: true });
+
+    // Build a set of incoming track stems (filename without extension) for duplicate detection
+    const incomingStems = new Set(
+      downloadedFiles.map(f => path.basename(f, path.extname(f)).toLowerCase())
+    );
+
+    // Remove existing files that share a track number prefix with an incoming file
+    // e.g. incoming "01 Armee der Tristen.flac" supersedes "01-Armee Der Tristen.mp3"
+    try {
+      const existing = fs.readdirSync(destDir).filter(f => downloader.isAudioFile(f));
+      for (const oldFile of existing) {
+        const oldTrackNum = oldFile.match(/^(\d+)/)?.[1];
+        if (!oldTrackNum) continue;
+        // Check if any incoming file shares the same track number prefix
+        const superseded = downloadedFiles.some(f => {
+          const newName = path.basename(f);
+          return newName.match(/^(\d+)/)?.[1] === oldTrackNum;
+        });
+        if (superseded) {
+          const oldPath = path.join(destDir, oldFile);
+          fs.unlinkSync(oldPath);
+          log('pipeline', 'info', `[job ${job.id}] Removed superseded: ${oldFile}`);
+        }
+      }
+    } catch { /* directory may not exist yet */ }
+
     for (const filePath of downloadedFiles) {
       const destPath = path.join(destDir, path.basename(filePath));
       fs.renameSync(filePath, destPath);
@@ -361,9 +387,27 @@ async function processSoulseekDownload(job, payload) {
       throw new Error(`Download validation failed (score ${validation.score}): ${validation.details}`);
     }
 
-    // Step 6: Move from staging to library
+    // Step 6: Move from staging to library, removing superseded lower-quality versions
     const destDir = path.join(getMusicDir(), downloader.sanitizePath(artist), downloader.sanitizePath(album));
     fs.mkdirSync(destDir, { recursive: true });
+
+    // Remove existing files that share a track number prefix with an incoming file
+    try {
+      const existing = fs.readdirSync(destDir).filter(f => downloader.isAudioFile(f));
+      for (const oldFile of existing) {
+        const oldTrackNum = oldFile.match(/^(\d+)/)?.[1];
+        if (!oldTrackNum) continue;
+        const superseded = downloadedFiles.some(f => {
+          const newName = path.basename(f);
+          return newName.match(/^(\d+)/)?.[1] === oldTrackNum;
+        });
+        if (superseded) {
+          fs.unlinkSync(path.join(destDir, oldFile));
+          log('pipeline', 'info', `[job ${job.id}] Removed superseded: ${oldFile}`);
+        }
+      }
+    } catch { /* directory may not exist yet */ }
+
     for (const filePath of downloadedFiles) {
       const destPath = path.join(destDir, path.basename(filePath));
       fs.renameSync(filePath, destPath);
