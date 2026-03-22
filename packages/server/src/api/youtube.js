@@ -90,13 +90,14 @@ async function ytQueueProcess() {
 
   ytQueueProcessing = false;
 
-  // Auto-enqueue upgrade jobs for completed album downloads
+  // Auto-enqueue upgrade jobs after all album tracks have been attempted.
+  // Includes albums with errors — tracks missing from YT may exist on torrent/Soulseek.
   try {
     const jobQueue = require('../services/job-queue');
-    const completed = ytQueue.filter(e => e.status === 'done' && e.artist && e.album);
+    const attempted = ytQueue.filter(e => (e.status === 'done' || e.status === 'error') && e.artist && e.album);
     // Dedupe by artist+album
     const albums = new Map();
-    for (const e of completed) {
+    for (const e of attempted) {
       const key = `${e.artist}|${e.album}`;
       if (!albums.has(key)) albums.set(key, { artist: e.artist, album: e.album });
     }
@@ -283,6 +284,15 @@ router.post('/download/yt/album', async (req, res) => {
   for (const track of tracks) {
     const trackTitle = track.title || track.name;
     if (!trackTitle) continue;
+
+    // Skip non-music tracks (silence, data tracks, hidden tracks with no real title)
+    const titleLower = trackTitle.toLowerCase().trim();
+    if (titleLower === '[silence]' || titleLower === 'silence'
+      || titleLower === '[data track]' || titleLower === 'data track'
+      || titleLower === '[untitled]' || titleLower === ''
+      || (track.lengthMs && track.lengthMs < 5000)) { // <5 seconds
+      continue;
+    }
 
     const position = track.position || (queued.length + errors.length + 1);
     const paddedPos = String(position).padStart(2, '0');

@@ -96,8 +96,18 @@ async function processNextJob() {
     const duration = Date.now() - start;
 
     activity.log('upgrade', 'error', `Job failed: ${payload.artist} — ${payload.album}: ${err.message}`, { artist: payload.artist, album: payload.album, error: err.message, attempt: (job.retries || 0) + 1 });
-    const retryAfter = Date.now() + (BACKOFF[job.retries || 0] || BACKOFF[BACKOFF.length - 1]);
-    jobQueue.fail(job.id, err.message, retryAfter);
+
+    // RD timeouts and dead torrents won't improve on retry — fail permanently
+    const noRetry = err.message.includes('RD timeout')
+      || err.message.includes('magnet_error')
+      || err.message.includes('dead')
+      || err.message.includes('virus');
+    if (noRetry) {
+      jobQueue.complete(job.id, { error: err.message, outcome: 'failed_permanent' });
+    } else {
+      const retryAfter = Date.now() + (BACKOFF[job.retries || 0] || BACKOFF[BACKOFF.length - 1]);
+      jobQueue.fail(job.id, err.message, retryAfter);
+    }
     jobsFailed++; lastErrorAt = Date.now();
     db.addJobLog({
       job_id: job.id,

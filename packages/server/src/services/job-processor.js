@@ -70,14 +70,24 @@ async function processDownload(job, payload) {
       throw new Error('REQUEUE: manual download active');
     }
 
-    // Step 2: Add magnet
+    // Step 2: Add magnet (check for existing RD torrent to avoid duplicate adds on retry)
     log('pipeline', 'info', `[job ${job.id}] Adding magnet for ${artist} - ${album}`);
     const magnet = await rd.addMagnet(magnetLink);
     torrentId = magnet.id;
 
     // Step 3: Wait for file selection, get file list
+    // If RD already has this torrent cached, it may skip straight to 'downloaded' —
+    // check current status before waiting for 'waiting_files_selection'.
     log('pipeline', 'info', `[job ${job.id}] Waiting for RD file selection...`);
-    const fileInfo = await pollRd(torrentId, 'waiting_files_selection', RD_FILE_SELECTION_TIMEOUT);
+    const initialInfo = await rd.getTorrentInfo(torrentId);
+    let fileInfo;
+    if (initialInfo.status === 'waiting_files_selection') {
+      fileInfo = initialInfo;
+    } else if (initialInfo.status === 'downloaded') {
+      fileInfo = initialInfo; // already cached, skip selection wait
+    } else {
+      fileInfo = await pollRd(torrentId, 'waiting_files_selection', RD_FILE_SELECTION_TIMEOUT);
+    }
 
     // Step 4: Select files (discography-aware)
     const selection = downloader.selectAlbumFiles(fileInfo.files || [], artist, album);
@@ -161,10 +171,25 @@ async function processDownload(job, payload) {
     const destDir = path.join(getMusicDir(), downloader.sanitizePath(artist), downloader.sanitizePath(album));
     fs.mkdirSync(destDir, { recursive: true });
 
-    // Build a set of incoming track stems (filename without extension) for duplicate detection
-    const incomingStems = new Set(
-      downloadedFiles.map(f => path.basename(f, path.extname(f)).toLowerCase())
-    );
+    // Load excluded list — tracks the user manually deleted (should not be re-added)
+    let excludedTracks = [];
+    try {
+      const metaPath = path.join(destDir, '.metadata.json');
+      if (fs.existsSync(metaPath)) {
+        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+        excludedTracks = (meta.excluded || []).map(f => f.match(/^(\d+)/)?.[1]).filter(Boolean);
+      }
+    } catch { /* no metadata */ }
+
+    // Filter out excluded tracks (by track number prefix)
+    const filteredFiles = downloadedFiles.filter(f => {
+      const trackNum = path.basename(f).match(/^(\d+)/)?.[1];
+      if (trackNum && excludedTracks.includes(trackNum)) {
+        log('pipeline', 'info', `[job ${job.id}] Skipped excluded track: ${path.basename(f)}`);
+        return false;
+      }
+      return true;
+    });
 
     // Remove existing files that share a track number prefix with an incoming file
     // e.g. incoming "01 Armee der Tristen.flac" supersedes "01-Armee Der Tristen.mp3"
@@ -173,8 +198,7 @@ async function processDownload(job, payload) {
       for (const oldFile of existing) {
         const oldTrackNum = oldFile.match(/^(\d+)/)?.[1];
         if (!oldTrackNum) continue;
-        // Check if any incoming file shares the same track number prefix
-        const superseded = downloadedFiles.some(f => {
+        const superseded = filteredFiles.some(f => {
           const newName = path.basename(f);
           return newName.match(/^(\d+)/)?.[1] === oldTrackNum;
         });
@@ -186,18 +210,19 @@ async function processDownload(job, payload) {
       }
     } catch { /* directory may not exist yet */ }
 
-    for (const filePath of downloadedFiles) {
+    for (const filePath of filteredFiles) {
       const destPath = path.join(destDir, path.basename(filePath));
       fs.renameSync(filePath, destPath);
     }
 
-    log('pipeline', 'success', `[job ${job.id}] ${artist} - ${album}: ${downloadedFiles.length} files replaced (${validation.confidence} confidence, ${upgradeFrom ? upgradeFrom + ' → ' : ''}upgraded)`);
+    const skippedCount = downloadedFiles.length - filteredFiles.length;
+    log('pipeline', 'success', `[job ${job.id}] ${artist} - ${album}: ${filteredFiles.length} files replaced${skippedCount ? ` (${skippedCount} excluded)` : ''} (${validation.confidence} confidence, ${upgradeFrom ? upgradeFrom + ' → ' : ''}upgraded)`);
 
     return {
       success: true,
       artist,
       album,
-      files: downloadedFiles.length,
+      files: filteredFiles.length,
       confidence: validation.confidence,
       score: validation.score,
     };
@@ -395,13 +420,32 @@ async function processSoulseekDownload(job, payload) {
     const destDir = path.join(getMusicDir(), downloader.sanitizePath(artist), downloader.sanitizePath(album));
     fs.mkdirSync(destDir, { recursive: true });
 
+    // Load excluded list — tracks the user manually deleted
+    let slskExcluded = [];
+    try {
+      const metaPath = path.join(destDir, '.metadata.json');
+      if (fs.existsSync(metaPath)) {
+        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+        slskExcluded = (meta.excluded || []).map(f => f.match(/^(\d+)/)?.[1]).filter(Boolean);
+      }
+    } catch { /* no metadata */ }
+
+    const slskFilteredFiles = downloadedFiles.filter(f => {
+      const trackNum = path.basename(f).match(/^(\d+)/)?.[1];
+      if (trackNum && slskExcluded.includes(trackNum)) {
+        log('pipeline', 'info', `[job ${job.id}] Skipped excluded track: ${path.basename(f)}`);
+        return false;
+      }
+      return true;
+    });
+
     // Remove existing files that share a track number prefix with an incoming file
     try {
       const existing = fs.readdirSync(destDir).filter(f => downloader.isAudioFile(f));
       for (const oldFile of existing) {
         const oldTrackNum = oldFile.match(/^(\d+)/)?.[1];
         if (!oldTrackNum) continue;
-        const superseded = downloadedFiles.some(f => {
+        const superseded = slskFilteredFiles.some(f => {
           const newName = path.basename(f);
           return newName.match(/^(\d+)/)?.[1] === oldTrackNum;
         });
@@ -412,7 +456,7 @@ async function processSoulseekDownload(job, payload) {
       }
     } catch { /* directory may not exist yet */ }
 
-    for (const filePath of downloadedFiles) {
+    for (const filePath of slskFilteredFiles) {
       const destPath = path.join(destDir, path.basename(filePath));
       fs.renameSync(filePath, destPath);
     }

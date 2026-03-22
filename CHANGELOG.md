@@ -7,6 +7,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 - **MINOR** (0.x.0): New features, meaningful improvements
 - **PATCH** (0.0.x): Bug fixes, polish, iteration on current features
 
+## [1.4.1] - 2026-03-21
+
+### Added
+- Soulseek pipeline integration: slskd search cascade wired into upgrade flow as third source
+- Soulseek download job type: enqueue → poll → copy from shared volume → validate → library
+- Track deletion with soft-exclude: deleted tracks added to `.metadata.json` excluded list, upgrader respects it
+- Player auto-advances on audio error (skips deleted/missing tracks)
+- SSE auto-reconnect in ActivityLog (retries after 3 seconds on disconnect)
+
+### Changed
+- Download validator: MB release selection now scores by duration match, not just track count
+- Download validator: partial album matches accepted (11/14 tracks = high confidence, not rejected)
+- Download validator: falls back to medium confidence when MB data is unreliable (multiple release variants)
+- Upgrade trigger: fires after all YT tracks are attempted (including failures), not just successes
+- RD timeout/dead torrent errors now fail permanently instead of retrying 3 times
+- YT downloader filters silence tracks, data tracks, and sub-5-second tracks
+
+### Fixed
+- Soulseek responses always empty: search must be stopped before fetching `/responses` sub-endpoint
+- SLSKD_URL missing from `.env.dev` — native dev defaulted to Docker hostname, silently skipping Soulseek
+- ActivityLog race condition: SSE events buffered during REST fetch, then merged with deduplication
+- Duplicate track highlighting: matches by track ID/position instead of title (fixes "Prison Sex" x3 bug)
+- Silent REST error swallowing in ActivityLog replaced with SSE fallback
+
 ## [1.4.0] - 2026-03-20
 
 ### Added

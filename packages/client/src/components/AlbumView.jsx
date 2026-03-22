@@ -285,11 +285,12 @@ export function AlbumView({
             </span>}
           </div>
           {pl.map((track, idx) => {
-            // Match by ID (library-to-library) or by title when a YouTube
-            // preview of the same song is playing. Title-only is safe here
-            // because we're inside one specific album's track list.
+            // Match by unique track ID. For YT previews, also match by title+track number
+            // to avoid highlighting all tracks with the same name (e.g., "Prison Sex" x3).
+            const trackNum = track.filename?.match(/^(\d+)/)?.[1];
             const isActive = currentTrack?.id === track.id
-              || (currentTrack?.isYtPreview && currentTrack?.title === track.title);
+              || (currentTrack?.isYtPreview && currentTrack?.title === track.title
+                  && currentTrack?.id === `yt-pending-${trackNum}`);
             const isHovered = hoveredTrack === track.id;
             const trackArtist = track.artist || artist;
             return (
@@ -360,17 +361,20 @@ export function AlbumView({
             ) || [];
             return mbTracks.map((t, i) => {
             const isHovered = hoveredMbTrack === i;
-            const isActive = (currentTrack?.isYtPreview
-                && currentTrack?.title === t.title
-                && currentTrack?.artist === artist)
-              || (!currentTrack?.isYtPreview
-                  && currentTrack?.title === t.title
-                  && (currentAlbumInfo?.album === album || currentTrack?.album === album));
-            const isPending = ytPendingTrack === t.title;
             const trackArtist = t.artist || artist;
             const libTrack = albumLibTracks.find(lt =>
               norm(lt.title) === norm(t.title)
             );
+            // Match by library track ID when available, otherwise by YT pending ID.
+            // For duplicate titles, match the library track at the same position to avoid
+            // highlighting all tracks with the same name (e.g., "Prison Sex" x3).
+            const positionMatchedLibTrack = albumLibTracks.find(lt =>
+              norm(lt.title) === norm(t.title) && lt.filename?.match(/^(\d+)/)?.[1] === String(t.position)
+            ) || libTrack;
+            const isActive = positionMatchedLibTrack
+              ? currentTrack?.id === positionMatchedLibTrack.id
+              : currentTrack?.isYtPreview && currentTrack?.id === `yt-pending-${t.position}`;
+            const isPending = ytPendingTrack === t.title;
             return (
               <div
                 key={i}

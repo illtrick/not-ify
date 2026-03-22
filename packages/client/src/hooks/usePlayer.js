@@ -332,9 +332,14 @@ export function usePlayer({
     onPause: () => setIsPlaying(false),
     onError: () => {
       if (currentTrack) {
-        console.warn('Audio load failed for:', currentTrack.title);
-        setCurrentTrack(null);
-        setIsPlaying(false);
+        console.warn('Audio load failed for:', currentTrack.title, '— skipping to next');
+        // Auto-advance to next track (handles deleted/missing tracks)
+        if (playlist.length > 0 && playlistIdx < playlist.length - 1) {
+          playNext();
+        } else {
+          setCurrentTrack(null);
+          setIsPlaying(false);
+        }
       }
     },
   };

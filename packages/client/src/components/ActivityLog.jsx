@@ -272,7 +272,11 @@ export function ActivityLog({ open, onClose }) {
       return;
     }
 
-    api.getActivityLog({ limit: 100 }).then(setEntries).catch(() => {});
+    // Buffer SSE events while REST fetch is in-flight to avoid race condition.
+    // Events arriving before the historical fetch completes are queued, then
+    // merged (deduplicated by timestamp+message) after the fetch resolves.
+    let sseBuffer = [];
+    let historicalLoaded = false;
 
     const url = api.getActivityStreamUrl();
     const es = new EventSource(url);
@@ -283,15 +287,53 @@ export function ActivityLog({ open, onClose }) {
       trackSseEvent('activity');
       try {
         const entry = JSON.parse(event.data);
-        setEntries(prev => {
-          const next = [...prev, entry];
-          return next.length > 200 ? next.slice(-200) : next;
-        });
+        if (!historicalLoaded) {
+          sseBuffer.push(entry);
+        } else {
+          setEntries(prev => {
+            const next = [...prev, entry];
+            return next.length > 200 ? next.slice(-200) : next;
+          });
+        }
       } catch {}
     };
 
+    // Reconnect on SSE error (network drop, server restart)
+    es.onerror = () => {
+      trackSseClose('activity');
+      es.close();
+      // Retry after 3 seconds
+      const retryTimer = setTimeout(() => {
+        if (!eventSourceRef.current || eventSourceRef.current === es) {
+          const newEs = new EventSource(url);
+          eventSourceRef.current = newEs;
+          trackSseOpen('activity');
+          newEs.onmessage = es.onmessage;
+          newEs.onerror = es.onerror;
+        }
+      }, 3000);
+      // Clean up retry timer on unmount
+      es._retryTimer = retryTimer;
+    };
+
+    // Fetch historical entries, then flush any buffered SSE events
+    api.getActivityLog({ limit: 100 }).then(historical => {
+      const dedupeKey = (e) => `${e.timestamp || ''}|${e.message || ''}`;
+      const seen = new Set((historical || []).map(dedupeKey));
+      const newFromSse = sseBuffer.filter(e => !seen.has(dedupeKey(e)));
+      setEntries([...(historical || []), ...newFromSse]);
+      historicalLoaded = true;
+      sseBuffer = [];
+    }).catch(() => {
+      // REST failed — use whatever SSE has collected
+      setEntries(sseBuffer);
+      historicalLoaded = true;
+      sseBuffer = [];
+    });
+
     return () => {
       es.close();
+      if (es._retryTimer) clearTimeout(es._retryTimer);
       trackSseClose('activity');
       eventSourceRef.current = null;
     };

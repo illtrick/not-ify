@@ -70,6 +70,21 @@ async function searchSoulseek(query, opts = {}) {
       if (result.isComplete || result.responseCount >= minResults) break;
     }
 
+    // Stop the search if it hasn't completed naturally — slskd only populates
+    // the /responses sub-endpoint once the search is in a terminal state.
+    if (!result.isComplete) {
+      try {
+        await fetch(`${SLSKD_URL}/api/v0/searches/${searchId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ isComplete: true }),
+          signal: AbortSignal.timeout(3000),
+        });
+        // Brief pause for slskd to finalize responses
+        await new Promise(r => setTimeout(r, 500));
+      } catch {}
+    }
+
     // Fetch full responses with file details (main endpoint omits files)
     let responses = [];
     try {

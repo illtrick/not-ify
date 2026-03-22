@@ -63,35 +63,59 @@ function computeScore(expectedTracks, actualDurations) {
   const actualCount = actualDurations.length;
 
   // Track count score (weight 0.3)
+  // When actual < expected, be lenient — the source may not have bonus/live tracks
+  // and that's fine as long as what it does have matches well.
+  // Only penalize heavily when actual > expected (potential wrong album).
   let trackCountScore;
   const countDiff = Math.abs(expectedCount - actualCount);
-  if (countDiff === 0) trackCountScore = 0;
-  else if (countDiff === 1) trackCountScore = 0.5;
-  else trackCountScore = 1.0;
+  if (countDiff === 0) {
+    trackCountScore = 0;
+  } else if (actualCount < expectedCount) {
+    // Partial album: penalize gently based on coverage ratio
+    // 11/14 tracks = 0.21, 8/14 = 0.43, 5/14 = 0.64
+    const coverage = actualCount / expectedCount;
+    trackCountScore = coverage >= 0.5 ? (1 - coverage) : 1.0;
+  } else if (countDiff === 1) {
+    trackCountScore = 0.5;
+  } else {
+    trackCountScore = 1.0;
+  }
 
   // Duration match score (weight 0.5) — greedy closest-match pairing
   const pairs = pairTracks(expectedTracks, actualDurations);
+  // Only score pairs that actually matched (have a non-zero actual duration).
+  // Unmatched expected tracks (bonus/live content the source doesn't have) shouldn't
+  // penalize the duration score — the track count score already handles coverage.
+  const matchedPairs = pairs.filter(p => p.actual > 0);
   let durationScoreSum = 0;
-  for (const pair of pairs) {
+  for (const pair of matchedPairs) {
     const delta = pair.delta;
     if (delta <= 10) durationScoreSum += 0;
     else if (delta <= 30) durationScoreSum += (delta - 10) / 20;
     else durationScoreSum += 1.0;
   }
-  const durationScore = pairs.length > 0 ? durationScoreSum / pairs.length : 1.0;
+  const durationScore = matchedPairs.length > 0 ? durationScoreSum / matchedPairs.length : 1.0;
 
   // Total duration score (weight 0.2)
-  // Compare totals only over paired tracks so count mismatches don't inflate this penalty.
-  const expectedTotal = pairs.reduce((s, p) => s + p.expected, 0);
-  const actualTotal = pairs.reduce((s, p) => s + p.actual, 0);
+  // Compare totals only over matched pairs so missing bonus tracks don't inflate this penalty.
+  const expectedTotal = matchedPairs.reduce((s, p) => s + p.expected, 0);
+  const actualTotal = matchedPairs.reduce((s, p) => s + p.actual, 0);
   const totalDelta = Math.abs(expectedTotal - actualTotal);
   let totalDurationScore;
   if (totalDelta <= 30) totalDurationScore = 0;
   else if (totalDelta <= 120) totalDurationScore = (totalDelta - 30) / 90;
   else totalDurationScore = 1.0;
 
-  const score = 0.3 * trackCountScore + 0.5 * durationScore + 0.2 * totalDurationScore;
-  const avgPerTrackDelta = pairs.length > 0 ? pairs.reduce((s, p) => s + p.delta, 0) / pairs.length : 0;
+  // When coverage is very poor (e.g., 10/69), the greedy matcher can accidentally
+  // find good duration matches from a large pool. Floor the duration score by
+  // the unmatched ratio so large mismatches can't produce artificially good scores.
+  const unmatchedRatio = (expectedCount > 0 && actualCount < expectedCount)
+    ? 1 - (actualCount / expectedCount)
+    : 0;
+  const adjustedDurationScore = Math.max(durationScore, unmatchedRatio * 0.5);
+
+  const score = 0.3 * trackCountScore + 0.5 * adjustedDurationScore + 0.2 * totalDurationScore;
+  const avgPerTrackDelta = matchedPairs.length > 0 ? matchedPairs.reduce((s, p) => s + p.delta, 0) / matchedPairs.length : 0;
 
   let confidence;
   if (score < 0.15) confidence = 'high';
@@ -122,22 +146,41 @@ function computeScore(expectedTracks, actualDurations) {
 async function validate({ files, mbid, rgid, artist, album, existingTrackCount }) {
   const actualDurations = files.map(f => getFileDuration(f));
 
-  // Try to get MB track data
+  // Try to get MB track data — pick the release whose track count best matches
   let mbTracks = null;
   try {
     if (mbid) {
       mbTracks = await mb.getReleaseTracks(mbid);
-    } else if (rgid) {
-      // Release-group ID: search for releases in this group, pick best
-      const releases = await mb.searchReleases(`rgid:${rgid}`);
-      if (releases.length > 0) {
-        mbTracks = await mb.getReleaseTracks(releases[0].mbid);
+    } else {
+      // Search for releases and pick the one whose track count is closest to actual
+      let releases = [];
+      if (rgid) {
+        releases = await mb.searchReleases(`rgid:${rgid}`);
       }
-    }
-    if (!mbTracks && artist && album) {
-      const releases = await mb.searchReleases(`${artist} ${album}`);
+      if (releases.length === 0 && artist && album) {
+        releases = await mb.searchReleases(`${artist} ${album}`);
+      }
       if (releases.length > 0) {
-        mbTracks = await mb.getReleaseTracks(releases[0].mbid);
+        // Try up to 5 releases, pick the one with the best computeScore.
+        // Track count alone is unreliable (e.g., Tool has 69-track, 13-track,
+        // and 10-track releases all called "Undertow"). Duration matching
+        // distinguishes the correct release.
+        const candidates = releases.slice(0, 5);
+        let bestTracks = null;
+        let bestScore = Infinity;
+        for (const rel of candidates) {
+          try {
+            const tracks = await mb.getReleaseTracks(rel.mbid);
+            if (!tracks || tracks.length === 0) continue;
+            const result = computeScore(tracks, actualDurations);
+            if (result.score < bestScore) {
+              bestScore = result.score;
+              bestTracks = tracks;
+            }
+            if (result.score === 0) break; // perfect match
+          } catch { continue; }
+        }
+        mbTracks = bestTracks;
       }
     }
   } catch {
@@ -145,7 +188,24 @@ async function validate({ files, mbid, rgid, artist, album, existingTrackCount }
   }
 
   if (mbTracks && mbTracks.length > 0) {
-    return computeScore(mbTracks, actualDurations);
+    const mbResult = computeScore(mbTracks, actualDurations);
+    if (mbResult.confidence !== 'low') {
+      return mbResult;
+    }
+    // MB gave low confidence — this often means MB has wrong/multiple release variants
+    // with bad duration data (e.g., Tool Undertow has 69-track, 13-track, 10-track releases).
+    // If the download looks like a real album (4+ files, 15+ minutes), downgrade to medium
+    // rather than rejecting. The search scoring already validated artist/album name match.
+    const totalMinutesCheck = actualDurations.reduce((s, d) => s + d, 0) / 60;
+    if (files.length >= 4 && totalMinutesCheck >= 15) {
+      return {
+        ...mbResult,
+        score: 0.30,
+        confidence: 'medium',
+        details: mbResult.details + ' (MB data unreliable, fallback to medium)',
+      };
+    }
+    return mbResult;
   }
 
   // Fallback: no MB data available
@@ -154,14 +214,16 @@ async function validate({ files, mbid, rgid, artist, album, existingTrackCount }
 
   if (existingTrackCount != null) {
     // Compare against existing library
+    // Be lenient when incoming has fewer tracks (partial upgrade is fine)
+    const coverage = existingTrackCount > 0 ? files.length / existingTrackCount : 1;
     const countDiff = Math.abs(files.length - existingTrackCount);
-    if (countDiff <= 2) {
+    if (countDiff <= 2 || (files.length < existingTrackCount && coverage >= 0.5)) {
       return {
         score: 0.20,
         confidence: 'medium',
         trackCount: { expected: existingTrackCount, actual: files.length },
         durationDelta: { avgPerTrack: 0, total: 0 },
-        details: `fallback: ${files.length} files vs ${existingTrackCount} existing (±${countDiff})`,
+        details: `fallback: ${files.length} files vs ${existingTrackCount} existing (coverage ${(coverage * 100).toFixed(0)}%)`,
       };
     }
     return {

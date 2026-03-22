@@ -264,17 +264,27 @@ router.delete('/library/track/:id', (req, res) => {
     return res.status(404).json({ error: 'Track not found' });
   }
 
+  const filename = path.basename(filePath);
+  const dir = path.dirname(filePath);
+
   try {
     fs.unlinkSync(filePath);
-    // Clean up empty directories
-    const dir = path.dirname(filePath);
+
+    // Add to excluded list in .metadata.json so the upgrader doesn't re-add it
+    const metaPath = path.join(dir, '.metadata.json');
+    let meta = {};
+    try {
+      if (fs.existsSync(metaPath)) meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+    } catch { /* start fresh */ }
+    if (!Array.isArray(meta.excluded)) meta.excluded = [];
+    if (!meta.excluded.includes(filename)) meta.excluded.push(filename);
+    fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+
+    // Clean up empty directories (no audio files left)
     const remaining = fs.readdirSync(dir).filter(f => f !== '.metadata.json');
     if (remaining.length === 0) {
-      // Remove metadata and directory
-      const metaPath = path.join(dir, '.metadata.json');
       if (fs.existsSync(metaPath)) fs.unlinkSync(metaPath);
       fs.rmdirSync(dir);
-      // Clean up empty parent
       const parentDir = path.dirname(dir);
       if (parentDir !== MUSIC_DIR && fs.existsSync(parentDir) && fs.readdirSync(parentDir).length === 0) {
         fs.rmdirSync(parentDir);
@@ -284,8 +294,8 @@ router.delete('/library/track/:id', (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 
-  console.log(`[library] Removed track: ${filePath}`);
-  res.json({ removed: 1, id: req.params.id });
+  console.log(`[library] Removed track: ${filePath} (excluded: ${filename})`);
+  res.json({ removed: 1, id: req.params.id, excluded: filename });
 });
 
 // ---------------------------------------------------------------------------
