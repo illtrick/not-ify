@@ -53,9 +53,27 @@ export function SettingsModal({
   const [migrationProgress, setMigrationProgress] = useState(null);
   const [libraryError, setLibraryError] = useState(null);
 
+  // Pre-fill Soulseek username from saved config
+  useEffect(() => {
+    if (slskConfig?.status?.username && !slskUsername) {
+      setSlskUsername(slskConfig.status.username);
+    }
+  }, [slskConfig?.status?.username]);
+
   // Handle path selected from folder browser — fetch active jobs + files count, then show confirm step
   const handlePathSelected = useCallback(async (path) => {
     setShowFolderBrowser(false);
+
+    // Same path selected — no-op
+    const currentNorm = (libraryConfig?.musicDir || '').replace(/[\\/]+/g, '/').replace(/\/+$/, '');
+    const selectedNorm = (path || '').replace(/[\\/]+/g, '/').replace(/\/+$/, '');
+    if (currentNorm === selectedNorm) {
+      setLibraryError(null);
+      setPendingLibraryPath(null);
+      setLibraryStep(null);
+      return; // Already using this path, nothing to do
+    }
+
     setPendingLibraryPath(path);
     setLibraryError(null);
     setLibraryActiveJobs(null);
