@@ -412,6 +412,14 @@ async function processUpgrade(job, payload) {
 
   log('pipeline', 'info', `[job ${job.id}] Found upgrade: ${result.name} (score ${result.score?.toFixed(3)}${result.seeders != null ? `, ${result.seeders} seeders` : ''})`);
 
+  // Pre-check: skip if detected quality isn't actually better than what we have
+  const { isUpgrade } = require('./library-check');
+  const detectedQuality = (result.detectedQuality || result.source === 'soulseek' ? 'flac' : 'unknown').toLowerCase();
+  if (currentQuality && currentQuality !== 'unknown' && detectedQuality !== 'unknown' && !isUpgrade(currentQuality, detectedQuality)) {
+    log('pipeline', 'info', `[job ${job.id}] Skipping — detected quality (${detectedQuality}) is not better than current (${currentQuality})`);
+    return { skipped: true, reason: `no quality improvement (have: ${currentQuality}, found: ${detectedQuality})` };
+  }
+
   const jobQueue = require('./job-queue');
 
   // Route Soulseek results to soulseek-download job type
