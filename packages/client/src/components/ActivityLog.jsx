@@ -349,7 +349,9 @@ export function ActivityLog({ open, onClose }) {
 
   const filtered = filter === 'all'
     ? entries
-    : entries.filter(e => e.category === filter);
+    : filter === 'upgrade'
+      ? entries.filter(e => e.category === 'pipeline' || e.category === 'upgrade')
+      : entries.filter(e => e.category === filter);
 
   return (
     <div style={{
@@ -384,7 +386,7 @@ export function ActivityLog({ open, onClose }) {
         {tab === 'log' && (
           <>
             <span style={{ width: 1, height: 14, background: COLORS.border, margin: '0 4px' }} />
-            {['all', 'youtube', 'torrent', 'upgrade'].map(cat => (
+            {['all', 'youtube', 'upgrade'].map(cat => (
               <button
                 key={cat}
                 onClick={() => setFilter(cat)}
