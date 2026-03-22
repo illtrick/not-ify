@@ -285,12 +285,12 @@ export function AlbumView({
             </span>}
           </div>
           {pl.map((track, idx) => {
-            // Match by unique track ID. For YT previews, also match by title+track number
-            // to avoid highlighting all tracks with the same name (e.g., "Prison Sex" x3).
-            const trackNum = track.filename?.match(/^(\d+)/)?.[1];
+            // Match by unique track ID. For YT previews, match by title but only
+            // highlight the first occurrence when duplicates exist (e.g., "Prison Sex" x3).
+            const isDuplicate = albumTracks.filter(t => t.title === track.title).length > 1;
             const isActive = currentTrack?.id === track.id
               || (currentTrack?.isYtPreview && currentTrack?.title === track.title
-                  && currentTrack?.id === `yt-pending-${trackNum}`);
+                  && (!isDuplicate || idx === albumTracks.findIndex(t => t.title === track.title)));
             const isHovered = hoveredTrack === track.id;
             const trackArtist = track.artist || artist;
             return (
@@ -365,15 +365,13 @@ export function AlbumView({
             const libTrack = albumLibTracks.find(lt =>
               norm(lt.title) === norm(t.title)
             );
-            // Match by library track ID when available, otherwise by YT pending ID.
-            // For duplicate titles, match the library track at the same position to avoid
-            // highlighting all tracks with the same name (e.g., "Prison Sex" x3).
-            const positionMatchedLibTrack = albumLibTracks.find(lt =>
-              norm(lt.title) === norm(t.title) && lt.filename?.match(/^(\d+)/)?.[1] === String(t.position)
-            ) || libTrack;
-            const isActive = positionMatchedLibTrack
-              ? currentTrack?.id === positionMatchedLibTrack.id
-              : currentTrack?.isYtPreview && currentTrack?.id === `yt-pending-${t.position}`;
+            // Match by library track ID when available, otherwise by title.
+            // For duplicate titles, only highlight the first occurrence.
+            const isDupMb = mbTracks.filter(mt => mt.title === t.title).length > 1;
+            const isActive = libTrack
+              ? currentTrack?.id === libTrack.id
+              : (currentTrack?.isYtPreview && currentTrack?.title === t.title
+                  && (!isDupMb || i === mbTracks.findIndex(mt => mt.title === t.title)));
             const isPending = ytPendingTrack === t.title;
             return (
               <div
