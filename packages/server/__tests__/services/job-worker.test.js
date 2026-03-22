@@ -53,6 +53,7 @@ beforeEach(() => {
     getDb: () => mockDb,
     addJobLog: (...args) => mockAddJobLog(...args),
     getJobLogs: (...args) => mockGetJobLogs(...args),
+    getGlobalSetting: () => null,
     close: () => { if (mockDb && mockDb.open) { mockDb.close(); mockDb = null; } },
   }));
 

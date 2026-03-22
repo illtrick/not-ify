@@ -26,7 +26,7 @@ const upgradeRouter = require('./api/upgrade');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const CONFIG_DIR = process.env.CONFIG_DIR || '/app/config';
-const MUSIC_DIR = process.env.MUSIC_DIR || '/app/music';
+const MUSIC_DIR = db.getGlobalSetting('musicDir') || process.env.MUSIC_DIR || '/app/music';
 const COVERS_DIR = path.join(CONFIG_DIR, 'covers');
 
 app.use(cors());
