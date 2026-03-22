@@ -127,11 +127,18 @@ async function ytDownloadOne(entry, abort) {
   const destDir = path.join(MUSIC_DIR, dlArtist, dlAlbum);
   fs.mkdirSync(destDir, { recursive: true });
 
-  // Skip if file already exists (avoid re-downloading on repeat plays)
-  const existingFile = path.join(destDir, `${sanitizePath(dlTitle)}.mp3`);
-  if (fs.existsSync(existingFile)) {
-    activity.log('youtube', 'info', `Skipped (exists): ${dlTitle}`, { artist: dlArtist, album: dlAlbum, title: dlTitle });
-    return existingFile;
+  // Skip if a file with the same track number already exists (avoid re-downloading).
+  // Filenames vary: "08-Legs.mp3" (YT), "08 Legs.mp3" (torrent), "08 Legs.flac" (upgrade)
+  const trackNum = sanitizePath(dlTitle).match(/^(\d+)/)?.[1];
+  if (trackNum) {
+    try {
+      const existing = fs.readdirSync(destDir);
+      const match = existing.find(f => f.match(/^(\d+)/)?.[1] === trackNum && /\.(mp3|flac|ogg|m4a|opus|wav)$/i.test(f));
+      if (match) {
+        activity.log('youtube', 'info', `Skipped (exists): ${dlTitle}`, { artist: dlArtist, album: dlAlbum, title: dlTitle });
+        return path.join(destDir, match);
+      }
+    } catch { /* dir doesn't exist yet */ }
   }
 
   activity.log('youtube', 'info', `Downloading: ${dlTitle}`, { artist: dlArtist, album: dlAlbum, title: dlTitle });
