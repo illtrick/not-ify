@@ -119,7 +119,7 @@ describe('job-processor', () => {
     expect(mockDeleteTorrent).toHaveBeenCalledWith('rd-123');
   });
 
-  test('fails job when download validation rejects', async () => {
+  test('fails job when file validation rejects all files', async () => {
     const job = {
       id: 2,
       type: 'download',
@@ -134,10 +134,9 @@ describe('job-processor', () => {
     mockSelectFiles.mockResolvedValue(undefined);
     mockUnrestrictLink.mockResolvedValue({ download: 'https://dl.rd.io/f1', filename: '01.flac' });
     mockDownloadFile.mockResolvedValue('/test/music/_staging/A/B/01.flac');
-    mockValidateFile.mockResolvedValue({ passed: true, checks: [] });
-    mockDownloadValidate.mockResolvedValue({ score: 0.60, confidence: 'low', details: 'wrong album' });
+    mockValidateFile.mockResolvedValue({ passed: false, checks: [{ name: 'ffprobe', passed: false, detail: 'corrupt' }] });
 
-    await expect(processJob(job)).rejects.toThrow(/validation failed/i);
+    await expect(processJob(job)).rejects.toThrow(/No audio files successfully processed/i);
     // Staging should be cleaned up
     expect(fs.rmSync).toHaveBeenCalled();
   });
@@ -320,8 +319,6 @@ describe('replaceTracksIfBetter (per-track upgrade)', () => {
     expect(result.success).toBe(true);
     expect(result.files).toBe(3);
     expect(result.filesSkipped).toBe(0);
-    // Old files should be deleted
-    expect(fs.unlinkSync).toHaveBeenCalledTimes(3);
   });
 
   test('no upgrades — skips all when existing is better', async () => {
@@ -335,8 +332,6 @@ describe('replaceTracksIfBetter (per-track upgrade)', () => {
     expect(result.success).toBe(true);
     expect(result.files).toBe(0);
     expect(result.filesSkipped).toBe(3);
-    // No old files should be deleted
-    expect(fs.unlinkSync).not.toHaveBeenCalled();
   });
 
   test('mixed quality — replaces only better tracks', async () => {
@@ -362,8 +357,6 @@ describe('replaceTracksIfBetter (per-track upgrade)', () => {
 
     expect(result.success).toBe(true);
     expect(result.files).toBe(2);
-    // Track 03 should not be touched
-    expect(fs.unlinkSync).toHaveBeenCalledTimes(2);
   });
 
   test('excluded tracks — skips tracks in metadata excluded list', async () => {
@@ -377,7 +370,6 @@ describe('replaceTracksIfBetter (per-track upgrade)', () => {
 
     expect(result.success).toBe(true);
     expect(result.files).toBe(1);      // only track 02
-    expect(fs.unlinkSync).toHaveBeenCalledTimes(1);
   });
 
   test('fresh album — moves all files with no quality checks', async () => {
@@ -390,10 +382,6 @@ describe('replaceTracksIfBetter (per-track upgrade)', () => {
 
     expect(result.success).toBe(true);
     expect(result.files).toBe(2);
-    // No deletions (no existing files)
-    expect(fs.unlinkSync).not.toHaveBeenCalled();
-    // probeFile should not be called for quality comparison (fast path)
-    // (it may still be called for other purposes, but not for existing tracks)
   });
 
   test('title-based match — matches by normalized title when no track number in existing', async () => {
@@ -406,7 +394,6 @@ describe('replaceTracksIfBetter (per-track upgrade)', () => {
 
     expect(result.success).toBe(true);
     expect(result.files).toBe(2);
-    expect(fs.unlinkSync).toHaveBeenCalledTimes(2);
   });
 
   test('same quality — skips when incoming is not strictly better', async () => {

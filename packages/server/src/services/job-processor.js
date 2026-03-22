@@ -243,6 +243,11 @@ function replaceTracksIfBetter({ incomingFiles, destDir, jobId }) {
 
 /**
  * Process a download job: magnet → RD → download → validate → replace.
+ *
+ * ARCHITECTURE NOTE: This pipeline mirrors processSoulseekDownload() below.
+ * Both use per-file processing: each file is validated and moved to the library
+ * immediately after download via replaceTracksIfBetter(). Changes to the
+ * validate → replace flow should be applied to BOTH functions.
  */
 async function processDownload(job, payload) {
   const { magnetLink, artist, album, mbid, rgid, isDiscography, upgradeFrom } = payload;
@@ -291,75 +296,82 @@ async function processDownload(job, payload) {
     log('pipeline', 'info', `[job ${job.id}] Waiting for RD download...`);
     const cached = await pollRd(torrentId, 'downloaded', RD_DOWNLOAD_TIMEOUT);
 
-    // Step 6: Unrestrict + download to staging
+    // Step 6: Unrestrict + download + validate + replace per-file
+    // Each file is validated and moved to library immediately after download.
+    // This prevents losing work if later files fail.
     fs.mkdirSync(stagingDir, { recursive: true });
-    const downloadedFiles = [];
+    const destDir = path.join(getMusicDir(), downloader.sanitizePath(artist), downloader.sanitizePath(album));
+    fs.mkdirSync(destDir, { recursive: true });
     const links = cached.links || [];
+    const upgraded = [];
+    const skippedWorse = [];
+    const skippedExcluded = [];
+    const failedFiles = [];
 
     for (const link of links) {
-      const unrestricted = await rd.unrestrictLink(link);
+      let unrestricted;
+      try {
+        unrestricted = await rd.unrestrictLink(link);
+      } catch (err) {
+        log('pipeline', 'info', `[job ${job.id}] Failed to unrestrict link: ${err.message}`);
+        failedFiles.push(link);
+        continue;
+      }
       if (!downloader.isAudioFile(unrestricted.filename) && !downloader.isArchive(unrestricted.filename)) {
         continue; // skip non-audio, non-archive
       }
       const destPath = path.join(stagingDir, downloader.sanitizePath(unrestricted.filename));
       log('pipeline', 'info', `[job ${job.id}] Downloading: ${unrestricted.filename}`);
-      await downloader.downloadFile(unrestricted.download, destPath);
 
-      // Step 7: Extract archives
+      try {
+        await downloader.downloadFile(unrestricted.download, destPath);
+      } catch (err) {
+        log('pipeline', 'info', `[job ${job.id}] Download failed for ${unrestricted.filename}: ${err.message}`);
+        failedFiles.push(unrestricted.filename);
+        continue;
+      }
+
+      // Extract archives into individual files
+      let filesToProcess = [destPath];
       if (downloader.isArchive(unrestricted.filename)) {
-        const extracted = await downloader.extractArchive(destPath, stagingDir);
-        downloadedFiles.push(...extracted);
-      } else {
-        downloadedFiles.push(destPath);
+        try {
+          const extracted = await downloader.extractArchive(destPath, stagingDir);
+          filesToProcess = extracted;
+        } catch (err) {
+          log('pipeline', 'info', `[job ${job.id}] Archive extraction failed: ${err.message}`);
+          failedFiles.push(unrestricted.filename);
+          continue;
+        }
+      }
+
+      // Validate + replace each file immediately
+      for (const filePath of filesToProcess) {
+        const validation = await fileValidator.validateFile(filePath);
+        if (!validation.passed) {
+          const failedChecks = validation.checks.filter(c => !c.passed && !c.skipped).map(c => c.name).join(', ');
+          log('pipeline', 'info', `[job ${job.id}] Validation failed for ${path.basename(filePath)}: ${failedChecks}`);
+          try { fs.unlinkSync(filePath); } catch {}
+          failedFiles.push(path.basename(filePath));
+          continue;
+        }
+
+        const trackResult = replaceTracksIfBetter({ incomingFiles: [filePath], destDir, jobId: job.id });
+        upgraded.push(...trackResult.upgraded);
+        skippedWorse.push(...trackResult.skippedWorse);
+        skippedExcluded.push(...trackResult.skippedExcluded);
+
+        // Clean up staging copy
+        try { fs.unlinkSync(filePath); } catch {}
       }
     }
 
-    if (downloadedFiles.length === 0) {
-      throw new Error('No audio files downloaded');
+    if (upgraded.length === 0 && skippedWorse.length === 0) {
+      throw new Error(`No audio files successfully processed (${failedFiles.length} failed)`);
     }
 
-    // Step 8: File validation (MIME + ffprobe + ClamAV)
-    for (const filePath of downloadedFiles) {
-      const validation = await fileValidator.validateFile(filePath);
-      if (!validation.passed) {
-        const failedChecks = validation.checks.filter(c => !c.passed && !c.skipped).map(c => c.name).join(', ');
-        throw new Error(`File validation failed for ${path.basename(filePath)}: ${failedChecks}`);
-      }
-    }
-    log('pipeline', 'info', `[job ${job.id}] All ${downloadedFiles.length} files passed validation`);
+    const result = { upgraded, skippedWorse, skippedExcluded };
 
-    // Step 9: Download validation (MusicBrainz track matching)
-    const existingDir = path.join(getMusicDir(), downloader.sanitizePath(artist), downloader.sanitizePath(album));
-    let existingTrackCount;
-    try {
-      if (fs.existsSync(existingDir)) {
-        existingTrackCount = fs.readdirSync(existingDir).filter(f => downloader.isAudioFile(f)).length;
-      }
-    } catch { /* no existing files */ }
-
-    const validation = await downloadValidator.validate({
-      files: downloadedFiles,
-      mbid,
-      rgid,
-      artist,
-      album,
-      existingTrackCount,
-    });
-
-    log('pipeline', 'info', `[job ${job.id}] Validation: ${validation.confidence} confidence (score ${validation.score}) — ${validation.details}`);
-
-    // Step 10: Replace or reject
-    if (validation.confidence === 'low') {
-      throw new Error(`Download validation failed (score ${validation.score}): ${validation.details}`);
-    }
-
-    // Move files from staging to library — per-track quality comparison
-    const destDir = path.join(getMusicDir(), downloader.sanitizePath(artist), downloader.sanitizePath(album));
-    fs.mkdirSync(destDir, { recursive: true });
-
-    const result = replaceTracksIfBetter({ incomingFiles: downloadedFiles, destDir, jobId: job.id });
-
-    log('pipeline', 'success', `[job ${job.id}] ${artist} - ${album}: ${result.upgraded.length} upgraded, ${result.skippedWorse.length} skipped (worse), ${result.skippedExcluded.length} excluded (${validation.confidence} confidence${upgradeFrom ? ', ' + upgradeFrom + ' → upgraded' : ''})`);
+    log('pipeline', 'success', `[job ${job.id}] ${artist} - ${album}: ${result.upgraded.length} upgraded, ${result.skippedWorse.length} skipped (worse), ${failedFiles.length} failed${upgradeFrom ? ', ' + upgradeFrom + ' → upgraded' : ''}`);
 
     return {
       success: true,
@@ -367,8 +379,7 @@ async function processDownload(job, payload) {
       album,
       files: result.upgraded.length,
       filesSkipped: result.skippedWorse.length,
-      confidence: validation.confidence,
-      score: validation.score,
+      filesFailed: failedFiles.length,
     };
   } finally {
     // Step 11: Cleanup staging
@@ -462,6 +473,11 @@ function findFileInDir(dir, targetBasename) {
 /**
  * Process a Soulseek download job:
  * enqueue on slskd → poll per-file → validate + replace incrementally → library
+ *
+ * ARCHITECTURE NOTE: This pipeline mirrors processDownload() above.
+ * Both use per-file processing: each file is validated and moved to the library
+ * immediately after completion via replaceTracksIfBetter(). Changes to the
+ * validate → replace flow should be applied to BOTH functions.
  */
 async function processSoulseekDownload(job, payload) {
   const { soulseekUser, files, artist, album, mbid, rgid } = payload;
