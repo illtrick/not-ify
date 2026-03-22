@@ -124,10 +124,17 @@ async function ytDownloadOne(entry, abort) {
   const dlArtist = sanitizePath(entry.artist || 'Unknown Artist');
   const dlAlbum = sanitizePath(entry.album || 'Singles');
 
-  activity.log('youtube', 'info', `Downloading: ${dlTitle}`, { artist: dlArtist, album: dlAlbum, title: dlTitle });
-
   const destDir = path.join(MUSIC_DIR, dlArtist, dlAlbum);
   fs.mkdirSync(destDir, { recursive: true });
+
+  // Skip if file already exists (avoid re-downloading on repeat plays)
+  const existingFile = path.join(destDir, `${sanitizePath(dlTitle)}.mp3`);
+  if (fs.existsSync(existingFile)) {
+    activity.log('youtube', 'info', `Skipped (exists): ${dlTitle}`, { artist: dlArtist, album: dlAlbum, title: dlTitle });
+    return existingFile;
+  }
+
+  activity.log('youtube', 'info', `Downloading: ${dlTitle}`, { artist: dlArtist, album: dlAlbum, title: dlTitle });
 
   const outputTemplate = path.join(destDir, `${sanitizePath(dlTitle)}.%(ext)s`);
   const args = [
