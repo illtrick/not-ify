@@ -440,8 +440,28 @@ async function processUpgrade(job, payload) {
 }
 
 /**
+ * Recursively search a directory for a file by basename.
+ * Returns the full path if found, null otherwise.
+ */
+function findFileInDir(dir, targetBasename) {
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        const found = findFileInDir(fullPath, targetBasename);
+        if (found) return found;
+      } else if (entry.name === targetBasename) {
+        return fullPath;
+      }
+    }
+  } catch {}
+  return null;
+}
+
+/**
  * Process a Soulseek download job:
- * enqueue on slskd → poll until complete → copy from shared volume → validate → library
+ * enqueue on slskd → poll per-file → validate + replace incrementally → library
  */
 async function processSoulseekDownload(job, payload) {
   const { soulseekUser, files, artist, album, mbid, rgid } = payload;
@@ -463,16 +483,33 @@ async function processSoulseekDownload(job, payload) {
       throw new Error(`Failed to enqueue download from ${soulseekUser}`);
     }
 
-    // Step 2: Poll until all files complete or timeout
+    // Step 2: Poll and process files incrementally as they complete.
+    // Each file is validated and moved to library immediately — no waiting
+    // for the full album. This prevents losing work if some files timeout.
     const deadline = Date.now() + getSlskDownloadTimeout();
-    let allComplete = false;
-
     const getBasename = (f) => f.split(/[\\/]/).pop();
+    const processedBasenames = new Set();
+    const destDir = path.join(getMusicDir(), downloader.sanitizePath(artist), downloader.sanitizePath(album));
+    fs.mkdirSync(destDir, { recursive: true });
+    fs.mkdirSync(stagingDir, { recursive: true });
 
-    while (Date.now() < deadline && !allComplete) {
+    const dlBase = getSlskdDownloadsDir();
+    const userDir = path.join(dlBase, soulseekUser);
+    const expectedBasenames = new Set(
+      files.map(f => path.basename(f.filename.replace(/\\/g, '/')))
+    );
+
+    const upgraded = [];
+    const skippedWorse = [];
+    const skippedExcluded = [];
+    const failedFiles = [];
+    let lastLoggedCount = -1;
+
+    while (Date.now() < deadline) {
       await new Promise(r => setTimeout(r, getSlskPollInterval()));
       const transfers = await pollDownloads(soulseekUser);
 
+      // Build current state map
       const fileStates = new Map();
       for (const t of transfers) {
         for (const dir of (t.directories || [])) {
@@ -482,111 +519,85 @@ async function processSoulseekDownload(job, payload) {
         }
       }
 
-      const completed = files.filter(f => {
-        const state = fileStates.get(getBasename(f.filename)) || '';
-        return state.includes('Succeeded');
-      });
-
-      const failed = files.filter(f => {
-        const state = fileStates.get(getBasename(f.filename)) || '';
-        return state.includes('Errored') || state.includes('Cancelled');
-      });
-
-      if (failed.length > 0) {
-        throw new Error(`${failed.length} files failed to download from ${soulseekUser}`);
-      }
-
-      allComplete = completed.length >= files.length;
-      if (!allComplete) {
-        log('pipeline', 'info', `[job ${job.id}] Soulseek download progress: ${completed.length}/${files.length}`);
-      }
-    }
-
-    if (!allComplete) {
-      throw new Error(`Soulseek download timed out after ${getSlskDownloadTimeout() / 1000}s`);
-    }
-
-    // Step 3: Copy ONLY the files we requested from shared volume to staging
-    // Build a set of expected basenames from the enqueued files list
-    fs.mkdirSync(stagingDir, { recursive: true });
-    const downloadedFiles = [];
-    const expectedBasenames = new Set(
-      files.map(f => path.basename(f.filename.replace(/\\/g, '/')))
-    );
-
-    const dlBase = getSlskdDownloadsDir();
-    if (!fs.existsSync(dlBase)) {
-      throw new Error(`Soulseek downloads directory not found: ${dlBase}`);
-    }
-
-    // Walk ONLY the specific user's directory to avoid grabbing files from other jobs
-    // slskd organizes: /downloads/{username}/{remote_path}/files
-    const userDir = path.join(dlBase, soulseekUser);
-    const searchDir = fs.existsSync(userDir) ? userDir : dlBase;
-    if (searchDir !== userDir) {
-      log('pipeline', 'info', `[job ${job.id}] User dir ${userDir} not found, falling back to ${dlBase}`);
-    }
-
-    const walkDir = (dir) => {
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        const fullPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          walkDir(fullPath);
-        } else if (downloader.isAudioFile(entry.name) && expectedBasenames.has(entry.name)) {
-          const safeName = path.basename(entry.name);
-          const destPath = path.join(stagingDir, downloader.sanitizePath(safeName));
-          // Avoid duplicates — only copy if we haven't already copied this basename
-          if (!downloadedFiles.some(f => path.basename(f) === downloader.sanitizePath(safeName))) {
-            fs.copyFileSync(fullPath, destPath);
-            downloadedFiles.push(destPath);
-          }
+      // Track failed files (but don't abort — process what we can)
+      for (const f of files) {
+        const bn = getBasename(f.filename);
+        const state = fileStates.get(bn) || '';
+        if ((state.includes('Errored') || state.includes('Cancelled')) && !processedBasenames.has(bn)) {
+          processedBasenames.add(bn);
+          failedFiles.push(bn);
+          log('pipeline', 'info', `[job ${job.id}] File failed to download: ${bn}`);
         }
       }
-    };
-    walkDir(searchDir);
 
-    if (downloadedFiles.length === 0) {
-      throw new Error(`No matching audio files found in Soulseek downloads (expected ${expectedBasenames.size} files)`);
+      // Find newly completed files and process them immediately
+      for (const f of files) {
+        const bn = getBasename(f.filename);
+        if (processedBasenames.has(bn)) continue;
+        const state = fileStates.get(bn) || '';
+        if (!state.includes('Succeeded')) continue;
+
+        processedBasenames.add(bn);
+
+        // Find the file in the downloads directory
+        const searchDir = fs.existsSync(userDir) ? userDir : dlBase;
+        const foundPath = findFileInDir(searchDir, bn);
+        if (!foundPath) {
+          log('pipeline', 'info', `[job ${job.id}] Completed file not found on disk: ${bn}`);
+          failedFiles.push(bn);
+          continue;
+        }
+
+        // Copy to staging
+        const safeName = downloader.sanitizePath(path.basename(bn));
+        const stagingPath = path.join(stagingDir, safeName);
+        fs.copyFileSync(foundPath, stagingPath);
+
+        // Validate (MIME + ffprobe + ClamAV)
+        const fileVal = await fileValidator.validateFile(stagingPath);
+        if (!fileVal.passed) {
+          const failedChecks = fileVal.checks.filter(c => !c.passed && !c.skipped).map(c => c.name).join(', ');
+          log('pipeline', 'info', `[job ${job.id}] Validation failed for ${bn}: ${failedChecks}`);
+          try { fs.unlinkSync(stagingPath); } catch {}
+          failedFiles.push(bn);
+          continue;
+        }
+
+        // Per-track quality comparison and replacement
+        const trackResult = replaceTracksIfBetter({ incomingFiles: [stagingPath], destDir, jobId: job.id });
+        upgraded.push(...trackResult.upgraded);
+        skippedWorse.push(...trackResult.skippedWorse);
+        skippedExcluded.push(...trackResult.skippedExcluded);
+
+        // Clean up staging copy
+        try { fs.unlinkSync(stagingPath); } catch {}
+      }
+
+      // Log progress (only when count changes)
+      const doneCount = processedBasenames.size;
+      if (doneCount !== lastLoggedCount) {
+        lastLoggedCount = doneCount;
+        log('pipeline', 'info', `[job ${job.id}] Soulseek progress: ${upgraded.length} upgraded, ${failedFiles.length} failed, ${skippedWorse.length} skipped (${doneCount}/${files.length})`);
+      }
+
+      // All files accounted for — done
+      if (processedBasenames.size >= files.length) break;
     }
 
-    log('pipeline', 'info', `[job ${job.id}] Copied ${downloadedFiles.length}/${expectedBasenames.size} files from Soulseek to staging`);
-
-    // Step 4: File validation (MIME + ffprobe + ClamAV)
-    for (const filePath of downloadedFiles) {
-      const validation = await fileValidator.validateFile(filePath);
-      if (!validation.passed) {
-        const failedChecks = validation.checks.filter(c => !c.passed && !c.skipped).map(c => c.name).join(', ');
-        throw new Error(`File validation failed for ${path.basename(filePath)}: ${failedChecks}`);
+    // Log any remaining unfinished files as timed out
+    for (const f of files) {
+      const bn = getBasename(f.filename);
+      if (!processedBasenames.has(bn)) {
+        failedFiles.push(bn);
+        log('pipeline', 'info', `[job ${job.id}] File timed out: ${bn}`);
       }
     }
-    log('pipeline', 'info', `[job ${job.id}] All ${downloadedFiles.length} files passed validation`);
 
-    // Step 5: Download validation (MusicBrainz track matching)
-    const existingDir = path.join(getMusicDir(), downloader.sanitizePath(artist), downloader.sanitizePath(album));
-    let existingTrackCount;
-    try {
-      if (fs.existsSync(existingDir)) {
-        existingTrackCount = fs.readdirSync(existingDir).filter(f => downloader.isAudioFile(f)).length;
-      }
-    } catch { /* no existing files */ }
-
-    const validation = await downloadValidator.validate({
-      files: downloadedFiles,
-      mbid, rgid, artist, album, existingTrackCount,
-    });
-
-    log('pipeline', 'info', `[job ${job.id}] Validation: ${validation.confidence} confidence (score ${validation.score})`);
-
-    if (validation.confidence === 'low') {
-      throw new Error(`Download validation failed (score ${validation.score}): ${validation.details}`);
+    if (upgraded.length === 0 && skippedWorse.length === 0) {
+      throw new Error(`No files successfully processed from Soulseek (${failedFiles.length} failed)`);
     }
 
-    // Step 6: Move from staging to library — per-track quality comparison
-    const destDir = path.join(getMusicDir(), downloader.sanitizePath(artist), downloader.sanitizePath(album));
-    fs.mkdirSync(destDir, { recursive: true });
-
-    const result = replaceTracksIfBetter({ incomingFiles: downloadedFiles, destDir, jobId: job.id });
+    const result = { upgraded, skippedWorse, skippedExcluded };
 
     // Step 7: Write .metadata.json (matches torrent pipeline behavior)
     const metadataPath = path.join(destDir, '.metadata.json');
@@ -606,7 +617,7 @@ async function processSoulseekDownload(job, payload) {
       }).catch(() => {});
     } catch {}
 
-    log('pipeline', 'success', `[job ${job.id}] ${artist} - ${album}: ${result.upgraded.length} upgraded, ${result.skippedWorse.length} skipped (worse), ${result.skippedExcluded.length} excluded from Soulseek (${validation.confidence} confidence)`);
+    log('pipeline', 'success', `[job ${job.id}] ${artist} - ${album}: ${result.upgraded.length} upgraded, ${result.skippedWorse.length} skipped (worse), ${failedFiles.length} failed from Soulseek`);
 
     return {
       success: true,
@@ -614,8 +625,7 @@ async function processSoulseekDownload(job, payload) {
       artist, album,
       files: result.upgraded.length,
       filesSkipped: result.skippedWorse.length,
-      confidence: validation.confidence,
-      score: validation.score,
+      filesFailed: failedFiles.length,
       soulseekUser,
     };
   } finally {
