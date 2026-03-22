@@ -23,9 +23,9 @@ function getSlskPollInterval() {
 }
 
 // Read lazily so that tests can set process.env.MUSIC_DIR before each test case.
-// In production this is effectively read-once on first job, which is fine.
+// Use _env() to avoid shadowing by the module's own process() function export.
 function getMusicDir() {
-  return (process.env && process.env.MUSIC_DIR) || '/app/music';
+  return _env().MUSIC_DIR || '/app/music';
 }
 function getStagingDir() {
   return path.join(getMusicDir(), '_staging');
