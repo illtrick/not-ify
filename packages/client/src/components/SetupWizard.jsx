@@ -642,7 +642,12 @@ function StepDashboard({ onComplete }) {
 
   useEffect(() => {
     getSetupServices()
-      .then(data => setServices(data || {}))
+      .then(data => {
+        // API returns array — convert to object keyed by name for easy lookup
+        const map = {};
+        (Array.isArray(data) ? data : []).forEach(s => { map[s.name] = s; });
+        setServices(map);
+      })
       .catch(() => setServices({}));
   }, []);
 
