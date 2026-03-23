@@ -337,10 +337,17 @@ docker run --rm \
 # Check if containers started successfully
 echo ""
 if docker ps --filter name=not-ify --format '{{.Names}}' 2>/dev/null | grep -q 'not-ify'; then
-  # Detect LAN IP
-  HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-  [ -z "$HOST_IP" ] && HOST_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[\d.]+' 2>/dev/null || true)
-  [ -z "$HOST_IP" ] && HOST_IP="localhost"
+  # Detect LAN IP (multiple methods for compatibility)
+  HOST_IP=""
+  # Method 1: hostname -I (most Linux)
+  [ -z "$HOST_IP" ] && HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+  # Method 2: ip route (works on busybox)
+  [ -z "$HOST_IP" ] && HOST_IP=$(ip route get 1.1.1.1 2>/dev/null | awk '/src/{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')
+  # Method 3: ifconfig (QNAP/older systems)
+  [ -z "$HOST_IP" ] && HOST_IP=$(ifconfig 2>/dev/null | grep 'inet ' | grep -v '127.0.0.1' | head -1 | awk '{print $2}' | sed 's/addr://')
+  # Method 4: hostname lookup
+  [ -z "$HOST_IP" ] && HOST_IP=$(hostname 2>/dev/null)
+  [ -z "$HOST_IP" ] && HOST_IP="<your-server-ip>"
 
   echo ""
   echo -e "  ${BOLD}═══════════════════════════════════════════${NC}"

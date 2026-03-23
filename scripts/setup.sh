@@ -104,12 +104,16 @@ SLSKD_API_KEY=${API_KEY}
 SLSKD_DOWNLOADS_DIR=${INSTALL_DIR}/slskd-downloads
 EOF
 
-# Write slskd config
+# Write slskd config with auto-generated Soulseek credentials
+# These are placeholder credentials so slskd starts cleanly.
+# Users update with their real account in the Not-ify Settings UI.
 mkdir -p "${HOST_INSTALL}/slskd"
+SLSK_AUTO_USER="notifier-$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+SLSK_AUTO_PASS="$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 cat > "${HOST_INSTALL}/slskd/slskd.yml" << EOF
 soulseek:
-  username:
-  password:
+  username: ${SLSK_AUTO_USER}
+  password: ${SLSK_AUTO_PASS}
 
 web:
   authentication:

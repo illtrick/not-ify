@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   not-ify:
     image: ghcr.io/illtrick/not-ify:latest
