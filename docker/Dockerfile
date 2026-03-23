@@ -19,9 +19,20 @@ RUN npm run build -w @not-ify/client
 # Stage 2: Production image — only runtime deps
 FROM node:20-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg curl ca-certificates unrar-free python3 file \
+    ffmpeg curl ca-certificates unrar-free python3 file bash whiptail jq \
     && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
        -o /usr/local/bin/yt-dlp && chmod +x /usr/local/bin/yt-dlp \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Docker CLI + Compose plugin (for setup script to manage host containers)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gnupg lsb-release \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -41,6 +52,14 @@ COPY --from=build /app/packages/shared/ packages/shared/
 # Copy only the built client (no source, no devDeps)
 COPY --from=build /app/packages/client/dist/ packages/client/dist/
 
+# Copy setup scripts
+COPY scripts/entrypoint.sh /app/scripts/entrypoint.sh
+COPY scripts/setup.sh /app/scripts/setup.sh
+COPY scripts/setup-lib.sh /app/scripts/setup-lib.sh
+COPY scripts/docker-compose.template.yml /app/scripts/docker-compose.template.yml
+RUN chmod +x /app/scripts/*.sh
+
 EXPOSE 3000
 
-CMD ["node", "packages/server/src/index.js"]
+ENTRYPOINT ["/app/scripts/entrypoint.sh"]
+CMD ["server"]
