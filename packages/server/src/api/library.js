@@ -267,7 +267,38 @@ router.get('/library', (req, res) => {
   const { tracks } = getTrackMap();
   // Remove internal _fullPath from response
   const cleaned = tracks.map(({ _fullPath, ...rest }) => rest);
-  res.json(cleaned);
+
+  // Append excluded tracks from .metadata.json so the UI can render them greyed out
+  const albumDirs = new Set();
+  for (const t of tracks) {
+    albumDirs.add(path.dirname(t._fullPath));
+  }
+  const excludedEntries = [];
+  for (const dir of albumDirs) {
+    const meta = readDirMeta(dir);
+    if (!meta || !Array.isArray(meta.excluded) || meta.excluded.length === 0) continue;
+    // Derive artist/album from the directory structure relative to MUSIC_DIR
+    const rel = path.relative(MUSIC_DIR, dir);
+    const parts = rel.split(path.sep);
+    const artist = parts.length >= 2 ? (cleanFolderName(parts[0]) || parts[0]) : 'Unknown Artist';
+    const album = parts.length >= 2 ? (cleanFolderName(parts[1]) || parts[1]) : (cleanFolderName(parts[0]) || parts[0]);
+    for (const excludedName of meta.excluded) {
+      excludedEntries.push({
+        id: `excluded-${excludedName}`,
+        title: excludedName.replace(/^\d+[-_ ]*/, '').replace(/\.\w+$/, ''),
+        artist,
+        album,
+        format: null,
+        excluded: true,
+        _dir: dir,
+        _filename: excludedName,
+      });
+    }
+  }
+
+  // Merge: include excluded entries, exposing dir info for restore but stripping internal fields
+  const excludedCleaned = excludedEntries.map(({ _dir, ...rest }) => rest);
+  res.json([...cleaned, ...excludedCleaned]);
 });
 
 // GET /api/stream/:id — serve audio with range request support
@@ -494,6 +525,52 @@ router.put('/recently-played', express.json(), (req, res) => {
   const result = db.bulkSetRecentlyPlayed(req.userId, cleaned);
   broadcastRecentlyPlayed(req.userId, result);
   res.json(result);
+});
+
+// DELETE /api/library/track/exclude — Restore a previously excluded track
+// Query params: artist, album, filename
+router.delete('/library/track/exclude', (req, res) => {
+  const { artist, album, filename } = req.query;
+  if (!artist || !album || !filename) {
+    return res.status(400).json({ error: 'Missing artist, album, or filename' });
+  }
+
+  const downloader = require('../services/downloader');
+  const albumDir = path.join(MUSIC_DIR, downloader.sanitizePath(artist), downloader.sanitizePath(album));
+  const metaPath = path.join(albumDir, '.metadata.json');
+
+  if (!fs.existsSync(metaPath)) {
+    return res.status(404).json({ error: 'No metadata found for this album' });
+  }
+
+  let meta;
+  try {
+    meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+  } catch {
+    return res.status(500).json({ error: 'Failed to read metadata' });
+  }
+
+  if (!Array.isArray(meta.excluded)) {
+    return res.status(404).json({ error: 'Track not in excluded list' });
+  }
+
+  const idx = meta.excluded.indexOf(filename);
+  if (idx === -1) {
+    return res.status(404).json({ error: 'Track not in excluded list' });
+  }
+
+  meta.excluded.splice(idx, 1);
+  if (meta.excluded.length === 0) delete meta.excluded;
+
+  try {
+    fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+
+  invalidateCache();
+  console.log(`[library] Restored excluded track: ${filename} in ${artist}/${album}`);
+  res.json({ restored: 1, filename, artist, album });
 });
 
 // POST /api/library/rescan — admin-triggered full re-scan

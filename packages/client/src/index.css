@@ -158,3 +158,11 @@ input[type="range"]::-moz-range-thumb {
 .eq-bars .eq-bar-1 { animation: eq-bar-1 0.8s ease-in-out infinite; }
 .eq-bars .eq-bar-2 { animation: eq-bar-2 0.6s ease-in-out infinite 0.1s; }
 .eq-bars .eq-bar-3 { animation: eq-bar-3 0.7s ease-in-out infinite 0.2s; }
+
+.track-excluded {
+  opacity: 0.4;
+}
+.track-excluded .excluded-label {
+  color: var(--text-secondary, #888);
+  font-size: 0.75rem;
+}

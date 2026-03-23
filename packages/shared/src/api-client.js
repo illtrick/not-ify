@@ -169,6 +169,10 @@ export function removeTrack(id) {
   return del(`/api/library/track/${id}`);
 }
 
+export function restoreExcludedTrack(artist, album, filename) {
+  return del(`/api/library/track/exclude?artist=${enc(artist)}&album=${enc(album)}&filename=${enc(filename)}`);
+}
+
 export function dedupeLibrary() {
   return post('/api/library/dedupe');
 }

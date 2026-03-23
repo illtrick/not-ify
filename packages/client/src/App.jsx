@@ -721,6 +721,22 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
     }
   }
 
+  async function restoreExcludedTrackFromLibrary(artist, album, filename) {
+    try {
+      await api.restoreExcludedTrack(artist, album, filename);
+      await loadLibrary();
+      // Update selected album's track list — remove the excluded placeholder so it refreshes
+      if (selectedAlbum && selectedAlbum.tracks) {
+        setSelectedAlbum(prev => prev ? {
+          ...prev,
+          tracks: prev.tracks.filter(t => t.id !== `excluded-${filename}`),
+        } : prev);
+      }
+    } catch (err) {
+      console.error('Failed to restore excluded track:', err);
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Main render
   // -------------------------------------------------------------------------
@@ -857,6 +873,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
                     addToQueue={addToQueue}
                     setQueue={setQueue}
                     removeTrackFromLibrary={removeTrackFromLibrary}
+                    restoreExcludedTrack={restoreExcludedTrackFromLibrary}
                     getTrackDlStatus={getTrackDlStatus}
                     onUpgradeTriggered={startJobQueuePoll}
                   />

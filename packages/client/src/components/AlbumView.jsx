@@ -38,6 +38,7 @@ export function AlbumView({
   addToQueue,
   setQueue,
   removeTrackFromLibrary,
+  restoreExcludedTrack,
   getTrackDlStatus,
   onUpgradeTriggered,
 }) {
@@ -78,7 +79,7 @@ export function AlbumView({
   if (!selectedAlbum) return null;
   const { artist, album, year, coverArt, tracks, sources, fromSearch, trackCount } = selectedAlbum;
 
-  const isLib = !fromSearch && tracks.length > 0;
+  const isLib = !fromSearch && (activeTracks.length > 0 || excludedTracks.length > 0);
 
   // Enrich tracks with latest format info from library (badges stay fresh after upgrades)
   // Library is re-fetched via SSE on upgrade events — see App.jsx SSE listener
@@ -95,7 +96,11 @@ export function AlbumView({
     return map;
   }, [library, artist, album]);
 
-  const pl = tracks.map(t => {
+  // Separate active tracks from excluded ones (excluded come from server with excluded:true)
+  const activeTracks = tracks.filter(t => !t.excluded);
+  const excludedTracks = tracks.filter(t => t.excluded);
+
+  const pl = activeTracks.map(t => {
     const liveFormat = libraryFormatMap.get(t.id) || libraryFormatMap.get((t.title || '').toLowerCase());
     return liveFormat && liveFormat !== t.format ? { ...t, format: liveFormat } : t;
   });
@@ -359,6 +364,45 @@ export function AlbumView({
                   <span style={{ opacity: 0.45, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
                     {Icon.checkCircle(13, ['flac', 'wav'].includes(track.format?.toLowerCase()) ? COLORS.success : COLORS.textSecondary)}
                   </span>
+                )}
+              </div>
+            );
+          })}
+          {excludedTracks.map((track) => {
+            const trackArtist = track.artist || artist;
+            // Extract original filename for restore — stored in track.id as "excluded-<filename>"
+            const filename = track.id.replace(/^excluded-/, '');
+            return (
+              <div
+                key={track.id}
+                role="listitem"
+                className="track-excluded"
+                style={{ ...trackRowStyle(false, false, isMobile), opacity: 0.4, cursor: 'default' }}
+                {...contextMenuProps(e => showContextMenu(e, [
+                  { label: 'Restore Track', action: () => restoreExcludedTrack && restoreExcludedTrack(track.artist || artist, album, filename) },
+                ]))}
+              >
+                <span style={{ width: isMobile ? 28 : 32, textAlign: 'right', marginRight: isMobile ? 12 : 16, fontSize: 14, color: COLORS.textSecondary, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                  —
+                </span>
+                <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                  <div style={{ fontSize: 14, fontWeight: 500, color: COLORS.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {track.title}
+                  </div>
+                  <div style={{ fontSize: 12, color: COLORS.textSecondary, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {trackArtist}
+                  </div>
+                </div>
+                {!isMobile && (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                    <span className="excluded-label" style={{ color: COLORS.textSecondary, fontSize: '0.75rem' }}>Removed</span>
+                  </span>
+                )}
+                {!isMobile && (
+                  <span style={{ width: 50, textAlign: 'right', fontSize: 12, color: COLORS.textSecondary, flexShrink: 0, marginLeft: 12 }} />
+                )}
+                {isMobile && (
+                  <span style={{ fontSize: '0.7rem', color: COLORS.textSecondary, flexShrink: 0 }}>Removed</span>
                 )}
               </div>
             );
