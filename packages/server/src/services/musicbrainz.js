@@ -1,9 +1,11 @@
 const MB_BASE = 'https://musicbrainz.org/ws/2';
 const USER_AGENT = 'Not-ify/1.0.0 (personal-use)';
+const db = require('./db');
 
-// In-memory cache: key -> { data, expires }
-const cache = new Map();
-const CACHE_TTL = 60 * 60 * 1000; // 1 hour
+// Cache TTLs
+const CACHE_TTL_POSITIVE = 6 * 60 * 60 * 1000;   // 6 hours for results
+const CACHE_TTL_NEGATIVE = 48 * 60 * 60 * 1000;   // 48 hours for empty results
+const CACHE_TTL_TRACKS = 24 * 60 * 60 * 1000;      // 24 hours for track listings
 
 // Rate limiter: max 1 req/sec
 let lastRequestTime = 0;
@@ -26,17 +28,6 @@ async function mbFetch(url) {
     throw new Error(`MusicBrainz error ${res.status}`);
   }
   return res.json();
-}
-
-function cacheGet(key) {
-  const entry = cache.get(key);
-  if (!entry) return null;
-  if (Date.now() > entry.expires) { cache.delete(key); return null; }
-  return entry.data;
-}
-
-function cacheSet(key, data) {
-  cache.set(key, { data, expires: Date.now() + CACHE_TTL });
 }
 
 // Parse a release-group API response into our internal format
@@ -63,7 +54,7 @@ function parseReleaseGroups(data) {
 // Returns: [{ mbid, rgid, artist, album, year, trackCount }]
 async function searchReleases(query) {
   const key = `releases:${query.toLowerCase().trim()}`;
-  const cached = cacheGet(key);
+  const cached = db.mbCacheGet(key);
   if (cached) return cached;
 
   try {
@@ -94,7 +85,8 @@ async function searchReleases(query) {
       }
     }
 
-    cacheSet(key, releases);
+    const ttl = releases.length > 0 ? CACHE_TTL_POSITIVE : CACHE_TTL_NEGATIVE;
+    db.mbCacheSet(key, releases, ttl);
     return releases;
   } catch (err) {
     console.error(`MusicBrainz search failed: ${err.message}`);
@@ -106,7 +98,7 @@ async function searchReleases(query) {
 // Returns: [{ mbid, name, type, disambiguation, sortName }]
 async function searchArtists(query) {
   const key = `artists:${query.toLowerCase().trim()}`;
-  const cached = cacheGet(key);
+  const cached = db.mbCacheGet(key);
   if (cached) return cached;
 
   try {
@@ -130,7 +122,8 @@ async function searchArtists(query) {
     }
 
     const artists = Array.from(seen.values()).slice(0, 6);
-    cacheSet(key, artists);
+    const ttl = artists.length > 0 ? CACHE_TTL_POSITIVE : CACHE_TTL_NEGATIVE;
+    db.mbCacheSet(key, artists, ttl);
     return artists;
   } catch (err) {
     console.error(`MusicBrainz artist search failed: ${err.message}`);
@@ -142,7 +135,7 @@ async function searchArtists(query) {
 // Returns: [{ mbid, rgid, artist, album, year, trackCount, primaryType }]
 async function browseArtistReleases(artistMbid, artistName) {
   const key = `browse:${artistMbid}`;
-  const cached = cacheGet(key);
+  const cached = db.mbCacheGet(key);
   if (cached) return cached;
 
   try {
@@ -163,7 +156,8 @@ async function browseArtistReleases(artistMbid, artistName) {
       };
     });
 
-    cacheSet(key, releases);
+    const ttl = releases.length > 0 ? CACHE_TTL_POSITIVE : CACHE_TTL_NEGATIVE;
+    db.mbCacheSet(key, releases, ttl);
     return releases;
   } catch (err) {
     console.error(`MusicBrainz browse failed: ${err.message}`);
@@ -180,7 +174,7 @@ function getCoverArtUrl(mbid) {
 // Returns: [{ position, title, lengthMs, artist?, artistMbid? }]
 async function getReleaseTracks(mbid) {
   const key = `tracks:${mbid}`;
-  const cached = cacheGet(key);
+  const cached = db.mbCacheGet(key);
   if (cached) return cached;
 
   const url = `${MB_BASE}/release/${mbid}?inc=recordings+artist-credits&fmt=json`;
@@ -210,7 +204,7 @@ async function getReleaseTracks(mbid) {
     }
   }
 
-  cacheSet(key, tracks);
+  db.mbCacheSet(key, tracks, CACHE_TTL_TRACKS);
   return tracks;
 }
 
@@ -218,7 +212,7 @@ async function getReleaseTracks(mbid) {
 // Returns: { releaseMbid, tracks: [{ position, title, lengthMs, artist?, artistMbid? }] }
 async function getReleaseGroupTracks(rgid) {
   const key = `rg-tracks:${rgid}`;
-  const cached = cacheGet(key);
+  const cached = db.mbCacheGet(key);
   if (cached) return cached;
 
   // Browse releases within this release-group, include artist-credits for VA detection
@@ -258,7 +252,7 @@ async function getReleaseGroupTracks(rgid) {
   }
 
   const result = { releaseMbid: best.id, tracks };
-  cacheSet(key, result);
+  db.mbCacheSet(key, result, CACHE_TTL_TRACKS);
   return result;
 }
 
@@ -287,7 +281,7 @@ function normalizeQuery(q) {
 // MB's eDisMax parser supports Lucene fuzzy: "balmoreha~" finds "Balmorhea".
 async function searchReleasesFuzzy(query) {
   const key = `releases-fuzzy:${query.toLowerCase().trim()}`;
-  const cached = cacheGet(key);
+  const cached = db.mbCacheGet(key);
   if (cached) return cached;
 
   try {
@@ -297,7 +291,8 @@ async function searchReleasesFuzzy(query) {
     const url = `${MB_BASE}/release-group/?query=${encodeURIComponent(luceneQuery)}&fmt=json&limit=15&inc=releases`;
     const data = await mbFetch(url);
     const releases = parseReleaseGroups(data);
-    cacheSet(key, releases);
+    const ttl = releases.length > 0 ? CACHE_TTL_POSITIVE : CACHE_TTL_NEGATIVE;
+    db.mbCacheSet(key, releases, ttl);
     return releases;
   } catch (err) {
     console.error(`MusicBrainz fuzzy search failed: ${err.message}`);
@@ -308,7 +303,7 @@ async function searchReleasesFuzzy(query) {
 // Fuzzy artist search with ~ operator
 async function searchArtistsFuzzy(query) {
   const key = `artists-fuzzy:${query.toLowerCase().trim()}`;
-  const cached = cacheGet(key);
+  const cached = db.mbCacheGet(key);
   if (cached) return cached;
 
   try {
@@ -328,7 +323,8 @@ async function searchArtistsFuzzy(query) {
       }
     }
     const artists = Array.from(seen.values()).slice(0, 6);
-    cacheSet(key, artists);
+    const ttl = artists.length > 0 ? CACHE_TTL_POSITIVE : CACHE_TTL_NEGATIVE;
+    db.mbCacheSet(key, artists, ttl);
     return artists;
   } catch (err) {
     console.error(`MusicBrainz fuzzy artist search failed: ${err.message}`);
@@ -379,7 +375,7 @@ function pickBestRelease(releases) {
 // Returns: [{ title, artist, album, rgid, mbid, year }]
 async function searchRecordings(query) {
   const key = `recordings:${query.toLowerCase().trim()}`;
-  const cached = cacheGet(key);
+  const cached = db.mbCacheGet(key);
   if (cached) return cached;
 
   try {
@@ -442,7 +438,8 @@ async function searchRecordings(query) {
 
     const results = Array.from(bestByKey.values()).map(v => v.entry);
 
-    cacheSet(key, results);
+    const ttl = results.length > 0 ? CACHE_TTL_POSITIVE : CACHE_TTL_NEGATIVE;
+    db.mbCacheSet(key, results, ttl);
     return results;
   } catch (err) {
     console.error(`MusicBrainz recording search failed: ${err.message}`);
@@ -455,7 +452,7 @@ async function searchRecordings(query) {
 // Returns: { genres, country, area, activeYears, type, disambiguation, links, members }
 async function getArtistDetails(mbid) {
   const key = `artist-detail:${mbid}`;
-  const cached = cacheGet(key);
+  const cached = db.mbCacheGet(key);
   if (cached) return cached;
 
   try {
@@ -522,7 +519,7 @@ async function getArtistDetails(mbid) {
       members: members.sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0)),
     };
 
-    cacheSet(key, result);
+    db.mbCacheSet(key, result, CACHE_TTL_POSITIVE);
     return result;
   } catch (err) {
     console.error(`MusicBrainz artist detail failed: ${err.message}`);

@@ -150,6 +150,14 @@ function getDb() {
       created_at INTEGER DEFAULT (unixepoch()),
       updated_at INTEGER DEFAULT (unixepoch())
     );
+
+    CREATE TABLE IF NOT EXISTS mb_cache (
+      key TEXT PRIMARY KEY,
+      data TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      hit_count INTEGER DEFAULT 0
+    );
   `);
 
   // Create indexes
@@ -160,6 +168,7 @@ function getDb() {
     CREATE INDEX IF NOT EXISTS idx_scrobbles_user_artist ON scrobbles(user_id, artist);
     CREATE INDEX IF NOT EXISTS idx_scrobbles_user_time ON scrobbles(user_id, played_at);
     CREATE INDEX IF NOT EXISTS idx_tracks_artist_album ON tracks(artist, album);
+    CREATE INDEX IF NOT EXISTS idx_mb_cache_expires ON mb_cache(expires_at);
   `);
 
   // Migration: add role column if missing
@@ -585,6 +594,40 @@ function pruneDeletedTracks(validFilepaths) {
   })();
 }
 
+// --- MB Cache ---
+
+function mbCacheGet(key) {
+  let db;
+  try { db = getDb(); } catch { return null; }
+  const row = db.prepare('SELECT data, expires_at FROM mb_cache WHERE key = ?').get(key);
+  if (!row) return null;
+  if (Date.now() > row.expires_at) {
+    db.prepare('DELETE FROM mb_cache WHERE key = ?').run(key);
+    return null;
+  }
+  db.prepare('UPDATE mb_cache SET hit_count = hit_count + 1 WHERE key = ?').run(key);
+  return JSON.parse(row.data);
+}
+
+function mbCacheSet(key, data, ttlMs) {
+  const db = getDb();
+  const now = Date.now();
+  db.prepare(`INSERT OR REPLACE INTO mb_cache (key, data, expires_at, created_at, hit_count)
+              VALUES (?, ?, ?, ?, 0)`).run(key, JSON.stringify(data), now + ttlMs, now);
+}
+
+function mbCacheCleanup() {
+  const db = getDb();
+  const result = db.prepare('DELETE FROM mb_cache WHERE expires_at < ?').run(Date.now());
+  return result.changes;
+}
+
+function mbCacheStats() {
+  const db = getDb();
+  const row = db.prepare('SELECT COUNT(*) as total, SUM(hit_count) as hits FROM mb_cache').get();
+  return row;
+}
+
 // --- Cleanup ---
 
 function close() {
@@ -654,4 +697,9 @@ module.exports = {
   removeTrackById,
   syncAlbumTracks,
   pruneDeletedTracks,
+  // MB Cache
+  mbCacheGet,
+  mbCacheSet,
+  mbCacheCleanup,
+  mbCacheStats,
 };
