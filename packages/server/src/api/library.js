@@ -1,9 +1,9 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 const db = require('../services/db');
 const streamAuth = require('../services/stream-auth');
+const { generateTrackId, extractTrackNumber, titleFromFilename } = require('../services/track-id');
 
 // Clean folder-derived names: decode HTML entities and strip torrent artifacts
 function cleanFolderName(s) {
@@ -49,10 +49,6 @@ const MIME_TYPES = {
   '.opus': 'audio/opus',
 };
 
-function fileId(filepath) {
-  return crypto.createHash('md5').update(filepath).digest('hex');
-}
-
 function readDirMeta(dir) {
   const metaPath = path.join(dir, '.metadata.json');
   if (!fs.existsSync(metaPath)) return null;
@@ -63,11 +59,14 @@ function readDirMeta(dir) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Filesystem scanner — walks MUSIC_DIR and returns raw track objects.
+// Used by scanAndSync() and syncAlbum(). Does NOT touch the database.
+// ---------------------------------------------------------------------------
 function scanMusicDir(dir, basePath = '', inheritedMeta = null) {
   const tracks = [];
   if (!fs.existsSync(dir)) return tracks;
 
-  // Pick up .metadata.json if present at this level
   const dirMeta = readDirMeta(dir) || inheritedMeta;
 
   const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -90,39 +89,177 @@ function scanMusicDir(dir, basePath = '', inheritedMeta = null) {
         artist = cleanFolderName(parts[0]) || parts[0];
       }
 
-      // Derive title from filename: strip track number prefix and extension
-      const title = path.basename(filename, path.extname(filename))
-        .replace(/^\d+[\s._-]+/, '');
+      const title = titleFromFilename(filename);
+      const trackNumber = extractTrackNumber(filename);
+      let fileSize = null;
+      try { fileSize = fs.statSync(fullPath).size; } catch {}
 
-      const id = fileId(fullPath);
       tracks.push({
-        id,
-        title: title || filename,
         artist,
         album,
+        title: title || filename,
+        trackNumber,
+        format: path.extname(filename).slice(1).toLowerCase(),
+        filepath: fullPath,
+        filename,
+        fileSize,
         year: dirMeta?.year || null,
         coverArt: dirMeta?.coverArt || null,
         mbid: dirMeta?.mbid || null,
-        path: `/api/stream/${id}`,
-        filename,
-        format: path.extname(filename).slice(1).toLowerCase(),
-        _fullPath: fullPath,
       });
     }
   }
   return tracks;
 }
 
-// Build an id→path lookup
+// ---------------------------------------------------------------------------
+// Stable track IDs — assign IDs based on (artist|album|title), with
+// discriminators for duplicate titles in the same album.
+// ---------------------------------------------------------------------------
+function assignStableIds(tracks) {
+  // Group by normalized (artist|album|title) to detect duplicates
+  const groups = new Map();
+  for (const t of tracks) {
+    const key = generateTrackId(t.artist, t.album, t.title); // base key (disc=0)
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(t);
+  }
+
+  for (const [, group] of groups) {
+    if (group.length === 1) {
+      group[0].id = generateTrackId(group[0].artist, group[0].album, group[0].title, 0);
+    } else {
+      // Sort deterministically by filename for stable discriminator assignment
+      group.sort((a, b) => a.filename.localeCompare(b.filename));
+      group.forEach((t, i) => {
+        t.id = generateTrackId(t.artist, t.album, t.title, i);
+      });
+    }
+  }
+  return tracks;
+}
+
+// ---------------------------------------------------------------------------
+// Database-backed track map with in-memory cache.
+// PIPELINE NOTE: All download paths (torrent, soulseek, youtube) call
+// syncAlbum() + invalidateCache() after moving files. See job-processor.js.
+// ---------------------------------------------------------------------------
 let trackCache = null;
+
+function invalidateCache() {
+  trackCache = null;
+}
+
 function getTrackMap() {
-  const tracks = scanMusicDir(MUSIC_DIR);
+  if (trackCache) return trackCache;
+
+  let rows = db.getAllTracks();
+  // Auto-scan if tracks table is empty (first startup or fresh DB)
+  if (rows.length === 0 && fs.existsSync(MUSIC_DIR)) {
+    scanAndSync();
+    rows = db.getAllTracks();
+  }
+  const tracks = rows.map(r => ({
+    id: r.id,
+    title: r.title,
+    artist: r.artist,
+    album: r.album,
+    year: null,
+    coverArt: null,
+    mbid: null,
+    path: `/api/stream/${r.id}`,
+    filename: path.basename(r.filepath),
+    format: r.format,
+    _fullPath: r.filepath,
+  }));
+
+  // Enrich with .metadata.json (coverArt, year, mbid) per album
+  const albumDirs = new Set();
+  for (const t of tracks) {
+    albumDirs.add(path.dirname(t._fullPath));
+  }
+  const metaCache = new Map();
+  for (const dir of albumDirs) {
+    const meta = readDirMeta(dir);
+    if (meta) metaCache.set(dir, meta);
+  }
+  for (const t of tracks) {
+    const meta = metaCache.get(path.dirname(t._fullPath));
+    if (meta) {
+      t.year = meta.year || null;
+      t.coverArt = meta.coverArt || null;
+      t.mbid = meta.mbid || null;
+    }
+  }
+
   const map = {};
   for (const t of tracks) {
     map[t.id] = t._fullPath;
   }
   trackCache = { tracks, map };
   return trackCache;
+}
+
+// ---------------------------------------------------------------------------
+// Full library scan — called on startup. Walks filesystem, upserts all tracks
+// into SQLite, prunes tracks whose files no longer exist.
+// ---------------------------------------------------------------------------
+function scanAndSync() {
+  const start = Date.now();
+  const scanned = scanMusicDir(MUSIC_DIR);
+  assignStableIds(scanned);
+
+  // Upsert all scanned tracks
+  for (const t of scanned) {
+    db.upsertTrack({
+      id: t.id,
+      artist: t.artist,
+      album: t.album,
+      title: t.title,
+      trackNumber: t.trackNumber,
+      format: t.format,
+      filepath: t.filepath,
+      fileSize: t.fileSize,
+    });
+  }
+
+  // Prune tracks that no longer exist on disk
+  const validPaths = new Set(scanned.map(t => t.filepath));
+  db.pruneDeletedTracks(validPaths);
+
+  invalidateCache();
+  const elapsed = Date.now() - start;
+  console.log(`[library] Scanned ${scanned.length} tracks in ${elapsed}ms`);
+  return scanned.length;
+}
+
+// ---------------------------------------------------------------------------
+// Album-scoped re-scan — called by download pipeline after files are moved.
+// Only re-scans the specific album directory.
+// ---------------------------------------------------------------------------
+function syncAlbum(artist, album) {
+  const downloader = require('../services/downloader');
+  const albumDir = path.join(MUSIC_DIR, downloader.sanitizePath(artist), downloader.sanitizePath(album));
+  if (!fs.existsSync(albumDir)) return;
+
+  const relBase = path.join(downloader.sanitizePath(artist), downloader.sanitizePath(album));
+  const scanned = scanMusicDir(albumDir, relBase);
+  // Override artist/album from folder names (scanMusicDir derives from path)
+  assignStableIds(scanned);
+
+  db.syncAlbumTracks(scanned[0]?.artist || artist, scanned[0]?.album || album,
+    scanned.map(t => ({
+      id: t.id,
+      artist: t.artist,
+      album: t.album,
+      title: t.title,
+      trackNumber: t.trackNumber,
+      format: t.format,
+      filepath: t.filepath,
+      fileSize: t.fileSize,
+    }))
+  );
+  invalidateCache();
 }
 
 // GET /api/library
@@ -143,8 +280,9 @@ router.get('/stream/:id', (req, res) => {
     }
   }
 
-  const { map } = getTrackMap();
-  const filePath = map[req.params.id];
+  // Look up filepath from DB (fast), fall back to cached map
+  const track = db.getTrackById(req.params.id);
+  const filePath = track?.filepath || getTrackMap().map[req.params.id];
 
   if (!filePath || !fs.existsSync(filePath)) {
     return res.status(404).json({ error: 'Track not found' });
@@ -213,6 +351,7 @@ router.post('/library/dedupe', (req, res) => {
     for (let i = 1; i < dupes.length; i++) {
       try {
         fs.unlinkSync(dupes[i]._fullPath);
+        db.removeTrackByFilepath(dupes[i]._fullPath);
         removed++;
         console.log(`[dedupe] Removed: ${dupes[i]._fullPath} (kept ${dupes[0].format}, removed ${dupes[i].format})`);
       } catch (err) {
@@ -221,6 +360,7 @@ router.post('/library/dedupe', (req, res) => {
     }
   }
 
+  invalidateCache();
   res.json({ removed, scanned: tracks.length });
 });
 
@@ -239,7 +379,9 @@ router.delete('/library/album', (req, res) => {
   try {
     const files = fs.readdirSync(albumDir);
     for (const f of files) {
-      fs.unlinkSync(path.join(albumDir, f));
+      const fp = path.join(albumDir, f);
+      fs.unlinkSync(fp);
+      db.removeTrackByFilepath(fp);
       removed++;
     }
     fs.rmdirSync(albumDir);
@@ -252,14 +394,15 @@ router.delete('/library/album', (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 
+  invalidateCache();
   console.log(`[library] Removed album: ${artist}/${album} (${removed} files)`);
   res.json({ removed, artist, album });
 });
 
 // DELETE /api/library/track/:id — Remove a single track
 router.delete('/library/track/:id', (req, res) => {
-  const { map } = getTrackMap();
-  const filePath = map[req.params.id];
+  const track = db.getTrackById(req.params.id);
+  const filePath = track?.filepath || getTrackMap().map[req.params.id];
   if (!filePath || !fs.existsSync(filePath)) {
     return res.status(404).json({ error: 'Track not found' });
   }
@@ -294,6 +437,8 @@ router.delete('/library/track/:id', (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 
+  db.removeTrackById(req.params.id);
+  invalidateCache();
   console.log(`[library] Removed track: ${filePath} (excluded: ${filename})`);
   res.json({ removed: 1, id: req.params.id, excluded: filename });
 });
@@ -351,9 +496,18 @@ router.put('/recently-played', express.json(), (req, res) => {
   res.json(result);
 });
 
+// POST /api/library/rescan — admin-triggered full re-scan
+router.post('/library/rescan', (req, res) => {
+  const count = scanAndSync();
+  res.json({ scanned: count });
+});
+
 module.exports = router;
 
-// Expose pure functions for unit testing
-module.exports._test = { cleanFolderName, fileId, scanMusicDir, QUALITY_RANK };
+// Expose for download pipelines and unit testing
 module.exports.getTrackMap = getTrackMap;
+module.exports.syncAlbum = syncAlbum;
+module.exports.scanAndSync = scanAndSync;
+module.exports.invalidateCache = invalidateCache;
 module.exports.MIME_TYPES = MIME_TYPES;
+module.exports._test = { cleanFolderName, scanMusicDir, QUALITY_RANK, assignStableIds };

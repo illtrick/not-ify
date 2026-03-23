@@ -388,6 +388,13 @@ async function processDownload(job, payload) {
 
     log('pipeline', 'success', `[job ${job.id}] ${artist} - ${album}: ${result.upgraded.length} upgraded, ${result.skippedWorse.length} skipped (worse), ${failedFiles.length} failed${upgradeFrom ? ', ' + upgradeFrom + ' → upgraded' : ''}`);
 
+    // Sync tracks table with updated files — stable IDs persist across format upgrades
+    try {
+      const library = require('../api/library');
+      library.syncAlbum(artist, album);
+      library.invalidateCache();
+    } catch (e) { console.warn('[pipeline] syncAlbum failed:', e.message); }
+
     return {
       success: true,
       artist,
@@ -657,6 +664,13 @@ async function processSoulseekDownload(job, payload) {
     } catch {}
 
     log('pipeline', 'success', `[job ${job.id}] ${artist} - ${album}: ${result.upgraded.length} upgraded, ${result.skippedWorse.length} skipped (worse), ${failedFiles.length} failed from Soulseek`);
+
+    // Sync tracks table — stable IDs persist across format upgrades
+    try {
+      const library = require('../api/library');
+      library.syncAlbum(artist, album);
+      library.invalidateCache();
+    } catch (e) { console.warn('[pipeline] syncAlbum failed:', e.message); }
 
     return {
       success: true,

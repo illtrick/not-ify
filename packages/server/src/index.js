@@ -612,6 +612,10 @@ if (require.main === module) {
     }
   }, UPGRADER_INTERVAL_MS);
 
+  // Sync library tracks table with filesystem on startup
+  const library = require('./api/library');
+  library.scanAndSync();
+
   // Start Last.fm scrobble delta sync scheduler for users with existing auth
   const scrobbleSync = require('./services/scrobble-sync');
   scrobbleSync.startDeltaSyncScheduler();

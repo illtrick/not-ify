@@ -137,6 +137,19 @@ function getDb() {
       last_played_at INTEGER NOT NULL,
       PRIMARY KEY(user_id, artist)
     );
+
+    CREATE TABLE IF NOT EXISTS tracks (
+      id TEXT PRIMARY KEY,
+      artist TEXT NOT NULL,
+      album TEXT NOT NULL,
+      title TEXT NOT NULL,
+      track_number INTEGER,
+      format TEXT NOT NULL,
+      filepath TEXT NOT NULL UNIQUE,
+      file_size INTEGER,
+      created_at INTEGER DEFAULT (unixepoch()),
+      updated_at INTEGER DEFAULT (unixepoch())
+    );
   `);
 
   // Create indexes
@@ -146,6 +159,7 @@ function getDb() {
     CREATE INDEX IF NOT EXISTS idx_pt_playlist ON playlist_tracks(playlist_id, position);
     CREATE INDEX IF NOT EXISTS idx_scrobbles_user_artist ON scrobbles(user_id, artist);
     CREATE INDEX IF NOT EXISTS idx_scrobbles_user_time ON scrobbles(user_id, played_at);
+    CREATE INDEX IF NOT EXISTS idx_tracks_artist_album ON tracks(artist, album);
   `);
 
   // Migration: add role column if missing
@@ -477,6 +491,92 @@ function searchArtistAffinity(userId, query) {
   `).all(userId, pattern);
 }
 
+// --- Tracks ---
+
+function upsertTrack({ id, artist, album, title, trackNumber, format, filepath, fileSize }) {
+  return getDb().prepare(`
+    INSERT INTO tracks (id, artist, album, title, track_number, format, filepath, file_size, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
+    ON CONFLICT(id) DO UPDATE SET
+      format = excluded.format,
+      filepath = excluded.filepath,
+      file_size = excluded.file_size,
+      track_number = excluded.track_number,
+      updated_at = unixepoch()
+  `).run(id, artist, album, title, trackNumber || null, format, filepath, fileSize || null);
+}
+
+function getTrackById(id) {
+  return getDb().prepare('SELECT * FROM tracks WHERE id = ?').get(id);
+}
+
+function getAllTracks() {
+  return getDb().prepare('SELECT * FROM tracks ORDER BY artist, album, track_number, title').all();
+}
+
+function getTracksByAlbum(artist, album) {
+  return getDb().prepare('SELECT * FROM tracks WHERE artist = ? AND album = ? ORDER BY track_number, title').all(artist, album);
+}
+
+function removeTrackByFilepath(filepath) {
+  return getDb().prepare('DELETE FROM tracks WHERE filepath = ?').run(filepath);
+}
+
+function removeTrackById(id) {
+  return getDb().prepare('DELETE FROM tracks WHERE id = ?').run(id);
+}
+
+/**
+ * Sync tracks for an album: upsert provided tracks, remove any that no longer exist.
+ * Runs in a transaction for atomicity.
+ */
+function syncAlbumTracks(artist, album, tracksArray) {
+  const db = getDb();
+  const upsert = db.prepare(`
+    INSERT INTO tracks (id, artist, album, title, track_number, format, filepath, file_size, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
+    ON CONFLICT(id) DO UPDATE SET
+      format = excluded.format,
+      filepath = excluded.filepath,
+      file_size = excluded.file_size,
+      track_number = excluded.track_number,
+      updated_at = unixepoch()
+  `);
+  const filepaths = tracksArray.map(t => t.filepath);
+
+  db.transaction(() => {
+    for (const t of tracksArray) {
+      upsert.run(t.id, t.artist, t.album, t.title, t.trackNumber || null, t.format, t.filepath, t.fileSize || null);
+    }
+    // Remove tracks for this artist+album that are no longer on disk
+    if (filepaths.length > 0) {
+      const placeholders = filepaths.map(() => '?').join(',');
+      db.prepare(`DELETE FROM tracks WHERE artist = ? AND album = ? AND filepath NOT IN (${placeholders})`).run(artist, album, ...filepaths);
+    } else {
+      db.prepare('DELETE FROM tracks WHERE artist = ? AND album = ?').run(artist, album);
+    }
+  })();
+}
+
+/**
+ * Remove all tracks whose filepath is not in the provided set.
+ * Used by full library scan to prune deleted files.
+ */
+function pruneDeletedTracks(validFilepaths) {
+  if (validFilepaths.size === 0) {
+    getDb().prepare('DELETE FROM tracks').run();
+    return;
+  }
+  // SQLite has a variable limit, batch deletes
+  const all = getDb().prepare('SELECT id, filepath FROM tracks').all();
+  const toDelete = all.filter(t => !validFilepaths.has(t.filepath));
+  if (toDelete.length === 0) return;
+  const del = getDb().prepare('DELETE FROM tracks WHERE id = ?');
+  getDb().transaction(() => {
+    for (const t of toDelete) del.run(t.id);
+  })();
+}
+
 // --- Cleanup ---
 
 function close() {
@@ -536,4 +636,13 @@ module.exports = {
   getArtistAffinity,
   getUniqueAlbumsSince,
   searchArtistAffinity,
+  // Tracks
+  upsertTrack,
+  getTrackById,
+  getAllTracks,
+  getTracksByAlbum,
+  removeTrackByFilepath,
+  removeTrackById,
+  syncAlbumTracks,
+  pruneDeletedTracks,
 };

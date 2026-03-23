@@ -41,6 +41,8 @@ jest.mock('../../src/services/job-queue', () => ({
   getByStatus: jest.fn().mockReturnValue([]),
   getAll: jest.fn().mockReturnValue([]), getStats: jest.fn().mockReturnValue({}),
 }));
+// Track storage for mock DB
+const mockTracks = new Map();
 jest.mock('../../src/services/db', () => ({
   getDb: jest.fn(),
   isValidUser: jest.fn().mockReturnValue(true),
@@ -70,29 +72,45 @@ jest.mock('../../src/services/db', () => ({
   isFavorite: jest.fn().mockReturnValue(false),
   getUserSession: jest.fn().mockReturnValue({ queue: [], state: {} }),
   saveUserSession: jest.fn(),
+  // Track CRUD for stable track IDs
+  upsertTrack: jest.fn(({ id, filepath, ...rest }) => { mockTracks.set(id, { id, filepath, ...rest }); }),
+  getTrackById: jest.fn((id) => mockTracks.get(id) || null),
+  getAllTracks: jest.fn(() => [...mockTracks.values()]),
+  getTracksByAlbum: jest.fn(() => []),
+  removeTrackByFilepath: jest.fn((fp) => { for (const [k, v] of mockTracks) { if (v.filepath === fp) mockTracks.delete(k); } }),
+  removeTrackById: jest.fn((id) => { mockTracks.delete(id); }),
+  syncAlbumTracks: jest.fn(),
+  pruneDeletedTracks: jest.fn(),
 }));
 
 // Require after mocks are applied — vol and app share the same memfs instance
 const { vol } = require('memfs');
 const path = require('path');
-const crypto = require('crypto');
 const request = require('supertest');
+const { generateTrackId, titleFromFilename } = require('../../src/services/track-id');
 const app = require('../../src/index');
+const library = require('../../src/api/library');
 
-// Reset virtual filesystem between tests
+// Reset virtual filesystem and mock track store between tests
 beforeEach(() => {
   vol.reset();
   vol.mkdirSync('/app/music', { recursive: true });
+  mockTracks.clear();
+  library.invalidateCache();
 });
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-// Build the same file ID that library.js produces: MD5 of the full path.
-// On Windows, path.join uses backslashes, so we must match that.
+// Build a stable track ID matching the new generation scheme
 function fileId(p) {
-  return crypto.createHash('md5').update(p).digest('hex');
+  const filename = path.basename(p);
+  const parts = p.split(path.sep).filter(Boolean);
+  const artist = parts.length >= 3 ? parts[parts.length - 3] : 'Unknown Artist';
+  const album = parts.length >= 2 ? parts[parts.length - 2] : 'Unknown Album';
+  const title = titleFromFilename(filename);
+  return generateTrackId(artist, album, title);
 }
 
 // Write a fake audio file to the virtual FS; returns the full path as library.js

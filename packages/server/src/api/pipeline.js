@@ -2,10 +2,10 @@ const express = require('express');
 const rd = require('../services/realdebrid');
 const { parseArtistAlbum, sanitizePath, isAudioFile, isArchive, extractArchive, downloadFile } = require('../services/downloader');
 const { validateFile } = require('../services/file-validator');
+const { generateTrackId, titleFromFilename } = require('../services/track-id');
 const activity = require('../services/activity-log');
 const path = require('path');
 const fs = require('fs');
-const crypto = require('crypto');
 
 // Lazy-load job-queue to avoid triggering its schema initialisation at module
 // load time (which requires a real SQLite connection, unavailable in unit tests)
@@ -14,7 +14,13 @@ function getJobQueue() {
 }
 
 function fileId(filepath) {
-  return crypto.createHash('md5').update(filepath).digest('hex');
+  // Generate stable track ID from filepath metadata
+  const filename = path.basename(filepath);
+  const parts = filepath.split(path.sep);
+  const artist = parts.length >= 3 ? parts[parts.length - 3] : 'Unknown Artist';
+  const album = parts.length >= 2 ? parts[parts.length - 2] : 'Unknown Album';
+  const title = titleFromFilename(filename);
+  return generateTrackId(artist, album, title);
 }
 
 const router = express.Router();

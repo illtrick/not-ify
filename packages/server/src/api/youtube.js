@@ -240,6 +240,14 @@ async function ytDownloadOne(entry, abort) {
   } catch {}
 
   activity.log('youtube', 'success', `Saved: ${dlTitle}`, { artist: dlArtist, album: dlAlbum, title: dlTitle, path: downloadedFile });
+
+  // Sync tracks table so library IDs are immediately available
+  try {
+    const library = require('./library');
+    library.syncAlbum(dlArtist, dlAlbum);
+    library.invalidateCache();
+  } catch (e) { console.warn('[yt] syncAlbum failed:', e.message); }
+
   return downloadedFile;
 }
 

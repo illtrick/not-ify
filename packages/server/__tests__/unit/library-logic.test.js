@@ -1,16 +1,14 @@
 'use strict';
 
-// Suite A4 — Library logic: quality ranking, folder name cleaning, file ID, scanMusicDir
+// Suite A4 — Library logic: quality ranking, folder name cleaning, track IDs, scanMusicDir
 
 const path = require('path');
-
-// ---- We need fs to be real for scanMusicDir tests ----
-// Use os.tmpdir() to create actual temp files, avoiding complex memfs setup
 const fs = require('fs');
 const os = require('os');
 
 const { _test } = require('../../src/api/library');
-const { cleanFolderName, fileId, QUALITY_RANK } = _test;
+const { cleanFolderName, QUALITY_RANK, assignStableIds } = _test;
+const { generateTrackId, extractTrackNumber, titleFromFilename } = require('../../src/services/track-id');
 
 // ---------------------------------------------------------------------------
 // QUALITY_RANK — format ordering for deduplication
@@ -46,41 +44,31 @@ describe('cleanFolderName', () => {
   test('strips FLAC quality tag', () => {
     expect(cleanFolderName('Dark Side of the Moon FLAC')).not.toMatch(/FLAC/i);
   });
-
   test('strips 320 quality tag', () => {
     expect(cleanFolderName('OK Computer 320')).not.toMatch(/\b320\b/);
   });
-
   test('strips trailing dedup number', () => {
-    // "Album Name 88" (trailing 1-3 digit number)
     expect(cleanFolderName('Abbey Road 88')).not.toMatch(/\s+88$/);
   });
-
   test('decodes &amp; entity', () => {
     expect(cleanFolderName('AC&amp;DC')).toBe('AC&DC');
   });
-
   test('decodes &ndash; entity', () => {
     expect(cleanFolderName('Artist &ndash; Album')).toContain('-');
   });
-
   test('strips leading/trailing dashes', () => {
     const r = cleanFolderName('- Album Name -');
     expect(r).not.toMatch(/^-/);
     expect(r).not.toMatch(/-$/);
   });
-
   test('normalises multiple spaces', () => {
     expect(cleanFolderName('Too  Many  Spaces')).not.toMatch(/\s{2,}/);
   });
-
   test('returns original if cleaned would be empty', () => {
-    // e.g. "FLAC" alone → cleaned to '' → fallback to original "FLAC"
     const result = cleanFolderName('FLAC');
     expect(typeof result).toBe('string');
     expect(result.length).toBeGreaterThan(0);
   });
-
   test('leaves normal names unchanged', () => {
     expect(cleanFolderName('Pink Floyd')).toBe('Pink Floyd');
     expect(cleanFolderName('Radiohead')).toBe('Radiohead');
@@ -88,21 +76,77 @@ describe('cleanFolderName', () => {
 });
 
 // ---------------------------------------------------------------------------
-// fileId — deterministic MD5 from path
+// generateTrackId — stable content-based IDs
 // ---------------------------------------------------------------------------
-describe('fileId', () => {
-  test('returns 32-char hex string', () => {
-    const id = fileId('/app/music/Artist/Album/track.mp3');
-    expect(id).toMatch(/^[0-9a-f]{32}$/);
+describe('generateTrackId', () => {
+  test('returns 16-char hex string', () => {
+    const id = generateTrackId('Artist', 'Album', 'Track');
+    expect(id).toMatch(/^[0-9a-f]{16}$/);
   });
 
-  test('same path → same id', () => {
-    const p = '/app/music/Artist/Album/track.mp3';
-    expect(fileId(p)).toBe(fileId(p));
+  test('same metadata → same id', () => {
+    expect(generateTrackId('A', 'B', 'C')).toBe(generateTrackId('A', 'B', 'C'));
   });
 
-  test('different paths → different ids', () => {
-    expect(fileId('/app/music/A/B/1.mp3')).not.toBe(fileId('/app/music/A/B/2.mp3'));
+  test('different titles → different ids', () => {
+    expect(generateTrackId('A', 'B', 'Track1')).not.toBe(generateTrackId('A', 'B', 'Track2'));
+  });
+
+  test('case insensitive', () => {
+    expect(generateTrackId('Artist', 'Album', 'Track')).toBe(generateTrackId('ARTIST', 'ALBUM', 'TRACK'));
+  });
+
+  test('same id regardless of file extension (survives MP3→FLAC upgrade)', () => {
+    // ID is based on (artist|album|title), NOT filepath
+    const id1 = generateTrackId('Pink Floyd', 'Animals', 'Pigs');
+    const id2 = generateTrackId('Pink Floyd', 'Animals', 'Pigs');
+    expect(id1).toBe(id2);
+  });
+
+  test('discriminator produces different ids for same title', () => {
+    const id0 = generateTrackId('A', 'B', 'Track', 0);
+    const id1 = generateTrackId('A', 'B', 'Track', 1);
+    expect(id0).not.toBe(id1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractTrackNumber / titleFromFilename
+// ---------------------------------------------------------------------------
+describe('extractTrackNumber', () => {
+  test('extracts "01-" prefix', () => expect(extractTrackNumber('01-Track.mp3')).toBe(1));
+  test('extracts "01 " prefix', () => expect(extractTrackNumber('01 Track.mp3')).toBe(1));
+  test('extracts "12_" prefix', () => expect(extractTrackNumber('12_Track.mp3')).toBe(12));
+  test('returns null for no number', () => expect(extractTrackNumber('Track.mp3')).toBeNull());
+});
+
+describe('titleFromFilename', () => {
+  test('strips extension', () => expect(titleFromFilename('Track.mp3')).toBe('Track'));
+  test('strips track number prefix', () => expect(titleFromFilename('01-Pigs.mp3')).toBe('Pigs'));
+  test('strips "01 " prefix', () => expect(titleFromFilename('01 Track Name.flac')).toBe('Track Name'));
+});
+
+// ---------------------------------------------------------------------------
+// assignStableIds — handles duplicate titles
+// ---------------------------------------------------------------------------
+describe('assignStableIds', () => {
+  test('assigns unique ids to tracks with different titles', () => {
+    const tracks = [
+      { artist: 'A', album: 'B', title: 'Track1', filename: 'Track1.mp3' },
+      { artist: 'A', album: 'B', title: 'Track2', filename: 'Track2.mp3' },
+    ];
+    assignStableIds(tracks);
+    expect(tracks[0].id).toMatch(/^[0-9a-f]{16}$/);
+    expect(tracks[0].id).not.toBe(tracks[1].id);
+  });
+
+  test('assigns different ids to duplicate titles via discriminator', () => {
+    const tracks = [
+      { artist: 'A', album: 'B', title: 'Same', filename: '01-Same.mp3' },
+      { artist: 'A', album: 'B', title: 'Same', filename: '02-Same.mp3' },
+    ];
+    assignStableIds(tracks);
+    expect(tracks[0].id).not.toBe(tracks[1].id);
   });
 });
 
@@ -197,16 +241,17 @@ describe('scanMusicDir (real temp filesystem)', () => {
     expect(tracks[0].year).toBeNull();
   });
 
-  test('returns id as md5 hex', () => {
-    createTrack('Artist', 'Album', 'track.mp3');
+  test('extracts track number from filename', () => {
+    createTrack('Artist', 'Album', '05-Track.mp3');
     const tracks = scanMusicDir(tmpDir);
-    expect(tracks[0].id).toMatch(/^[0-9a-f]{32}$/);
+    expect(tracks[0].trackNumber).toBe(5);
   });
 
-  test('path field is /api/stream/{id}', () => {
+  test('filepath is absolute path to file', () => {
     createTrack('Artist', 'Album', 'track.mp3');
     const tracks = scanMusicDir(tmpDir);
-    expect(tracks[0].path).toMatch(/^\/api\/stream\/[0-9a-f]{32}$/);
+    expect(path.isAbsolute(tracks[0].filepath)).toBe(true);
+    expect(tracks[0].filepath).toContain('track.mp3');
   });
 
   test('all audio formats detected', () => {
