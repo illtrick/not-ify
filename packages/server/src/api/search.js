@@ -305,11 +305,18 @@ router.get('/search', async (req, res) => {
     const cleanedQ = cleanSearchQuery(q);
     const mbQuery = normalizeQuery(q);
 
+    // Check cache for this query — if we already know the artist, we can parallelize browse
+    const cachedArtists = db.mbCacheGet(`artists:${normalizeQuery(q).toLowerCase().trim()}`);
+    const knownArtistMbid = cachedArtists?.[0]?.mbid;
+    const knownArtistName = cachedArtists?.[0]?.name;
+
     // Run torrent search with multi-strategy fallback, MB searches with normalized query
-    const [torrentResult, mbReleases, mbArtists] = await Promise.all([
+    // If we have a cached artist MBID, preload their releases in parallel
+    const [torrentResult, mbReleases, mbArtists, preloadedArtistReleases] = await Promise.all([
       searchMusicMultiStrategy(q),
       searchReleases(mbQuery),
       searchArtists(mbQuery),
+      knownArtistMbid ? browseArtistReleases(knownArtistMbid, knownArtistName) : Promise.resolve(null),
     ]);
     const torrents = torrentResult.results;
 
@@ -323,86 +330,94 @@ router.get('/search', async (req, res) => {
       normalize(mbArtists[0]?.name || '') === normalize(mbQuery);
     const hasStrongResults = topArtistMatchesQuery && mbReleases.length > 0;
 
-    // Strategy A: Compound word join/split — always try for multi-word queries
-    // "ego pusher" → "egopusher" catches compound artist names
-    const words = mbQuery.split(/\s+/);
-    if (words.length >= 2) {
-      const joinedQuery = words.join('');
-      try {
-        const [altReleases, altArtists] = await Promise.all([
-          searchReleases(joinedQuery),
-          searchArtists(joinedQuery),
-        ]);
-        // If joined query finds a strong artist match, merge or replace
-        const bestAlt = altArtists[0];
-        if (bestAlt?.score >= 90) {
-          if (!hasStrongResults || bestAlt.score > topArtistScore) {
-            // Joined form is better — use it as primary
-            finalMbReleases = altReleases;
-            finalMbArtists = altArtists;
-          } else {
-            // Both good — merge (compound artist results after primary)
-            const existingRgids = new Set(finalMbReleases.map(r => r.rgid));
-            const existingMbids = new Set(finalMbArtists.map(a => a.mbid));
-            finalMbReleases = [...finalMbReleases, ...altReleases.filter(r => !existingRgids.has(r.rgid))];
-            finalMbArtists = [...finalMbArtists, ...altArtists.filter(a => !existingMbids.has(a.mbid))];
-          }
-        }
-      } catch {}
-    }
+    const hasStrongArtist = (mbArtists[0]?.score || 0) >= 95;
+    const hasStrongReleases = mbReleases.length >= 3;
 
-    // Strategy B: Lucene fuzzy search (~) — catches typos like "balmoreha" → "Balmorhea"
-    // Only fire if we still don't have strong results
-    if (!finalMbArtists.some(a => a.score >= 95 && normalize(a.name) === normalize(mbQuery))) {
-      try {
-        const [fuzzyReleases, fuzzyArtists] = await Promise.all([
-          searchReleasesFuzzy(mbQuery),
-          searchArtistsFuzzy(mbQuery),
-        ]);
-        if (fuzzyArtists.length > 0 || fuzzyReleases.length > 0) {
-          const existingRgids = new Set(finalMbReleases.map(r => r.rgid));
-          finalMbReleases = [...finalMbReleases, ...fuzzyReleases.filter(r => !existingRgids.has(r.rgid))];
-          if (fuzzyArtists.some(a => a.score >= 70)) {
-            const existingMbids = new Set(finalMbArtists.map(a => a.mbid));
-            finalMbArtists = [...finalMbArtists, ...fuzzyArtists.filter(a => !existingMbids.has(a.mbid))];
-          }
-        }
-      } catch {}
-    }
-
-    // ── Recording search (track-level) ──────────────────────────────────────
-    // If query looks like "artist trackname" (we found the artist but no album match),
-    // search MB recordings to find the specific track → album mapping
     let recordingAlbums = [];
-    const topArtistMatch = finalMbArtists[0];
-    if (topArtistMatch?.score >= 90) {
-      // Check if query has words beyond the artist name
-      const artistWords = topArtistMatch.name.toLowerCase().split(/\s+/);
-      const queryWords = mbQuery.toLowerCase().split(/\s+/);
-      const extraWords = queryWords.filter(w => !artistWords.includes(w) && w.length > 2);
 
-      if (extraWords.length > 0) {
-        // Query has extra words beyond artist name — could be a track title
+    if (!(hasStrongArtist && hasStrongReleases)) {
+      // Only run enhancement strategies when initial results are weak
+
+      // Strategy A: Compound word join/split — always try for multi-word queries
+      // "ego pusher" → "egopusher" catches compound artist names
+      const words = mbQuery.split(/\s+/);
+      if (words.length >= 2) {
+        const joinedQuery = words.join('');
         try {
-          const recQuery = `artist:"${topArtistMatch.name}" AND recording:"${extraWords.join(' ')}"`;
-          const recordings = await searchRecordings(recQuery);
-          // Convert recording results to album format for merging
-          const seenRgids = new Set();
-          for (const rec of recordings) {
-            if (rec.rgid && !seenRgids.has(rec.rgid)) {
-              seenRgids.add(rec.rgid);
-              recordingAlbums.push({
-                mbid: rec.mbid,
-                rgid: rec.rgid,
-                artist: rec.artist,
-                album: rec.album,
-                year: rec.year,
-                trackCount: null,
-                _fromRecording: rec.title, // track title that matched
-              });
+          const [altReleases, altArtists] = await Promise.all([
+            searchReleases(joinedQuery),
+            searchArtists(joinedQuery),
+          ]);
+          // If joined query finds a strong artist match, merge or replace
+          const bestAlt = altArtists[0];
+          if (bestAlt?.score >= 90) {
+            if (!hasStrongResults || bestAlt.score > topArtistScore) {
+              // Joined form is better — use it as primary
+              finalMbReleases = altReleases;
+              finalMbArtists = altArtists;
+            } else {
+              // Both good — merge (compound artist results after primary)
+              const existingRgids = new Set(finalMbReleases.map(r => r.rgid));
+              const existingMbids = new Set(finalMbArtists.map(a => a.mbid));
+              finalMbReleases = [...finalMbReleases, ...altReleases.filter(r => !existingRgids.has(r.rgid))];
+              finalMbArtists = [...finalMbArtists, ...altArtists.filter(a => !existingMbids.has(a.mbid))];
             }
           }
         } catch {}
+      }
+
+      // Strategy B: Lucene fuzzy search (~) — catches typos like "balmoreha" → "Balmorhea"
+      // Only fire if we still don't have strong results
+      if (!finalMbArtists.some(a => a.score >= 95 && normalize(a.name) === normalize(mbQuery))) {
+        try {
+          const [fuzzyReleases, fuzzyArtists] = await Promise.all([
+            searchReleasesFuzzy(mbQuery),
+            searchArtistsFuzzy(mbQuery),
+          ]);
+          if (fuzzyArtists.length > 0 || fuzzyReleases.length > 0) {
+            const existingRgids = new Set(finalMbReleases.map(r => r.rgid));
+            finalMbReleases = [...finalMbReleases, ...fuzzyReleases.filter(r => !existingRgids.has(r.rgid))];
+            if (fuzzyArtists.some(a => a.score >= 70)) {
+              const existingMbids = new Set(finalMbArtists.map(a => a.mbid));
+              finalMbArtists = [...finalMbArtists, ...fuzzyArtists.filter(a => !existingMbids.has(a.mbid))];
+            }
+          }
+        } catch {}
+      }
+
+      // ── Recording search (track-level) ──────────────────────────────────────
+      // If query looks like "artist trackname" (we found the artist but no album match),
+      // search MB recordings to find the specific track → album mapping
+      const topArtistMatch = finalMbArtists[0];
+      if (topArtistMatch?.score >= 90) {
+        // Check if query has words beyond the artist name
+        const artistWords = topArtistMatch.name.toLowerCase().split(/\s+/);
+        const queryWords = mbQuery.toLowerCase().split(/\s+/);
+        const extraWords = queryWords.filter(w => !artistWords.includes(w) && w.length > 2);
+
+        if (extraWords.length > 0) {
+          // Query has extra words beyond artist name — could be a track title
+          try {
+            const recQuery = `artist:"${topArtistMatch.name}" AND recording:"${extraWords.join(' ')}"`;
+            const recordings = await searchRecordings(recQuery);
+            // Convert recording results to album format for merging
+            const seenRgids = new Set();
+            for (const rec of recordings) {
+              if (rec.rgid && !seenRgids.has(rec.rgid)) {
+                seenRgids.add(rec.rgid);
+                recordingAlbums.push({
+                  mbid: rec.mbid,
+                  rgid: rec.rgid,
+                  artist: rec.artist,
+                  album: rec.album,
+                  year: rec.year,
+                  trackCount: null,
+                  _fromRecording: rec.title, // track title that matched
+                });
+              }
+            }
+          } catch {}
+        }
       }
     }
 
@@ -422,7 +437,7 @@ router.get('/search', async (req, res) => {
     const browseCandidate = validArtists[0];
     if (browseCandidate?.score >= 90 && browseCandidate?.mbid && !isSoundtrackQuery) {
       try {
-        const artistReleases = await browseArtistReleases(browseCandidate.mbid, browseCandidate.name);
+        const artistReleases = preloadedArtistReleases || await browseArtistReleases(browseCandidate.mbid, browseCandidate.name);
         // Merge: artist browse results first, then generic search results (dedup by rgid)
         const seenRgids = new Set(artistReleases.map(r => r.rgid));
         allMbReleases = [...artistReleases, ...finalMbReleases.filter(r => !seenRgids.has(r.rgid))];
