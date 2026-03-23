@@ -7,16 +7,57 @@ const CACHE_TTL_POSITIVE = 6 * 60 * 60 * 1000;   // 6 hours for results
 const CACHE_TTL_NEGATIVE = 48 * 60 * 60 * 1000;   // 48 hours for empty results
 const CACHE_TTL_TRACKS = 24 * 60 * 60 * 1000;      // 24 hours for track listings
 
-// Rate limiter: max 1 req/sec
-let lastRequestTime = 0;
+// Token bucket rate limiter: allows bursts, refills at 1 token/sec
+// Inspired by musicbrainz-api npm package pattern (15 req/18s)
+const BUCKET_MAX = 5;
+const REFILL_RATE = 1000;
+let tokens = BUCKET_MAX;
+let lastRefill = Date.now();
+let pendingQueue = [];
+let drainInterval = null;
+
+function refillTokens() {
+  const now = Date.now();
+  const newTokens = Math.floor((now - lastRefill) / REFILL_RATE);
+  if (newTokens > 0) {
+    tokens = Math.min(BUCKET_MAX, tokens + newTokens);
+    lastRefill += newTokens * REFILL_RATE;
+  }
+}
+
+async function acquireToken() {
+  refillTokens();
+  if (tokens > 0) {
+    tokens--;
+    return;
+  }
+  return new Promise(resolve => {
+    pendingQueue.push(resolve);
+    if (!drainInterval) {
+      drainInterval = setInterval(() => {
+        refillTokens();
+        while (tokens > 0 && pendingQueue.length > 0) {
+          tokens--;
+          pendingQueue.shift()();
+        }
+        if (pendingQueue.length === 0) {
+          clearInterval(drainInterval);
+          drainInterval = null;
+        }
+      }, REFILL_RATE);
+    }
+  });
+}
+
+function resetBucket() {
+  if (drainInterval) { clearInterval(drainInterval); drainInterval = null; }
+  tokens = BUCKET_MAX;
+  lastRefill = Date.now();
+  pendingQueue = [];
+}
 
 async function mbFetch(url) {
-  const now = Date.now();
-  const wait = 1100 - (now - lastRequestTime);
-  if (wait > 0) {
-    await new Promise(resolve => setTimeout(resolve, wait));
-  }
-  lastRequestTime = Date.now();
+  await acquireToken();
 
   const res = await fetch(url, {
     headers: { 'User-Agent': USER_AGENT, 'Accept': 'application/json' },
@@ -572,4 +613,5 @@ module.exports = {
   getCoverArtUrl, getReleaseTracks, getReleaseGroupTracks,
   searchReleasesFuzzy, searchArtistsFuzzy, searchRecordings,
   normalizeQuery, getArtistDetails, preWarmCache,
+  _test: { acquireToken, resetBucket },
 };
