@@ -46,15 +46,13 @@ router.get('/sc/search', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// YT download queue system — processes sequentially, accepts multiple requests
-// PIPELINE NOTE: This is one of three download paths. See job-processor.js header
-// for the full list. Post-download logic (validation, library move, badge refresh)
-// must stay consistent across all paths. Badge refresh happens via SSE → client.
+// YT download queue system — concurrent pool, accepts multiple requests
 // ---------------------------------------------------------------------------
+const YT_CONCURRENCY = parseInt(process.env.YT_CONCURRENCY || '3', 10);
 const ytQueue = [];       // [{id, url, title, artist, album, coverArt, status, progress, error}]
 let ytQueueProcessing = false;
 let ytQueueIdCounter = 0;
-let activeYtDownload = null; // { abort }
+const activeYtDownloads = new Map(); // id → { abort, title }
 
 function ytQueueAdd(item) {
   const entry = { id: ++ytQueueIdCounter, ...item, status: 'queued', progress: 0, error: null };
@@ -63,57 +61,75 @@ function ytQueueAdd(item) {
   return entry;
 }
 
+/**
+ * Check if all tracks for an album are finished and trigger upgrade if so.
+ * Called after each individual track completes/errors.
+ */
+function triggerUpgradeIfAlbumComplete(artist, album) {
+  if (!artist || !album) return;
+  const albumTracks = ytQueue.filter(e => e.artist === artist && e.album === album);
+  const allFinished = albumTracks.every(e => e.status === 'done' || e.status === 'error' || e.status === 'cancelled');
+  if (!allFinished) return;
+  if (albumTracks[0]?._upgradeTriggered) return;
+  albumTracks.forEach(e => e._upgradeTriggered = true);
+
+  try {
+    const jobQueue = require('../services/job-queue');
+    const dedupeKey = `upgrade:${artist}|${album}`;
+    const jobId = jobQueue.enqueue('upgrade', { artist, album }, { dedupeKey, priority: 10 });
+    if (jobId) {
+      activity.log('youtube', 'info', `Auto-queued upgrade for ${artist} — ${album}`, { artist, album });
+    }
+  } catch (err) {
+    console.error('[yt-queue] Failed to enqueue upgrade:', err.message);
+  }
+}
+
 async function ytQueueProcess() {
   if (ytQueueProcessing) return;
   ytQueueProcessing = true;
 
+  // Pool-based: keep up to YT_CONCURRENCY downloads active at once
+  const running = new Map(); // id → Promise
+
   while (true) {
-    const next = ytQueue.find(e => e.status === 'queued');
-    if (!next) break;
+    // Fill available slots
+    while (running.size < YT_CONCURRENCY) {
+      const next = ytQueue.find(e => e.status === 'queued');
+      if (!next) break;
 
-    next.status = 'active';
-    const abort = new AbortController();
-    activeYtDownload = { abort, title: next.title };
+      next.status = 'active';
+      const abort = new AbortController();
+      activeYtDownloads.set(next.id, { abort, title: next.title });
 
-    try {
-      await ytDownloadOne(next, abort);
-      next.status = 'done';
-    } catch (err) {
-      if (err.message === 'Download cancelled') {
-        next.status = 'cancelled';
-      } else {
-        next.status = 'error';
-        next.error = err.message;
-        activity.log('youtube', 'error', `Failed: ${next.title} — ${err.message}`, { title: next.title, error: err.message });
-      }
-    } finally {
-      activeYtDownload = null;
+      const promise = ytDownloadOne(next, abort)
+        .then(() => { next.status = 'done'; })
+        .catch(err => {
+          if (err.message === 'Download cancelled') {
+            next.status = 'cancelled';
+          } else {
+            next.status = 'error';
+            next.error = err.message;
+            activity.log('youtube', 'error', `Failed: ${next.title} — ${err.message}`, { title: next.title, error: err.message });
+          }
+        })
+        .finally(() => {
+          activeYtDownloads.delete(next.id);
+          running.delete(next.id);
+          triggerUpgradeIfAlbumComplete(next.artist, next.album);
+        });
+
+      running.set(next.id, promise);
     }
+
+    // No running tasks and nothing queued — we're done
+    if (running.size === 0) break;
+
+    // Wait for any one to finish, then loop to refill slots
+    await Promise.race(running.values());
   }
 
   ytQueueProcessing = false;
-
-  // Auto-enqueue upgrade jobs after all album tracks have been attempted.
-  // Includes albums with errors — tracks missing from YT may exist on torrent/Soulseek.
-  try {
-    const jobQueue = require('../services/job-queue');
-    const attempted = ytQueue.filter(e => (e.status === 'done' || e.status === 'error') && e.artist && e.album);
-    // Dedupe by artist+album
-    const albums = new Map();
-    for (const e of attempted) {
-      const key = `${e.artist}|${e.album}`;
-      if (!albums.has(key)) albums.set(key, { artist: e.artist, album: e.album });
-    }
-    for (const { artist, album } of albums.values()) {
-      const dedupeKey = `upgrade:${artist}|${album}`;
-      const jobId = jobQueue.enqueue('upgrade', { artist, album }, { dedupeKey, priority: 10 });
-      if (jobId) {
-        activity.log('youtube', 'info', `Auto-queued upgrade for ${artist} — ${album}`, { artist, album });
-      }
-    }
-  } catch (err) {
-    console.error('[yt-queue] Failed to enqueue upgrades:', err.message);
-  }
 
   // Trim completed items older than 50 entries
   while (ytQueue.length > 50 && ytQueue[0].status !== 'queued' && ytQueue[0].status !== 'active') {
@@ -240,39 +256,56 @@ async function ytDownloadOne(entry, abort) {
   } catch {}
 
   activity.log('youtube', 'success', `Saved: ${dlTitle}`, { artist: dlArtist, album: dlAlbum, title: dlTitle, path: downloadedFile });
-
-  // Sync tracks table so library IDs are immediately available
-  try {
-    const library = require('./library');
-    library.syncAlbum(dlArtist, dlAlbum);
-    library.invalidateCache();
-  } catch (e) { console.warn('[yt] syncAlbum failed:', e.message); }
-
   return downloadedFile;
 }
 
-// DELETE /api/download/yt — Cancel active yt-dlp download
+// DELETE /api/download/yt — Cancel active yt-dlp download(s)
+// ?id=123 cancels a specific download; omit to cancel all active + queued
 router.delete('/download/yt', (req, res) => {
-  if (!activeYtDownload) return res.json({ status: 'nothing_to_cancel' });
-  console.log(`Cancelling yt-dlp download: ${activeYtDownload.title}`);
-  activeYtDownload.abort.abort();
-  // Also clear queued items
+  const targetId = req.query.id ? parseInt(req.query.id, 10) : null;
+
+  if (targetId) {
+    // Cancel a specific download
+    const dl = activeYtDownloads.get(targetId);
+    if (dl) {
+      console.log(`Cancelling yt-dlp download #${targetId}: ${dl.title}`);
+      dl.abort.abort();
+      return res.json({ status: 'cancelled', id: targetId });
+    }
+    // Maybe it's still queued
+    const queued = ytQueue.find(e => e.id === targetId && e.status === 'queued');
+    if (queued) {
+      queued.status = 'cancelled';
+      return res.json({ status: 'cancelled', id: targetId });
+    }
+    return res.json({ status: 'not_found', id: targetId });
+  }
+
+  // Cancel all
+  if (activeYtDownloads.size === 0 && !ytQueue.some(e => e.status === 'queued')) {
+    return res.json({ status: 'nothing_to_cancel' });
+  }
+  for (const [id, dl] of activeYtDownloads) {
+    console.log(`Cancelling yt-dlp download #${id}: ${dl.title}`);
+    dl.abort.abort();
+  }
   ytQueue.forEach(e => { if (e.status === 'queued') e.status = 'cancelled'; });
   res.json({ status: 'cancelled' });
 });
 
 // GET /api/download/yt/queue — Queue status
 router.get('/download/yt/queue', (req, res) => {
-  const active = ytQueue.find(e => e.status === 'active') || null;
+  const activeItems = ytQueue.filter(e => e.status === 'active');
   const queued = ytQueue.filter(e => e.status === 'queued');
   const completed = ytQueue.filter(e => e.status === 'done').length;
   const errors = ytQueue.filter(e => e.status === 'error').length;
   res.json({
-    active: active ? { id: active.id, title: active.title, artist: active.artist, album: active.album, progress: active.progress } : null,
+    active: activeItems.map(e => ({ id: e.id, title: e.title, artist: e.artist, album: e.album, progress: e.progress })),
     queued: queued.map(e => ({ id: e.id, title: e.title, artist: e.artist, album: e.album })),
     completed,
     errors,
     total: ytQueue.length,
+    concurrency: YT_CONCURRENCY,
   });
 });
 
@@ -292,15 +325,17 @@ router.post('/download/yt/batch', (req, res) => {
   res.json({ queued: entries.length, ids: entries.map(e => e.id) });
 });
 
-// ---------------------------------------------------------------------------
-// ytQueueAlbum — Standalone function for album-aware YT download.
-// Accepts MB tracklist + artist/album info, searches YT for each track, queues downloads.
-// Can be called from the HTTP route or programmatically (e.g. from import pipeline).
-// ---------------------------------------------------------------------------
-async function ytQueueAlbum({ artist, album, tracks, rgid, mbid, coverArt }) {
+// ytQueueAlbum — core album queue logic, usable without HTTP context
+// Accepts { artist, album, tracks, mbid, rgid, coverArt }
+// Returns { queued, failed, total }
+async function ytQueueAlbum({ artist, album, tracks, mbid, rgid, coverArt }) {
+  if (!artist || !album) throw new Error('Missing artist or album');
+  if (!Array.isArray(tracks) || tracks.length === 0) throw new Error('Missing tracks array');
+
   const safeArtist = sanitizePath(artist);
   const safeAlbum = sanitizePath(album);
 
+  // For each track, search YouTube and queue download
   const queued = [];
   const errors = [];
 
@@ -397,22 +432,26 @@ async function ytQueueAlbum({ artist, album, tracks, rgid, mbid, coverArt }) {
   }
 
   activity.log('youtube', 'info', `Album queued: ${artist} — ${album} (${queued.length} tracks, ${errors.length} failed)`, { artist, album, queued: queued.length, errors: errors.length });
-  return {
-    queued: queued.length,
-    errors: errors.length,
-    tracks: queued,
-    failedTracks: errors,
-  };
+
+  return { queued: queued.length, failed: errors.length, total: tracks.length };
 }
 
-// POST /api/download/yt/album — Album-aware YT download (HTTP wrapper)
+// POST /api/download/yt/album — Album-aware YT download
+// Accepts MB tracklist + artist/album info, searches YT for each track, queues downloads
 router.post('/download/yt/album', async (req, res) => {
   const { artist, album, tracks, rgid, mbid, coverArt } = req.body;
   if (!artist || !album) return res.status(400).json({ error: 'Missing artist or album' });
   if (!Array.isArray(tracks) || tracks.length === 0) return res.status(400).json({ error: 'Missing tracks array' });
 
-  const result = await ytQueueAlbum({ artist, album, tracks, rgid, mbid, coverArt });
-  res.json(result);
+  try {
+    const result = await ytQueueAlbum({ artist, album, tracks, rgid, mbid, coverArt });
+    res.json({
+      queued: result.queued,
+      errors: result.failed,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Stream audio proxy

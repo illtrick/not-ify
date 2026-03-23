@@ -192,11 +192,16 @@ export function useDownload({ playTrack, loadLibrary, library = [] } = {}) {
       const pollId = setInterval(async () => {
         try {
           const qData = await api.getYtQueue();
-          if (qData.active) {
+          const activeItems = Array.isArray(qData.active) ? qData.active : (qData.active ? [qData.active] : []);
+          if (activeItems.length > 0) {
+            const first = activeItems[0];
+            const msg = activeItems.length > 1
+              ? `Downloading ${activeItems.length} tracks (${Math.round(first.progress)}%)`
+              : `Downloading: ${first.title} (${Math.round(first.progress)}%)`;
             setDownloadStatus(prev => ({
               ...prev,
-              message: `Downloading: ${qData.active.title} (${Math.round(qData.active.progress)}%)`,
-              percent: qData.active.progress,
+              message: msg,
+              percent: first.progress,
             }));
           } else if (qData.queued.length === 0) {
             clearInterval(pollId);
@@ -220,19 +225,23 @@ export function useDownload({ playTrack, loadLibrary, library = [] } = {}) {
     bgPollRef.current = setInterval(async () => {
       try {
         const data = await api.getYtQueue();
+        const activeItems = Array.isArray(data.active) ? data.active : (data.active ? [data.active] : []);
         const statusMap = new Map();
-        if (data.active) {
-          statusMap.set((data.active.artist + '::' + data.active.title).toLowerCase(), 'active');
+        for (const a of activeItems) {
+          statusMap.set((a.artist + '::' + a.title).toLowerCase(), 'active');
         }
         for (const q of (data.queued || [])) {
           statusMap.set((q.artist + '::' + q.title).toLowerCase(), 'queued');
         }
         setDlTrackStatus(statusMap);
-        if (data.active) {
+        if (activeItems.length > 0) {
+          const first = activeItems[0];
           setBgDownloadStatus(prev => ({
             ...prev,
-            message: `Saving: ${data.active.title}`,
-            count: data.queued.length + 1,
+            message: activeItems.length > 1
+              ? `Saving ${activeItems.length} tracks...`
+              : `Saving: ${first.title}`,
+            count: data.queued.length + activeItems.length,
             done: false,
           }));
         } else if (data.queued.length === 0) {
@@ -328,10 +337,6 @@ export function useDownload({ playTrack, loadLibrary, library = [] } = {}) {
           failed: stats.failed || 0,
           jobs: data.jobs || [],
         });
-        // Refresh library periodically while jobs are running (picks up completed upgrades)
-        libRefreshCountRef.current++;
-        if (libRefreshCountRef.current % 5 === 0) loadLibrary?.();
-
         // Stop polling when queue is idle
         if ((stats.pending || 0) === 0 && (stats.active || 0) === 0) {
           clearInterval(jobQueuePollRef.current);
