@@ -563,7 +563,7 @@ if (require.main === module) {
 
   // Clean up orphaned staging directories (from crashed jobs)
   try {
-    const stagingDir = path.join(process.env.MUSIC_DIR || '/app/music', '_staging');
+    const stagingDir = path.join(MUSIC_DIR, '_staging');
     if (fs.existsSync(stagingDir)) {
       const ONE_HOUR = 60 * 60 * 1000;
       for (const entry of fs.readdirSync(stagingDir, { withFileTypes: true })) {

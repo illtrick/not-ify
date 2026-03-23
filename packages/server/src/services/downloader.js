@@ -6,7 +6,14 @@ const { createExtractorFromFile } = require('node-unrar-js');
 const AdmZip = require('adm-zip');
 const { getProxyFetch, recordFailure } = require('./proxy');
 
-const MUSIC_DIR = process.env.MUSIC_DIR || '/app/music';
+function getMusicDir() {
+  try {
+    const db = require('./db');
+    return db.getGlobalSetting('musicDir') || process.env.MUSIC_DIR || '/app/music';
+  } catch {
+    return process.env.MUSIC_DIR || '/app/music';
+  }
+}
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.flac', '.ogg', '.m4a', '.aac', '.wav', '.opus']);
 const ARCHIVE_EXTENSIONS = new Set(['.rar', '.zip']);
 
@@ -114,9 +121,9 @@ async function downloadAlbum(torrentInfo, rdService) {
 
   let destDir;
   if (parsed) {
-    destDir = path.join(MUSIC_DIR, parsed.artist, parsed.album);
+    destDir = path.join(getMusicDir(), parsed.artist, parsed.album);
   } else {
-    destDir = path.join(MUSIC_DIR, '_unsorted', sanitizePath(torrentName));
+    destDir = path.join(getMusicDir(), '_unsorted', sanitizePath(torrentName));
   }
 
   fs.mkdirSync(destDir, { recursive: true });
