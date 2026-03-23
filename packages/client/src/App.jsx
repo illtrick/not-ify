@@ -248,10 +248,11 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
       es.onmessage = (event) => {
         try {
           const entry = JSON.parse(event.data);
-          // Refresh library on upgrade completion OR per-track upgrade events
+          // Refresh library on: upgrade completion, per-track upgrades, or YT download saves
           if (
             (entry.category === 'upgrade' && entry.level === 'success') ||
-            (entry.category === 'pipeline' && entry.level === 'info' && entry.message?.includes('upgraded'))
+            (entry.category === 'pipeline' && entry.level === 'info' && entry.message?.includes('upgraded')) ||
+            (entry.category === 'youtube' && entry.level === 'success' && entry.message?.startsWith('Saved:'))
           ) {
             // Debounce rapid per-track updates — only refresh every 3s max
             if (!connect._debounce) {
