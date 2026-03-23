@@ -52,7 +52,8 @@ COPY --from=build /app/packages/shared/ packages/shared/
 # Copy only the built client (no source, no devDeps)
 COPY --from=build /app/packages/client/dist/ packages/client/dist/
 
-# Copy setup scripts
+# Copy setup scripts (bootstrap.sh included for extraction by users)
+COPY scripts/bootstrap.sh /app/scripts/bootstrap.sh
 COPY scripts/entrypoint.sh /app/scripts/entrypoint.sh
 COPY scripts/setup.sh /app/scripts/setup.sh
 COPY scripts/setup-lib.sh /app/scripts/setup-lib.sh
