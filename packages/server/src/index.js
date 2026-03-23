@@ -17,6 +17,7 @@ const rd = require('./services/realdebrid');
 const db = require('./services/db');
 const { migrate } = require('./services/migrate');
 const userMiddleware = require('./middleware/user');
+const setupMiddleware = require('./middleware/setup');
 const adminGuard = require('./middleware/admin');
 const searchRouter = require('./api/search');
 const pipelineRouter = require('./api/pipeline');
@@ -31,6 +32,9 @@ const COVERS_DIR = path.join(CONFIG_DIR, 'covers');
 
 app.use(cors());
 app.use(express.json());
+
+// Setup middleware — blocks non-setup routes until first-run wizard is complete
+app.use(setupMiddleware);
 
 // User identification middleware — sets req.userId on every request
 app.use(userMiddleware);
@@ -410,6 +414,10 @@ app.get('/api/llm/health', async (req, res) => {
   const ok = await llm.checkHealth();
   res.json({ status: ok ? 'ok' : 'unavailable' });
 });
+
+// Setup wizard API — must be before admin-guarded routes so it's accessible without auth
+const setupRouter = require('./api/setup');
+app.use('/api/setup', setupRouter);
 
 // Search (unified: torrents + MusicBrainz metadata)
 app.use('/api', searchRouter);

@@ -7,6 +7,13 @@ jest.mock('../../src/services/search');
 jest.mock('../../src/services/musicbrainz');
 jest.mock('../../src/services/youtube');
 jest.mock('../../src/services/llm');
+// Setup middleware is bypassed in tests via _markComplete — mock it as a pass-through
+jest.mock('../../src/middleware/setup', () => {
+  const mw = (req, res, next) => next();
+  mw._resetCache = jest.fn();
+  mw._markComplete = jest.fn();
+  return mw;
+});
 
 const request = require('supertest');
 const app = require('../../src/index');

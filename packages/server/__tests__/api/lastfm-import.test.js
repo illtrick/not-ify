@@ -87,6 +87,13 @@ afterAll(() => {
   try { fs.rmSync(TEST_MUSIC_DIR, { recursive: true, force: true }); } catch {}
 });
 
+beforeAll(() => {
+  // Create test users since they're no longer seeded
+  const rawDb = db.getDb();
+  rawDb.prepare("INSERT OR IGNORE INTO users (id, display_name, role) VALUES (?, ?, ?)").run('nathan', 'Nathan', 'admin');
+  rawDb.prepare("INSERT OR IGNORE INTO users (id, display_name) VALUES (?, ?)").run('default', 'Default');
+});
+
 beforeEach(() => {
   // Clear any jobs and scrobbles between tests
   const rawDb = db.getDb();

@@ -1,0 +1,172 @@
+'use strict';
+
+const express = require('express');
+const fs = require('fs');
+const path = require('path');
+const db = require('../services/db');
+const setupMiddleware = require('../middleware/setup');
+
+const router = express.Router();
+
+// GET /api/setup/status
+router.get('/status', (req, res) => {
+  const userCount = db.getUserCount();
+  const setupComplete = db.isSetupComplete();
+  const musicDir = db.getGlobalSetting('musicDir');
+
+  const completedSteps = [];
+  if (userCount > 0) completedSteps.push('account');
+  if (musicDir) completedSteps.push('library');
+  if (setupComplete && userCount > 0) completedSteps.push('complete');
+
+  res.json({
+    needsSetup: !setupComplete,
+    userCount,
+    completedSteps,
+  });
+});
+
+// POST /api/setup/account
+router.post('/account', (req, res) => {
+  const { displayName } = req.body || {};
+
+  if (!displayName || typeof displayName !== 'string' || !displayName.trim()) {
+    return res.status(400).json({ error: 'Missing displayName' });
+  }
+
+  const existingCount = db.getUserCount();
+  if (existingCount > 0) {
+    return res.status(409).json({ error: 'Account already exists. Setup can only create one admin.' });
+  }
+
+  // Generate userId from displayName: lowercase, replace non-alphanumeric with hyphens, trim hyphens
+  const userId = displayName.trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  db.createUser(userId, displayName.trim(), 'admin');
+  setupMiddleware._resetCache();
+
+  return res.status(201).json({ userId, displayName: displayName.trim(), isAdmin: true });
+});
+
+// GET /api/setup/library
+router.get('/library', (req, res) => {
+  const musicDir = db.getGlobalSetting('musicDir') || process.env.MUSIC_DIR || '/app/music';
+
+  let exists = false;
+  let writable = false;
+  let freeSpace = null;
+
+  try {
+    const stat = fs.statSync(musicDir);
+    exists = stat.isDirectory();
+  } catch {
+    exists = false;
+  }
+
+  if (exists) {
+    const testFile = path.join(musicDir, `.notify-write-test-${process.pid}`);
+    try {
+      fs.writeFileSync(testFile, '');
+      fs.unlinkSync(testFile);
+      writable = true;
+    } catch {
+      writable = false;
+    }
+
+    // Try to get free space via statvfs-like approach (not available natively in Node)
+    // Use df-style — skip on platforms where it's unavailable
+    try {
+      const { execSync } = require('child_process');
+      if (process.platform === 'win32') {
+        // Skip free space on Windows in this context
+        freeSpace = null;
+      } else {
+        const output = execSync(`df -k "${musicDir}" 2>/dev/null | tail -1`, { timeout: 2000 }).toString();
+        const parts = output.trim().split(/\s+/);
+        if (parts.length >= 4) {
+          freeSpace = parseInt(parts[3], 10) * 1024; // convert KB to bytes
+        }
+      }
+    } catch {
+      freeSpace = null;
+    }
+  }
+
+  res.json({ musicDir, exists, writable, freeSpace });
+});
+
+// PUT /api/setup/library
+router.put('/library', (req, res) => {
+  const { musicDir } = req.body || {};
+
+  if (!musicDir || typeof musicDir !== 'string') {
+    return res.status(400).json({ error: 'Missing musicDir' });
+  }
+
+  const resolved = path.resolve(musicDir);
+
+  let stat;
+  try {
+    stat = fs.statSync(resolved);
+  } catch {
+    return res.status(400).json({ error: `Path does not exist: ${resolved}` });
+  }
+
+  if (!stat.isDirectory()) {
+    return res.status(400).json({ error: `Path is not a directory: ${resolved}` });
+  }
+
+  db.setGlobalSetting('musicDir', resolved);
+  res.json({ saved: true, musicDir: resolved });
+});
+
+// GET /api/setup/services
+router.get('/services', (req, res) => {
+  const services = [];
+
+  // Last.fm: check lastfm_config table for any row with session_key
+  let lastfmConfigured = false;
+  try {
+    const dbConn = db.getDb();
+    const row = dbConn.prepare('SELECT session_key FROM lastfm_config WHERE session_key IS NOT NULL LIMIT 1').get();
+    lastfmConfigured = !!row;
+  } catch {
+    lastfmConfigured = false;
+  }
+  services.push({ name: 'lastfm', label: 'Last.fm', configured: lastfmConfigured, connected: lastfmConfigured });
+
+  // Real-Debrid
+  const rdToken = db.getGlobalSetting('realDebridToken');
+  const rdConfigured = !!(rdToken && typeof rdToken === 'string' && rdToken.trim());
+  services.push({ name: 'realdebrid', label: 'Real-Debrid', configured: rdConfigured, connected: rdConfigured });
+
+  // VPN
+  const vpnConfig = db.getGlobalSetting('vpnConfig');
+  const vpnConfigured = !!(vpnConfig && vpnConfig.username);
+  services.push({ name: 'vpn', label: 'VPN', configured: vpnConfigured, connected: vpnConfigured });
+
+  // Soulseek
+  const soulseekConfig = db.getGlobalSetting('soulseekConfig');
+  const soulseekConfigured = !!(soulseekConfig && soulseekConfig.username);
+  services.push({ name: 'soulseek', label: 'Soulseek', configured: soulseekConfigured, connected: soulseekConfigured });
+
+  res.json(services);
+});
+
+// POST /api/setup/complete
+router.post('/complete', (req, res) => {
+  const userCount = db.getUserCount();
+  if (userCount === 0) {
+    return res.status(400).json({ error: 'Cannot complete setup without at least one user account.' });
+  }
+
+  db.setGlobalSetting('setup_complete', true);
+  setupMiddleware._markComplete();
+
+  res.json({ complete: true });
+});
+
+module.exports = router;

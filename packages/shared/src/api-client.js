@@ -90,7 +90,13 @@ export async function request(path, options = {}) {
 
   const contentType = response.headers.get('content-type');
   if (contentType && contentType.includes('application/json')) {
-    return response.json();
+    const data = await response.json();
+    if (data && data.error === 'setup_required') {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('notify-setup-required'));
+      }
+    }
+    return data;
   }
   return response;
 }
@@ -641,6 +647,34 @@ export function getActiveJobs() {
 
 export function restartServer() {
   return post('/api/server/restart');
+}
+
+// ---------------------------------------------------------------------------
+// Setup Wizard
+// ---------------------------------------------------------------------------
+
+export function getSetupStatus() {
+  return get('/api/setup/status');
+}
+
+export function createSetupAccount(displayName) {
+  return post('/api/setup/account', { displayName });
+}
+
+export function getSetupLibrary() {
+  return get('/api/setup/library');
+}
+
+export function updateSetupLibrary(musicDir) {
+  return put('/api/setup/library', { musicDir });
+}
+
+export function getSetupServices() {
+  return get('/api/setup/services');
+}
+
+export function completeSetup() {
+  return post('/api/setup/complete');
 }
 
 // Activity log — verbose download/pipeline events for debugging

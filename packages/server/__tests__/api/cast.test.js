@@ -12,6 +12,8 @@ jest.mock('upnp-client-ts', () => ({
 jest.mock('../../src/services/db', () => ({
   getDb: jest.fn(),
   isValidUser: jest.fn().mockReturnValue(true),
+  isSetupComplete: jest.fn().mockReturnValue(true),
+  getDefaultUserId: jest.fn().mockReturnValue('default'),
   getUsers: jest.fn().mockReturnValue([]),
   getRecentlyPlayed: jest.fn().mockReturnValue([]),
   addRecentlyPlayed: jest.fn().mockReturnValue([]),
