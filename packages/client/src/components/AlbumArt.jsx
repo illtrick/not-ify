@@ -12,7 +12,7 @@ export function AlbumArt({ src, size = 48, radius = 4, style = {}, artist, album
 
   const [phase, setPhase] = useState(() => src ? 'primary' : fallbackUrl ? 'fallback' : 'none');
 
-  useEffect(() => { setPhase(src ? 'primary' : fallbackUrl ? 'fallback' : 'none'); }, [src]);
+  useEffect(() => { setPhase(src ? 'primary' : fallbackUrl ? 'fallback' : 'none'); }, [src, fallbackUrl]);
 
   const baseStyle = {
     width: size, height: size, minWidth: size, minHeight: size,
