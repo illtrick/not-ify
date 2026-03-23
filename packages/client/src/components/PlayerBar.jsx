@@ -60,9 +60,6 @@ export function PlayerBar({
             <>
               <div style={{ fontSize: 15, fontWeight: 600, color: COLORS.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: 6 }}>
                 {currentTrack.title}
-                {currentTrack.isYtPreview && (
-                  <span style={{ fontSize: 10, fontWeight: 700, color: COLORS.accent, background: 'rgba(233,69,96,0.15)', padding: '1px 6px', borderRadius: 3, flexShrink: 0 }}>YT</span>
-                )}
               </div>
               <div style={{ fontSize: 13, color: canGoToAlbum ? COLORS.textSecondary : COLORS.textSecondary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 3 }}>
                 {[currentTrack.artist, currentTrack.album].filter(Boolean).join(' — ') || 'Unknown'}
