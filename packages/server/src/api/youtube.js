@@ -9,7 +9,16 @@ const streamAuth = require('../services/stream-auth');
 const { validateFile } = require('../services/file-validator');
 const activity = require('../services/activity-log');
 
-const MUSIC_DIR = process.env.MUSIC_DIR || '/app/music';
+// Read music dir from DB (set via Settings UI), fall back to env var
+function getMusicDir() {
+  try {
+    const db = require('../services/db');
+    return db.getGlobalSetting('musicDir') || process.env.MUSIC_DIR || '/app/music';
+  } catch {
+    return process.env.MUSIC_DIR || '/app/music';
+  }
+}
+const MUSIC_DIR = null; // DEPRECATED — use getMusicDir() instead
 
 function sanitizePath(s) {
   return (s || 'Unknown').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim() || 'Unknown';
@@ -143,7 +152,7 @@ async function ytDownloadOne(entry, abort) {
   const dlArtist = sanitizePath(entry.artist || 'Unknown Artist');
   const dlAlbum = sanitizePath(entry.album || 'Singles');
 
-  const destDir = path.join(MUSIC_DIR, dlArtist, dlAlbum);
+  const destDir = path.join(getMusicDir(), dlArtist, dlAlbum);
   fs.mkdirSync(destDir, { recursive: true });
 
   // Skip if a file with the same track number already exists (avoid re-downloading).
@@ -413,7 +422,7 @@ async function ytQueueAlbum({ artist, album, tracks, mbid, rgid, coverArt }) {
 
   // Write album-level metadata
   if (queued.length > 0) {
-    const destDir = path.join(MUSIC_DIR, safeArtist, safeAlbum);
+    const destDir = path.join(getMusicDir(), safeArtist, safeAlbum);
     fs.mkdirSync(destDir, { recursive: true });
     const metaPath = path.join(destDir, '.metadata.json');
     const metadata = {
