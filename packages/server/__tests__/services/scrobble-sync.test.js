@@ -20,6 +20,10 @@ beforeEach(() => {
   db = require('../../src/services/db');
   sync = require('../../src/services/scrobble-sync');
   require('../../src/services/lastfm').getRecentTracksPage = jest.fn();
+  // Create test users since they're no longer seeded
+  const d = db.getDb();
+  d.prepare("INSERT OR IGNORE INTO users (id, display_name, role) VALUES (?, ?, ?)").run('nathan', 'Nathan', 'admin');
+  d.prepare("INSERT OR IGNORE INTO users (id, display_name, role) VALUES (?, ?, ?)").run('sarah', 'Sarah', 'user');
 });
 
 afterEach(() => sync.stopAll());

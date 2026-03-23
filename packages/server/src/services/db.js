@@ -177,17 +177,6 @@ function getDb() {
   } catch {
     _db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
   }
-  // Auto-promote first user to admin if no admins exist
-  const hasAdmin = _db.prepare("SELECT 1 FROM users WHERE role = 'admin'").get();
-  if (!hasAdmin) {
-    _db.prepare("UPDATE users SET role = 'admin' WHERE id = (SELECT id FROM users WHERE id != 'default' ORDER BY created_at ASC LIMIT 1)").run();
-  }
-
-  // Seed default users if they don't exist
-  const upsertUser = _db.prepare('INSERT OR IGNORE INTO users (id, display_name) VALUES (?, ?)');
-  upsertUser.run('default', 'Default');
-  upsertUser.run('nathan', 'Nathan');
-  upsertUser.run('sarah', 'Sarah');
 
   return _db;
 }
@@ -431,6 +420,34 @@ function isValidUser(userId) {
   return !!db.prepare('SELECT 1 FROM users WHERE id = ?').get(userId);
 }
 
+function createUser(id, displayName, role = 'user') {
+  const db = getDb();
+  db.prepare('INSERT INTO users (id, display_name, role) VALUES (?, ?, ?)').run(id, displayName, role);
+  return { id, displayName, role };
+}
+
+function getUserCount() {
+  const db = getDb();
+  return db.prepare("SELECT COUNT(*) as count FROM users WHERE id != 'default'").get().count;
+}
+
+function getDefaultUserId() {
+  const db = getDb();
+  const row = db.prepare("SELECT id FROM users WHERE id != 'default' ORDER BY created_at ASC LIMIT 1").get();
+  return row?.id || null;
+}
+
+function isSetupComplete() {
+  try {
+    const db = getDb();
+    const flag = db.prepare("SELECT value FROM global_settings WHERE key = 'setup_complete'").get();
+    if (flag && JSON.parse(flag.value) === true) return true;
+    return getUserCount() > 0;
+  } catch {
+    return false;
+  }
+}
+
 // --- Job Log ---
 
 function addJobLog(entry) {
@@ -666,6 +683,10 @@ module.exports = {
   getUsers,
   isValidUser,
   isAdmin,
+  createUser,
+  getUserCount,
+  getDefaultUserId,
+  isSetupComplete,
   // Recently played
   getRecentlyPlayed,
   addRecentlyPlayed,
