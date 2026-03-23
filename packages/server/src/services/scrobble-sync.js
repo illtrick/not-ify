@@ -22,13 +22,14 @@ async function fullSync(userId, lastfmUsername) {
           result = await lastfm.getRecentTracksPage(lastfmUsername, page, 200);
           break; // success
         } catch (err) {
-          if (err.message?.includes('429') && retries < 4) {
-            console.warn(`[scrobble-sync] Rate limited, backing off 30s (page ${page}, attempt ${retries + 1})`);
-            await sleep(30000);
+          if ((err.message?.includes('429') || err.message?.includes('500')) && retries < 4) {
+            const backoff = err.message.includes('429') ? 30000 : 10000;
+            console.warn(`[scrobble-sync] API ${err.message.includes('429') ? '429' : '500'}, backing off ${backoff/1000}s (page ${page}, attempt ${retries + 1})`);
+            await sleep(backoff);
             retries++;
             continue;
           }
-          throw err; // non-429 or max retries exceeded
+          throw err; // other error or max retries exceeded
         }
       }
       totalPages = result.totalPages;
@@ -165,5 +166,35 @@ function getStatus() {
   }
   return syncs;
 }
+
+/**
+ * Reset stale 'syncing' states on startup.
+ * If the server crashed mid-sync, the state is stuck forever.
+ * Reset to 'error' so the user can retry.
+ */
+function resetStaleSyncs() {
+  try {
+    const users = db.getUsers();
+    for (const user of users) {
+      const state = getSyncState(user.id);
+      if (state.state === 'syncing') {
+        const ageMs = Date.now() - (state.startedAt || 0);
+        // If syncing for more than 30 minutes, it's stale
+        if (ageMs > 30 * 60 * 1000) {
+          console.warn(`[scrobble-sync] Resetting stale sync for ${user.id} (stuck for ${Math.round(ageMs / 60000)}m)`);
+          setSyncState(user.id, {
+            state: 'error',
+            error: 'Sync interrupted (server restart). Click Sync Now to retry.',
+            fetched: state.fetched || 0,
+            lastSyncedAt: state.lastSyncedAt,
+          });
+        }
+      }
+    }
+  } catch {}
+}
+
+// Run on module load
+resetStaleSyncs();
 
 module.exports = { fullSync, deltaSync, startDeltaSyncScheduler, scheduleDeltaSync, stopAll, getStatus };
