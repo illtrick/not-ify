@@ -40,6 +40,13 @@ jobs:
             curl -sf http://localhost:3000/api/health && break
             sleep 1
           done
+      - name: Create test user (first-run setup)
+        run: |
+          curl -sf http://localhost:3000/api/setup/status
+          curl -sf -X POST http://localhost:3000/api/setup/account \
+            -H "Content-Type: application/json" \
+            -d '{"displayName":"CI Test"}'
+          curl -sf -X POST http://localhost:3000/api/setup/complete
       - uses: actions/setup-node@v5
         with:
           node-version: 22
