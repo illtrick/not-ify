@@ -334,8 +334,9 @@ export function ActivityLog({ open, onClose, onUpgradeComplete }) {
     });
 
     return () => {
-      es.close();
-      if (es._retryTimer) clearTimeout(es._retryTimer);
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+      }
       trackSseClose('activity');
       eventSourceRef.current = null;
     };
