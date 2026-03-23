@@ -79,8 +79,6 @@ export function AlbumView({
   if (!selectedAlbum) return null;
   const { artist, album, year, coverArt, tracks, sources, fromSearch, trackCount } = selectedAlbum;
 
-  const isLib = !fromSearch && (activeTracks.length > 0 || excludedTracks.length > 0);
-
   // Enrich tracks with latest format info from library (badges stay fresh after upgrades)
   // Library is re-fetched via SSE on upgrade events — see App.jsx SSE listener
   const libraryFormatMap = React.useMemo(() => {
@@ -99,6 +97,7 @@ export function AlbumView({
   // Separate active tracks from excluded ones (excluded come from server with excluded:true)
   const activeTracks = tracks.filter(t => !t.excluded);
   const excludedTracks = tracks.filter(t => t.excluded);
+  const isLib = !fromSearch && (activeTracks.length > 0 || excludedTracks.length > 0);
 
   const pl = activeTracks.map(t => {
     const liveFormat = libraryFormatMap.get(t.id) || libraryFormatMap.get((t.title || '').toLowerCase());
