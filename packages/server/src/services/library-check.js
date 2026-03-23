@@ -3,19 +3,12 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
-const db = require('./db');
 
 const AUDIO_EXT = new Set(['.mp3', '.flac', '.ogg', '.m4a', '.aac', '.wav', '.opus']);
 
 const QUALITY_RANK = { flac: 6, '320': 5, v0: 4, '256': 3, '192': 2, '128': 1, unknown: 0 };
 
-/**
- * Probe an audio file with ffprobe, returning quality tier and duration.
- * Single ffprobe call extracts both codec/bitrate (for quality) and duration.
- * @param {string} filePath
- * @returns {{ quality: string, duration: number }} quality tier + duration in seconds
- */
-function probeFile(filePath) {
+function detectFileQuality(filePath) {
   try {
     const out = execSync(
       `ffprobe -v quiet -print_format json -show_format "${filePath}"`,
@@ -24,34 +17,21 @@ function probeFile(filePath) {
     const info = JSON.parse(out);
     const codec = info.format?.format_name || '';
     const bitrate = parseInt(info.format?.bit_rate || '0', 10);
-    const duration = parseFloat(info.format?.duration || '0');
 
-    let quality;
-    if (codec.includes('flac')) quality = 'flac';
-    else if (bitrate >= 310000) quality = '320';
-    else if (bitrate >= 245000) quality = '256';
-    else if (bitrate >= 220000) quality = 'v0';
-    else if (bitrate >= 185000) quality = '192';
-    else if (bitrate >= 120000) quality = '128';
-    else quality = 'unknown';
-
-    return { quality, duration };
+    if (codec.includes('flac')) return 'flac';
+    if (bitrate >= 310000) return '320';
+    if (bitrate >= 245000) return '256';
+    if (bitrate >= 220000) return 'v0';
+    if (bitrate >= 185000) return '192';
+    if (bitrate >= 120000) return '128';
+    return 'unknown';
   } catch {
-    return { quality: 'unknown', duration: 0 };
+    return 'unknown';
   }
 }
 
-/**
- * Detect quality tier of an audio file (backward-compatible wrapper).
- * @param {string} filePath
- * @returns {string} quality tier
- */
-function detectFileQuality(filePath) {
-  return probeFile(filePath).quality;
-}
-
 function getExistingQuality(artist, album) {
-  const musicDir = db.getGlobalSetting('musicDir') || process.env.MUSIC_DIR || '/app/music';
+  const musicDir = process.env.MUSIC_DIR || '/app/music';
   const normArtist = normalize(artist);
   const normAlbum = normalize(album);
 
@@ -96,7 +76,7 @@ function normalize(s) {
 }
 
 function albumExistsInLibrary(artist, album) {
-  const musicDir = db.getGlobalSetting('musicDir') || process.env.MUSIC_DIR || '/app/music';
+  const musicDir = process.env.MUSIC_DIR || '/app/music';
   const normArtist = normalize(artist);
   const normAlbum = normalize(album);
 
@@ -141,4 +121,82 @@ function albumExistsInLibrary(artist, album) {
   return false;
 }
 
-module.exports = { albumExistsInLibrary, normalize, QUALITY_RANK, getExistingQuality, isUpgrade, probeFile, detectFileQuality };
+/**
+ * Count audio files in a library album directory.
+ * Uses the same normalize + readdirSync dir-walking pattern as albumExistsInLibrary.
+ * @returns {number} count of audio files, or 0 if album not found
+ */
+function albumTrackCount(artist, album) {
+  const musicDir = process.env.MUSIC_DIR || '/app/music';
+  const normArtist = normalize(artist);
+  const normAlbum = normalize(album);
+
+  if (!fs.existsSync(musicDir)) return 0;
+
+  let artistDirs;
+  try { artistDirs = fs.readdirSync(musicDir); } catch { return 0; }
+
+  for (const artistDir of artistDirs) {
+    if (normalize(artistDir) !== normArtist) continue;
+    const artistPath = path.join(musicDir, artistDir);
+    try { if (!fs.statSync(artistPath).isDirectory()) continue; } catch { continue; }
+
+    let albumDirs;
+    try { albumDirs = fs.readdirSync(artistPath); } catch { continue; }
+
+    for (const albumDir of albumDirs) {
+      if (normalize(albumDir) !== normAlbum) continue;
+      const albumPath = path.join(artistPath, albumDir);
+      try { if (!fs.statSync(albumPath).isDirectory()) continue; } catch { continue; }
+
+      let files;
+      try { files = fs.readdirSync(albumPath); } catch { continue; }
+
+      return files.filter(f => AUDIO_EXT.has(path.extname(f).toLowerCase())).length;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Count excluded tracks for a library album (from .metadata.json).
+ * Uses the same normalize + readdirSync dir-walking pattern as albumExistsInLibrary.
+ * @returns {number} length of the excluded array, or 0 if not found
+ */
+function excludedTrackCount(artist, album) {
+  const musicDir = process.env.MUSIC_DIR || '/app/music';
+  const normArtist = normalize(artist);
+  const normAlbum = normalize(album);
+
+  if (!fs.existsSync(musicDir)) return 0;
+
+  let artistDirs;
+  try { artistDirs = fs.readdirSync(musicDir); } catch { return 0; }
+
+  for (const artistDir of artistDirs) {
+    if (normalize(artistDir) !== normArtist) continue;
+    const artistPath = path.join(musicDir, artistDir);
+    try { if (!fs.statSync(artistPath).isDirectory()) continue; } catch { continue; }
+
+    let albumDirs;
+    try { albumDirs = fs.readdirSync(artistPath); } catch { continue; }
+
+    for (const albumDir of albumDirs) {
+      if (normalize(albumDir) !== normAlbum) continue;
+      const albumPath = path.join(artistPath, albumDir);
+      try { if (!fs.statSync(albumPath).isDirectory()) continue; } catch { continue; }
+
+      try {
+        const metaPath = path.join(albumPath, '.metadata.json');
+        if (!fs.existsSync(metaPath)) return 0;
+        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+        return Array.isArray(meta.excluded) ? meta.excluded.length : 0;
+      } catch {
+        return 0;
+      }
+    }
+  }
+  return 0;
+}
+
+module.exports = { albumExistsInLibrary, albumTrackCount, excludedTrackCount, normalize, QUALITY_RANK, getExistingQuality, isUpgrade };
