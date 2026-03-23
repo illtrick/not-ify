@@ -51,11 +51,14 @@ services:
     volumes:
       - /share/CACHEDEV1_DATA/not-ify/staging/config:/app/config
       - /share/CACHEDEV3_DATA/Media/Music/Not-ify_Staging:/app/music
+      - /share/CACHEDEV1_DATA/not-ify/staging/slskd-downloads:/app/slskd-downloads
     environment:
       - NODE_ENV=staging
       - PORT=3001
       - CONFIG_DIR=/app/config
       - MUSIC_DIR=/app/music
+      - SLSKD_URL=http://localhost:5030
+      - SLSKD_DOWNLOADS_DIR=/app/slskd-downloads
       - LOG_LEVEL=info
       - DLNA_ENABLED=true
       - VPN_ENABLED=${VPN_ENABLED:-false}
@@ -69,6 +72,23 @@ services:
       retries: 3
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+
+  # ---------------------------------------------------------------------------
+  # slskd — Soulseek client for staging (FLAC upgrades from Soulseek peers)
+  # Shares downloads directory with not-ify-staging via bind mount.
+  # Web UI on :5030, API key set via SLSKD_API_KEY in not-ify Settings.
+  # ---------------------------------------------------------------------------
+  slskd-staging:
+    image: slskd/slskd:latest
+    container_name: slskd-staging
+    network_mode: host
+    volumes:
+      - /share/CACHEDEV1_DATA/not-ify/staging/slskd:/app
+      - /share/CACHEDEV1_DATA/not-ify/staging/slskd-downloads:/app/downloads
+      - /share/CACHEDEV3_DATA/Media/Music/Not-ify_Staging:/music:ro
+    environment:
+      - SLSKD_HTTP_PORT=5030
+    restart: unless-stopped
 
   # ---------------------------------------------------------------------------
   # Gluetun VPN sidecar — HTTP proxy for staging (bridge mode, NOT host)
