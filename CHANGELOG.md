@@ -7,6 +7,51 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 - **MINOR** (0.x.0): New features, meaningful improvements
 - **PATCH** (0.0.x): Bug fixes, polish, iteration on current features
 
+## [1.6.0] - 2026-03-23
+
+### Added
+- **First-run setup wizard**: Fresh installs show a guided wizard — create admin account, confirm music library, optionally configure Last.fm, Real-Debrid, VPN, Soulseek
+- **One-command SSH setup**: `docker run --rm -it ... setup` detects platform (QNAP/Synology/Linux), browses storage, generates docker-compose, starts containers, prints URL
+- **Setup API**: `/api/setup/*` endpoints for account creation, library config, service status, setup completion
+- **Setup gate middleware**: Blocks all API routes until first user is created; allows health check and setup endpoints through
+
+### Changed
+- No more hardcoded users: `nathan`, `sarah`, `default` users removed from DB seeding
+- User middleware falls back to first real user instead of hardcoded `default`
+- Docker image now includes bash, whiptail, jq, Docker CLI + Compose plugin for setup script
+
+### Fixed
+- Setup wizard dashboard: service status array-to-object conversion for correct display
+
+## [1.5.2] - 2026-03-23
+
+### Added
+- **MusicBrainz search performance**: Token bucket rate limiter (burst-friendly, 5 tokens, 1/sec refill)
+- **SQLite-persisted MB cache**: 6hr positive TTL, 48hr negative TTL, 24hr track TTL — survives restarts
+- **Search strategy short-circuit**: Skips compound join, fuzzy, and recording search when first batch returns strong artist match (score >= 95)
+- **Scrobble-based cache pre-warming**: Top 30 artists (weighted by recency) pre-cached on startup
+- Recency-weighted `getTopArtists`: recent scrobbles (30 days) get 3x weight over all-time affinity
+
+### Performance
+- Well-known artist search (cold): 2.65s → 0.47s (5.6x faster)
+- Artist+album search (cold): 5.09s → 0.45s (11.3x faster)
+- Track search (cold): 4.89s → 0.22s (22x faster, pre-warmed)
+- Cached searches: <0.25s (now persists across restarts)
+
+## [1.5.1] - 2026-03-22
+
+### Added
+- Soulseek credentials configurable via Settings UI (pushes to slskd)
+- Music library path configurable with folder browser + file migration with progress bar
+- Per-track quality comparison for upgrades (replaceTracksIfBetter)
+- Settings UI: Soulseek, Music Library, folder browser (admin-only sections)
+- Activity log tabs simplified: all, youtube, upgrade
+
+### Fixed
+- Library path reads from DB > env > default across all services
+- Server restart flow with active job handling
+- Various per-track upgrade and validation fixes
+
 ## [1.4.1] - 2026-03-21
 
 ### Added
