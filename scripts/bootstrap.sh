@@ -16,10 +16,14 @@ error()   { echo -e "  ${RED}✗${NC} $*"; }
 
 ask() {
   local prompt="$1" default="$2"
-  echo -ne "  ${BOLD}${prompt}${NC} "
-  [ -n "$default" ] && echo -ne "${DIM}[${default}]${NC} "
+  echo -ne "  ${BOLD}${prompt}${NC} " >&2
+  [ -n "$default" ] && echo -ne "${DIM}[${default}]${NC} " >&2
   read -r answer
-  [ "$answer" = "q" ] || [ "$answer" = "Q" ] && echo "" && info "Setup cancelled." && exit 0
+  if [ "$answer" = "q" ] || [ "$answer" = "Q" ]; then
+    echo "" >&2
+    info "Setup cancelled." >&2
+    exit 0
+  fi
   echo "${answer:-$default}"
 }
 
@@ -178,13 +182,82 @@ else
   MUSIC_BASE=$(ask "Full path to music storage:")
 fi
 
-# Subfolder
+# Browse into the selected volume
 echo ""
-echo -e "  ${DIM}Music will be stored in a subfolder. You can use an${NC}"
-echo -e "  ${DIM}existing folder or create a new one.${NC}"
+echo -e "  ${DIM}Navigate to where you want your music library.${NC}"
+echo -e "  ${DIM}You can select an existing folder or create a new one.${NC}"
 echo ""
-SUBFOLDER=$(ask "Subfolder name:" "not-ify-music")
-MUSIC_DIR="${MUSIC_BASE}/${SUBFOLDER}"
+
+CURRENT_DIR="$MUSIC_BASE"
+while true; do
+  echo -e "  ${BOLD}📁 ${CURRENT_DIR}${NC}"
+  echo ""
+
+  # List subdirectories
+  SUBDIRS=""
+  SUBCOUNT=0
+  for d in "$CURRENT_DIR"/*/; do
+    [ -d "$d" ] || continue
+    dirname=$(basename "$d")
+    case "$dirname" in
+      '@'*|'.'*|'$'*|lost+found) continue ;;  # skip system dirs
+    esac
+    SUBCOUNT=$((SUBCOUNT + 1))
+    SUBDIRS="${SUBDIRS}${dirname}
+"
+    [ "$SUBCOUNT" -ge 15 ] && break
+  done
+
+  if [ "$SUBCOUNT" -gt 0 ]; then
+    i=1
+    while IFS= read -r entry; do
+      [ -z "$entry" ] && continue
+      echo -e "    ${BOLD}[$i]${NC} $entry/"
+      i=$((i + 1))
+    done <<DIREOF
+$SUBDIRS
+DIREOF
+  else
+    echo -e "    ${DIM}(no subdirectories)${NC}"
+  fi
+
+  echo ""
+  echo -e "    ${BOLD}[S]${NC} Select this folder"
+  echo -e "    ${BOLD}[N]${NC} Create new folder here"
+  echo -e "    ${BOLD}[U]${NC} Go up"
+  echo ""
+  NAV_CHOICE=$(ask "Choice:" "S")
+
+  case "$NAV_CHOICE" in
+    [sS]) break ;;
+    [nN])
+      NEW_NAME=$(ask "New folder name:" "not-ify-music")
+      mkdir -p "${CURRENT_DIR}/${NEW_NAME}" 2>/dev/null
+      if [ -d "${CURRENT_DIR}/${NEW_NAME}" ]; then
+        CURRENT_DIR="${CURRENT_DIR}/${NEW_NAME}"
+        break
+      else
+        error "Failed to create folder" >&2
+      fi
+      ;;
+    [uU]) CURRENT_DIR=$(dirname "$CURRENT_DIR") ;;
+    [0-9]*)
+      idx=1
+      while IFS= read -r entry; do
+        [ -z "$entry" ] && continue
+        if [ "$idx" -eq "$NAV_CHOICE" ]; then
+          CURRENT_DIR="${CURRENT_DIR}/${entry}"
+          break
+        fi
+        idx=$((idx + 1))
+      done <<DIREOF2
+$SUBDIRS
+DIREOF2
+      ;;
+  esac
+done
+
+MUSIC_DIR="$CURRENT_DIR"
 
 # Create and validate
 mkdir -p "$MUSIC_DIR" 2>/dev/null || true
