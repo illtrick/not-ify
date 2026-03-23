@@ -505,16 +505,26 @@ function searchArtistAffinity(userId, query) {
   `).all(userId, pattern);
 }
 
-// Returns the top artists across all users by total play_count.
+// Returns the top artists blending all-time affinity with recent listening.
+// Recent scrobbles (last 30 days) get 3x weight to surface current interests.
 // Used for pre-warming the MB cache on startup.
 function getTopArtists(limit = 30) {
+  const thirtyDaysAgo = Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
   return getDb().prepare(`
-    SELECT artist as name, SUM(play_count) as play_count
-    FROM artist_affinity
-    GROUP BY artist
+    SELECT name, SUM(score) as play_count FROM (
+      SELECT artist as name, SUM(play_count) as score
+      FROM artist_affinity
+      GROUP BY artist
+      UNION ALL
+      SELECT artist as name, COUNT(*) * 3 as score
+      FROM scrobbles
+      WHERE played_at > ?
+      GROUP BY artist
+    )
+    GROUP BY name
     ORDER BY play_count DESC
     LIMIT ?
-  `).all(limit);
+  `).all(thirtyDaysAgo, limit);
 }
 
 // --- Tracks ---
