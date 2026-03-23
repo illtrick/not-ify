@@ -7,8 +7,12 @@ const db = require('../services/db');
  * Sets req.userId for downstream handlers.
  */
 function userMiddleware(req, res, next) {
-  const userId = req.headers['x-user-id'] || req.query.userId || 'default';
-  req.userId = db.isValidUser(userId) ? userId : 'default';
+  const requestedId = req.headers['x-user-id'] || req.query.userId;
+  if (requestedId && db.isValidUser(requestedId)) {
+    req.userId = requestedId;
+  } else {
+    req.userId = db.getDefaultUserId() || 'default';
+  }
   next();
 }
 
