@@ -623,6 +623,13 @@ if (require.main === module) {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Not-ify server running on port ${PORT}`);
   });
+
+  // Pre-warm MB cache from scrobble data (fire-and-forget, don't block startup)
+  setTimeout(() => {
+    const musicbrainz = require('./services/musicbrainz');
+    const db = require('./services/db');
+    musicbrainz.preWarmCache(db);
+  }, 5000);
 }
 
 module.exports = app;

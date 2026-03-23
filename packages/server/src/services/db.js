@@ -505,6 +505,18 @@ function searchArtistAffinity(userId, query) {
   `).all(userId, pattern);
 }
 
+// Returns the top artists across all users by total play_count.
+// Used for pre-warming the MB cache on startup.
+function getTopArtists(limit = 30) {
+  return getDb().prepare(`
+    SELECT artist as name, SUM(play_count) as play_count
+    FROM artist_affinity
+    GROUP BY artist
+    ORDER BY play_count DESC
+    LIMIT ?
+  `).all(limit);
+}
+
 // --- Tracks ---
 
 function upsertTrack({ id, artist, album, title, trackNumber, format, filepath, fileSize }) {
@@ -688,6 +700,7 @@ module.exports = {
   getArtistAffinity,
   getUniqueAlbumsSince,
   searchArtistAffinity,
+  getTopArtists,
   // Tracks
   upsertTrack,
   getTrackById,

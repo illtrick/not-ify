@@ -527,9 +527,49 @@ async function getArtistDetails(mbid) {
   }
 }
 
+/**
+ * Pre-warm the MB cache from top scrobbled artists.
+ * Called on server startup (fire-and-forget).
+ * @param {object} dbModule - the db module (to avoid circular require issues)
+ */
+async function preWarmCache(dbModule) {
+  try {
+    const topArtists = dbModule.getTopArtists ? dbModule.getTopArtists(30) : [];
+    if (topArtists.length === 0) {
+      console.log('[mb] No scrobble data for pre-warming');
+      return;
+    }
+
+    let warmed = 0;
+    for (const artist of topArtists) {
+      const key = `artists:${artist.name.toLowerCase().trim()}`;
+      if (dbModule.mbCacheGet(key)) {
+        warmed++; // already cached
+        continue;
+      }
+
+      try {
+        const results = await searchArtists(artist.name);
+        if (results.length > 0 && results[0].mbid) {
+          // Also pre-warm the artist's discography
+          await browseArtistReleases(results[0].mbid, results[0].name);
+        }
+        warmed++;
+      } catch (err) {
+        // Don't let one failure stop the whole pre-warm
+        console.error(`[mb] Pre-warm failed for ${artist.name}: ${err.message}`);
+      }
+    }
+
+    console.log(`[mb] Pre-warmed cache for ${warmed}/${topArtists.length} top artists`);
+  } catch (err) {
+    console.error(`[mb] Pre-warm error: ${err.message}`);
+  }
+}
+
 module.exports = {
   searchReleases, searchArtists, browseArtistReleases,
   getCoverArtUrl, getReleaseTracks, getReleaseGroupTracks,
   searchReleasesFuzzy, searchArtistsFuzzy, searchRecordings,
-  normalizeQuery, getArtistDetails,
+  normalizeQuery, getArtistDetails, preWarmCache,
 };
