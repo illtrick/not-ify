@@ -7,13 +7,10 @@ Not-ify discovers music from multiple sources (MusicBrainz, torrents, Soulseek, 
 ## Quick Start
 
 ```bash
-docker run --rm -it \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v /:/host:ro \
-  ghcr.io/illtrick/not-ify:latest setup
+curl -sL https://raw.githubusercontent.com/illtrick/not-ify/main/scripts/bootstrap.sh | bash
 ```
 
-The interactive setup detects your platform (QNAP, Synology, or any Linux with Docker), helps you pick a music folder, and starts everything. A first-run wizard in the browser walks you through account creation and service configuration.
+The setup script runs directly on your machine, detects your platform (QNAP, Synology, or any Linux with Docker), helps you choose a music folder, then launches Not-ify in Docker. A first-run wizard in the browser walks you through account creation and service configuration.
 
 **Requirements:** Docker with Compose plugin (Docker 23.0+ or Docker Desktop).
 
