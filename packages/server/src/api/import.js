@@ -217,11 +217,17 @@ router.post('/import/wanted/batch-search', async (req, res) => {
 // Import albums from the user's scrobble history into the download queue.
 // Requires scrobble sync to be complete (state === 'complete').
 // Deduplicates against: local library, existing pending/active jobs.
+//
+// Flow: For each album, try MusicBrainz to get a tracklist. If found,
+// queue YT downloads directly (fast playback). If no MB match, fall back
+// to the slower upgrade job pipeline.
 router.post('/import/lastfm', async (req, res) => {
   // Lazy-require to avoid circular-init issues when db is mocked in tests
   const db = require('../services/db');
   const jobQueue = require('../services/job-queue');
   const libraryCheck = require('../services/library-check');
+  const musicbrainz = require('../services/musicbrainz');
+  const { ytQueueAlbum } = require('./youtube');
 
   const { days = 60 } = req.body;
   const userId = req.userId;
@@ -266,19 +272,56 @@ router.post('/import/lastfm', async (req, res) => {
       continue;
     }
 
-    // Enqueue as upgrade job — searches for best source (torrent, Soulseek),
-    // then enqueues the appropriate download type. Falls through to existing
-    // YT download if no better source found.
-    // See job-processor.js:processUpgrade() for the full flow.
+    // Try MusicBrainz first: search for the album, get tracks, queue YT downloads
     try {
-      jobQueue.enqueue(
-        'upgrade',
-        { artist, album },
-        { priority: 0, dedupeKey }
-      );
-      queued++;
+      const mbResults = await musicbrainz.searchReleases(`${artist} ${album}`);
+      let tracks = null;
+      let mbid = null;
+      let rgid = null;
+
+      if (mbResults.length > 0) {
+        const best = mbResults[0];
+        rgid = best.rgid;
+        mbid = best.mbid;
+
+        // Get tracks — prefer release-group (more complete) over single release
+        if (rgid) {
+          const rgData = await musicbrainz.getReleaseGroupTracks(rgid);
+          if (rgData.tracks && rgData.tracks.length > 0) {
+            tracks = rgData.tracks;
+            mbid = rgData.releaseMbid || mbid;
+          }
+        }
+        if (!tracks && mbid) {
+          tracks = await musicbrainz.getReleaseTracks(mbid);
+        }
+      }
+
+      if (tracks && tracks.length > 0) {
+        // Queue YT downloads directly — fast path for playback
+        await ytQueueAlbum({ artist, album, tracks, mbid, rgid });
+        queued++;
+      } else {
+        // No MB match — fall back to upgrade job (searches torrent/Soulseek/YT)
+        jobQueue.enqueue(
+          'upgrade',
+          { artist, album },
+          { priority: 0, dedupeKey }
+        );
+        queued++;
+      }
     } catch {
-      notFound++;
+      // Last resort: enqueue as upgrade job
+      try {
+        jobQueue.enqueue(
+          'upgrade',
+          { artist, album },
+          { priority: 0, dedupeKey }
+        );
+        queued++;
+      } catch {
+        notFound++;
+      }
     }
   }
 

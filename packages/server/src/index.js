@@ -421,7 +421,7 @@ app.use('/api', pipelineRouter);
 app.use('/api', libraryRouter);
 
 // YouTube search and streaming routes
-const youtubeRouter = require('./api/youtube');
+const { router: youtubeRouter } = require('./api/youtube');
 app.use('/api', youtubeRouter);
 
 // Last.fm integration

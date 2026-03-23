@@ -292,17 +292,15 @@ router.post('/download/yt/batch', (req, res) => {
   res.json({ queued: entries.length, ids: entries.map(e => e.id) });
 });
 
-// POST /api/download/yt/album — Album-aware YT download
-// Accepts MB tracklist + artist/album info, searches YT for each track, queues downloads
-router.post('/download/yt/album', async (req, res) => {
-  const { artist, album, tracks, rgid, mbid, coverArt } = req.body;
-  if (!artist || !album) return res.status(400).json({ error: 'Missing artist or album' });
-  if (!Array.isArray(tracks) || tracks.length === 0) return res.status(400).json({ error: 'Missing tracks array' });
-
+// ---------------------------------------------------------------------------
+// ytQueueAlbum — Standalone function for album-aware YT download.
+// Accepts MB tracklist + artist/album info, searches YT for each track, queues downloads.
+// Can be called from the HTTP route or programmatically (e.g. from import pipeline).
+// ---------------------------------------------------------------------------
+async function ytQueueAlbum({ artist, album, tracks, rgid, mbid, coverArt }) {
   const safeArtist = sanitizePath(artist);
   const safeAlbum = sanitizePath(album);
 
-  // For each track, search YouTube and queue download
   const queued = [];
   const errors = [];
 
@@ -399,12 +397,22 @@ router.post('/download/yt/album', async (req, res) => {
   }
 
   activity.log('youtube', 'info', `Album queued: ${artist} — ${album} (${queued.length} tracks, ${errors.length} failed)`, { artist, album, queued: queued.length, errors: errors.length });
-  res.json({
+  return {
     queued: queued.length,
     errors: errors.length,
     tracks: queued,
     failedTracks: errors,
-  });
+  };
+}
+
+// POST /api/download/yt/album — Album-aware YT download (HTTP wrapper)
+router.post('/download/yt/album', async (req, res) => {
+  const { artist, album, tracks, rgid, mbid, coverArt } = req.body;
+  if (!artist || !album) return res.status(400).json({ error: 'Missing artist or album' });
+  if (!Array.isArray(tracks) || tracks.length === 0) return res.status(400).json({ error: 'Missing tracks array' });
+
+  const result = await ytQueueAlbum({ artist, album, tracks, rgid, mbid, coverArt });
+  res.json(result);
 });
 
 // Stream audio proxy
@@ -459,4 +467,4 @@ router.get('/yt/stream/:videoId', async (req, res) => {
   }
 });
 
-module.exports = router;
+module.exports = { router, ytQueueAlbum };
