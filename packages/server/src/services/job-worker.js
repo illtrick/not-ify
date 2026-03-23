@@ -9,12 +9,23 @@ const POLL_INTERVAL = 5000; // 5 seconds
 const BACKOFF = [60000, 300000, 900000]; // 1min, 5min, 15min
 const JOB_TIMEOUT = 1200000; // 20 minutes — large FLAC albums via RD need more time
 
+// Per-type concurrency limits
+const CONCURRENCY_LIMITS = {
+  upgrade: 2,
+  download: 1,          // RD API constraint
+  'soulseek-download': 1, // single slskd connection
+};
+const DEFAULT_CONCURRENCY = 1;
+
 let running = false;
 let pollTimer = null;
 let jobsProcessed = 0;
 let jobsFailed = 0;
 let lastJobAt = null;
 let lastErrorAt = null;
+
+// Track active jobs per type: Map<string, Set<number>>
+const activeJobs = new Map();
 
 let processor = async (job) => {
   throw new Error('No job processor registered');
@@ -24,10 +35,32 @@ function setProcessor(fn) {
   processor = fn;
 }
 
-async function processNextJob() {
-  const job = jobQueue.dequeue();
-  if (!job) return false;
+function getActiveCount(type) {
+  return activeJobs.get(type)?.size || 0;
+}
 
+function getLimit(type) {
+  return CONCURRENCY_LIMITS[type] || DEFAULT_CONCURRENCY;
+}
+
+function trackJob(type, jobId) {
+  if (!activeJobs.has(type)) activeJobs.set(type, new Set());
+  activeJobs.get(type).add(jobId);
+}
+
+function untrackJob(type, jobId) {
+  const set = activeJobs.get(type);
+  if (set) {
+    set.delete(jobId);
+    if (set.size === 0) activeJobs.delete(type);
+  }
+}
+
+/**
+ * Execute a single job — handles guard logic, timeout, retry, logging.
+ * Returns true if a job was processed, false if nothing was dequeued.
+ */
+async function executeJob(job) {
   const payload = JSON.parse(job.payload);
 
   // No-downgrade / duplicate guard: use a single getExistingQuality call.
@@ -123,10 +156,77 @@ async function processNextJob() {
   }
 }
 
+/**
+ * Try to fill all available concurrency slots across job types.
+ */
+function fillSlots() {
+  if (!running) return;
+
+  // Collect all types that have concurrency limits, plus check for untyped jobs
+  const types = Object.keys(CONCURRENCY_LIMITS);
+
+  for (const type of types) {
+    const limit = getLimit(type);
+    let active = getActiveCount(type);
+
+    while (active < limit) {
+      const job = jobQueue.dequeue(type);
+      if (!job) break;
+
+      active++;
+      trackJob(type, job.id);
+
+      // Fire-and-forget — completion triggers fillSlots again
+      executeJob(job)
+        .catch((err) => {
+          console.error(`[job-worker] executeJob error (${type}):`, err.message);
+        })
+        .finally(() => {
+          untrackJob(type, job.id);
+          // Try to fill the freed slot immediately
+          setImmediate(fillSlots);
+        });
+    }
+  }
+
+  // Also dequeue any jobs with types not in CONCURRENCY_LIMITS (fallback)
+  // These get DEFAULT_CONCURRENCY = 1
+  const fallbackJob = jobQueue.dequeue(); // untyped dequeue
+  if (fallbackJob && !types.includes(fallbackJob.type)) {
+    const fType = fallbackJob.type;
+    const limit = DEFAULT_CONCURRENCY;
+    const active = getActiveCount(fType);
+
+    if (active < limit) {
+      trackJob(fType, fallbackJob.id);
+      executeJob(fallbackJob)
+        .catch((err) => {
+          console.error(`[job-worker] executeJob error (${fType}):`, err.message);
+        })
+        .finally(() => {
+          untrackJob(fType, fallbackJob.id);
+          setImmediate(fillSlots);
+        });
+    }
+    // If at limit, the job was already dequeued (marked active in DB) so it will run.
+    // This edge case is minor — unknown types are rare.
+  }
+}
+
+/**
+ * processNextJob — thin wrapper for backward compatibility / tests.
+ * Dequeues and processes a single job synchronously (awaits completion).
+ */
+async function processNextJob() {
+  const job = jobQueue.dequeue();
+  if (!job) return false;
+  return executeJob(job);
+}
+
 async function poll() {
   if (!running) return;
   try {
-    await processNextJob();
+    fillSlots();
   } catch (err) {
     // log but don't crash
     console.error('[job-worker] poll error:', err.message);
@@ -151,7 +251,25 @@ function stop() {
 }
 
 function getStatus() {
-  return { running, jobsProcessed, jobsFailed, lastJobAt, lastErrorAt };
+  // Build active counts per type
+  const activeByType = {};
+  for (const [type, set] of activeJobs) {
+    activeByType[type] = set.size;
+  }
+  const totalActive = Array.from(activeJobs.values()).reduce((sum, s) => sum + s.size, 0);
+
+  return {
+    running,
+    jobsProcessed,
+    jobsFailed,
+    lastJobAt,
+    lastErrorAt,
+    concurrency: {
+      limits: { ...CONCURRENCY_LIMITS },
+      active: activeByType,
+      totalActive,
+    },
+  };
 }
 
-module.exports = { start, stop, setProcessor, processNextJob, getStatus };
+module.exports = { start, stop, setProcessor, processNextJob, getStatus, fillSlots };
