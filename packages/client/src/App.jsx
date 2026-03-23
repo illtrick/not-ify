@@ -18,6 +18,7 @@ import { PlayerBar } from './components/PlayerBar';
 import { MobileLibrary } from './components/MobileLibrary';
 import { BottomTabBar } from './components/BottomTabBar';
 import { UserPicker, getCurrentUser, clearCurrentUser } from './components/UserPicker';
+import { SetupWizard } from './components/SetupWizard';
 import { useQueue } from './hooks/useQueue';
 import { useRecentlyPlayed } from './hooks/useRecentlyPlayed';
 import { useSearch } from './hooks/useSearch';
@@ -1000,10 +1001,25 @@ function App() {
     return saved;
   });
   const [isAdmin, setIsAdmin] = useState(false);
+  const [setupRequired, setSetupRequired] = useState(null); // null = loading
 
   useEffect(() => {
     api.configure({ onRequest: onApiRequest });
     startErrorCapture();
+  }, []);
+
+  // Check setup status on mount
+  useEffect(() => {
+    api.getSetupStatus()
+      .then(status => setSetupRequired(status.needsSetup))
+      .catch(() => setSetupRequired(false));
+  }, []);
+
+  // Listen for setup_required events dispatched by the api-client
+  useEffect(() => {
+    const handler = () => setSetupRequired(true);
+    window.addEventListener('notify-setup-required', handler);
+    return () => window.removeEventListener('notify-setup-required', handler);
   }, []);
 
   function switchUser() {
@@ -1011,6 +1027,19 @@ function App() {
     api.setUser(null);
     setCurrentUser(null);
     setIsAdmin(false);
+  }
+
+  // Show nothing while checking setup status
+  if (setupRequired === null) return null;
+
+  // Show setup wizard if setup is required
+  if (setupRequired) {
+    return (
+      <SetupWizard onComplete={() => {
+        setSetupRequired(false);
+        window.location.reload();
+      }} />
+    );
   }
 
   if (!currentUser) {
