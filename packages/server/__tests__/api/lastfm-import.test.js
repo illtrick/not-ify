@@ -1,7 +1,8 @@
 'use strict';
 
 // Suite — POST /api/import/lastfm
-// Tests the scrobble-based library import endpoint.
+// Tests the scrobble-based library import endpoint (non-blocking).
+// The endpoint returns immediately with counts; background processing tested via processImportBatch.
 // Uses real SQLite (in-process, temp dir) + real library-check (real fs) + real job-queue.
 // External services mocked to prevent network calls / side effects.
 
@@ -31,6 +32,13 @@ jest.mock('../../src/services/youtube', () => ({
   searchSoundCloud: jest.fn().mockResolvedValue([]),
   getStreamUrl: jest.fn(),
 }));
+// Mock ytQueueAlbum so import tests don't make real YT requests
+const mockYtQueueAlbum = jest.fn().mockResolvedValue({ queued: 0, failed: 0, total: 0 });
+jest.mock('../../src/api/youtube', () => {
+  const express = require('express');
+  const r = express.Router();
+  return { router: r, ytQueueAlbum: mockYtQueueAlbum };
+});
 jest.mock('../../src/services/llm', () => ({
   getCachedParse: jest.fn().mockReturnValue(null),
   parseTorrentNamesAsync: jest.fn(),
@@ -43,7 +51,15 @@ jest.mock('../../src/services/realdebrid', () => ({}));
 jest.mock('../../src/services/migrate', () => ({ migrate: jest.fn() }));
 jest.mock('../../src/services/scrobble-sync', () => ({
   startDeltaSyncScheduler: jest.fn(),
+  deltaSync: jest.fn().mockResolvedValue({ fetched: 0 }),
   getSyncStatus: jest.fn().mockReturnValue({ state: 'not_started' }),
+}));
+jest.mock('../../src/services/activity-log', () => ({
+  log: jest.fn(),
+  getEntries: jest.fn().mockReturnValue([]),
+  onEntry: jest.fn().mockReturnValue(() => {}),
+  clear: jest.fn(),
+  getStatus: jest.fn().mockReturnValue({ entryCount: 0 }),
 }));
 jest.mock('../../src/services/dlna', () => ({ startDiscovery: jest.fn(), getDevices: jest.fn().mockReturnValue([]) }));
 
@@ -54,6 +70,10 @@ const db = require('../../src/services/db');
 // Require job-queue to ensure the jobs table schema is initialised
 require('../../src/services/job-queue');
 const fs = require('fs');
+
+// Get processImportBatch for direct testing of background logic
+const importRouter = require('../../src/api/import');
+const processImportBatch = importRouter._processImportBatch;
 
 // Auth header to identify as 'nathan' (seeded user)
 function nathanHeader() {
@@ -73,11 +93,11 @@ beforeEach(() => {
   rawDb.exec("DELETE FROM jobs");
   rawDb.exec("DELETE FROM scrobbles");
   rawDb.exec("DELETE FROM user_settings WHERE key = 'scrobbleSync'");
+  mockYtQueueAlbum.mockClear();
 });
 
-describe('POST /api/import/lastfm', () => {
+describe('POST /api/import/lastfm (non-blocking)', () => {
   test('returns 400 when scrobble sync not complete', async () => {
-    // No scrobbleSync setting set — defaults to null → not complete
     const res = await request(app)
       .post('/api/import/lastfm')
       .set(nathanHeader())
@@ -87,7 +107,7 @@ describe('POST /api/import/lastfm', () => {
     expect(res.body.error).toMatch(/not complete/i);
   });
 
-  test('returns summary with found=0 and queued=0 when scrobbles empty', async () => {
+  test('returns summary with found=0 and toProcess=0 when scrobbles empty', async () => {
     db.setUserSetting('nathan', 'scrobbleSync', { state: 'complete', lastSyncedAt: Math.floor(Date.now() / 1000) });
 
     const res = await request(app)
@@ -97,11 +117,12 @@ describe('POST /api/import/lastfm', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.found).toBe(0);
-    expect(res.body.queued).toBe(0);
+    expect(res.body.toProcess).toBe(0);
     expect(res.body.alreadyInLibrary).toBe(0);
+    expect(res.body.processing).toBe(true);
   });
 
-  test('queues albums not in library', async () => {
+  test('returns toProcess count for albums not in library (non-blocking)', async () => {
     db.setUserSetting('nathan', 'scrobbleSync', { state: 'complete', lastSyncedAt: Math.floor(Date.now() / 1000) });
 
     const now = Math.floor(Date.now() / 1000);
@@ -116,8 +137,8 @@ describe('POST /api/import/lastfm', () => {
       .send({ days: 60 });
 
     expect(res.status).toBe(200);
-    expect(res.body.found).toBe(1);   // 1 unique album
-    expect(res.body.queued).toBe(1);
+    expect(res.body.found).toBe(1);
+    expect(res.body.toProcess).toBe(1);
     expect(res.body.alreadyInLibrary).toBe(0);
   });
 
@@ -129,7 +150,6 @@ describe('POST /api/import/lastfm', () => {
       { artist: 'TestArtist', album: 'TestAlbum', track: 'T1', played_at: now - 10 },
     ]);
 
-    // Create a fake album dir with an audio file
     const albumDir = path.join(TEST_MUSIC_DIR, 'TestArtist', 'TestAlbum');
     fs.mkdirSync(albumDir, { recursive: true });
     fs.writeFileSync(path.join(albumDir, 'track.flac'), 'fake audio');
@@ -141,9 +161,8 @@ describe('POST /api/import/lastfm', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.alreadyInLibrary).toBe(1);
-    expect(res.body.queued).toBe(0);
+    expect(res.body.toProcess).toBe(0);
 
-    // Cleanup
     fs.rmSync(path.join(TEST_MUSIC_DIR, 'TestArtist'), { recursive: true, force: true });
   });
 
@@ -155,7 +174,6 @@ describe('POST /api/import/lastfm', () => {
       { artist: 'SomeArtist', album: 'SomeAlbum', track: 'T1', played_at: now - 10 },
     ]);
 
-    // Pre-enqueue the same album
     const jobQueue = require('../../src/services/job-queue');
     const { normalize } = require('../../src/services/library-check');
     const dedupeKey = normalize('SomeArtist') + ':' + normalize('SomeAlbum');
@@ -168,14 +186,13 @@ describe('POST /api/import/lastfm', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.alreadyQueued).toBe(1);
-    expect(res.body.queued).toBe(0);
+    expect(res.body.toProcess).toBe(0);
   });
 
   test('respects the days parameter (excludes old scrobbles)', async () => {
     db.setUserSetting('nathan', 'scrobbleSync', { state: 'complete', lastSyncedAt: Math.floor(Date.now() / 1000) });
 
     const now = Math.floor(Date.now() / 1000);
-    // played 120 days ago — should be excluded when days=60
     db.insertScrobbles('nathan', [
       { artist: 'OldArtist', album: 'OldAlbum', track: 'T1', played_at: now - (120 * 86400) },
     ]);
@@ -206,5 +223,84 @@ describe('POST /api/import/lastfm', () => {
     expect(res.status).toBe(200);
     expect(res.body.artists).toBe(2);
     expect(res.body.found).toBe(2);
+  });
+});
+
+describe('processImportBatch (background)', () => {
+  test('calls ytQueueAlbum when MusicBrainz returns tracks', async () => {
+    const mb = require('../../src/services/musicbrainz');
+    mb.searchReleases.mockResolvedValueOnce([
+      { mbid: 'mbid-123', rgid: 'rgid-456', artist: 'FreshArtist', album: 'FreshAlbum', year: 2023, trackCount: 2 },
+    ]);
+    mb.getReleaseGroupTracks.mockResolvedValueOnce({
+      releaseMbid: 'mbid-123',
+      tracks: [
+        { position: 1, title: 'Track One', lengthMs: 200000 },
+        { position: 2, title: 'Track Two', lengthMs: 180000 },
+      ],
+    });
+
+    const { normalize } = require('../../src/services/library-check');
+    const batch = [{ artist: 'FreshArtist', album: 'FreshAlbum', dedupeKey: normalize('FreshArtist') + ':' + normalize('FreshAlbum') }];
+
+    await processImportBatch(batch);
+
+    expect(mockYtQueueAlbum).toHaveBeenCalledTimes(1);
+    expect(mockYtQueueAlbum).toHaveBeenCalledWith(expect.objectContaining({
+      artist: 'FreshArtist',
+      album: 'FreshAlbum',
+      tracks: expect.arrayContaining([expect.objectContaining({ title: 'Track One' })]),
+    }));
+  });
+
+  test('falls back to download job when MusicBrainz returns no tracks', async () => {
+    const mb = require('../../src/services/musicbrainz');
+    mb.searchReleases.mockResolvedValueOnce([]);
+
+    const { normalize } = require('../../src/services/library-check');
+    const batch = [{ artist: 'UnknownArtist', album: 'UnknownAlbum', dedupeKey: normalize('UnknownArtist') + ':' + normalize('UnknownAlbum') }];
+
+    await processImportBatch(batch);
+
+    expect(mockYtQueueAlbum).not.toHaveBeenCalled();
+    const rawDb = db.getDb();
+    const job = rawDb.prepare("SELECT * FROM jobs WHERE status = 'pending'").get();
+    expect(job).toBeTruthy();
+  });
+
+  test('smart dedup skips albums where tracks + excluded >= expected', async () => {
+    const mb = require('../../src/services/musicbrainz');
+    mb.searchReleases.mockResolvedValueOnce([
+      { mbid: 'mbid-abc', rgid: 'rgid-def', artist: 'CompleteArtist', album: 'CompleteAlbum' },
+    ]);
+    mb.getReleaseGroupTracks.mockResolvedValueOnce({
+      releaseMbid: 'mbid-abc',
+      tracks: [
+        { position: 1, title: 'T1', lengthMs: 200000 },
+        { position: 2, title: 'T2', lengthMs: 180000 },
+        { position: 3, title: 'T3', lengthMs: 190000 },
+      ],
+    });
+
+    // Create album dir with 2 audio files + 1 excluded track in metadata
+    const albumDir = path.join(TEST_MUSIC_DIR, 'CompleteArtist', 'CompleteAlbum');
+    fs.mkdirSync(albumDir, { recursive: true });
+    fs.writeFileSync(path.join(albumDir, '01-t1.flac'), 'fake');
+    fs.writeFileSync(path.join(albumDir, '02-t2.flac'), 'fake');
+    fs.writeFileSync(path.join(albumDir, '.metadata.json'), JSON.stringify({ excluded: ['03-t3.flac'] }));
+
+    const { normalize } = require('../../src/services/library-check');
+    const batch = [{ artist: 'CompleteArtist', album: 'CompleteAlbum', dedupeKey: normalize('CompleteArtist') + ':' + normalize('CompleteAlbum') }];
+
+    await processImportBatch(batch);
+
+    // Should skip — album is complete (2 tracks + 1 excluded = 3 >= 3 expected)
+    expect(mockYtQueueAlbum).not.toHaveBeenCalled();
+
+    // Verify activity log recorded the skip
+    const activity = require('../../src/services/activity-log');
+    expect(activity.log).toHaveBeenCalledWith('import', 'info', expect.stringContaining('Skipped (complete)'));
+
+    fs.rmSync(path.join(TEST_MUSIC_DIR, 'CompleteArtist'), { recursive: true, force: true });
   });
 });

@@ -215,19 +215,14 @@ router.post('/import/wanted/batch-search', async (req, res) => {
 
 // ─── POST /api/import/lastfm ──────────────────────────────────────────────
 // Import albums from the user's scrobble history into the download queue.
-// Requires scrobble sync to be complete (state === 'complete').
-// Deduplicates against: local library, existing pending/active jobs.
-//
-// Flow: For each album, try MusicBrainz to get a tracklist. If found,
-// queue YT downloads directly (fast playback). If no MB match, fall back
-// to the slower upgrade job pipeline.
+// Returns immediately with album count — processes in background.
+// Auto delta-syncs scrobbles if stale (>6h since last sync).
+// Smart dedup: skips albums where albumTrackCount + excludedTrackCount >= expected MB tracks.
+// Progress reported via activity log SSE stream.
 router.post('/import/lastfm', async (req, res) => {
   // Lazy-require to avoid circular-init issues when db is mocked in tests
   const db = require('../services/db');
-  const jobQueue = require('../services/job-queue');
   const libraryCheck = require('../services/library-check');
-  const musicbrainz = require('../services/musicbrainz');
-  const { ytQueueAlbum } = require('./youtube');
 
   const { days = 60 } = req.body;
   const userId = req.userId;
@@ -240,28 +235,43 @@ router.post('/import/lastfm', async (req, res) => {
     });
   }
 
+  // Auto delta-sync if scrobbles are stale (>6h since last sync)
+  const STALE_THRESHOLD_MS = 6 * 60 * 60 * 1000;
+  const lastSyncedAt = syncState.lastSyncedAt || 0;
+  const isSyncStale = (Date.now() - lastSyncedAt * 1000) > STALE_THRESHOLD_MS;
+
+  if (isSyncStale) {
+    try {
+      const scrobbleSync = require('../services/scrobble-sync');
+      const lastfmConfig = db.getLastfmConfig(userId);
+      if (lastfmConfig && lastfmConfig.username) {
+        // Fire and forget — delta sync runs in background, we proceed with current data
+        scrobbleSync.deltaSync(userId, lastfmConfig.username).catch(err =>
+          console.warn('[import] Auto delta-sync failed:', err.message)
+        );
+      }
+    } catch (err) {
+      console.warn('[import] Could not trigger auto delta-sync:', err.message);
+    }
+  }
+
   // Gather unique artist/album pairs from the scrobble window
   const albums = db.getUniqueAlbumsSince(userId, days);
   const uniqueArtists = new Set(albums.map(a => a.artist));
 
+  // Quick pre-filter: remove albums already in library or already queued
   let alreadyInLibrary = 0;
   let alreadyQueued = 0;
-  let queued = 0;
-  let notFound = 0;
+  const toProcess = [];
 
   for (const { artist, album } of albums) {
-    if (!artist || !album) {
-      notFound++;
-      continue;
-    }
+    if (!artist || !album) continue;
 
-    // Check if already in the local music library
     if (libraryCheck.albumExistsInLibrary(artist, album)) {
       alreadyInLibrary++;
       continue;
     }
 
-    // Check if a pending or active job already exists for this album
     const dedupeKey = libraryCheck.normalize(artist) + ':' + libraryCheck.normalize(album);
     const existingJob = db.getDb().prepare(
       "SELECT id FROM jobs WHERE dedupe_key = ? AND status IN ('pending', 'active')"
@@ -272,68 +282,116 @@ router.post('/import/lastfm', async (req, res) => {
       continue;
     }
 
-    // Try MusicBrainz first: search for the album, get tracks, queue YT downloads
-    try {
-      const mbResults = await musicbrainz.searchReleases(`${artist} ${album}`);
-      let tracks = null;
-      let mbid = null;
-      let rgid = null;
-
-      if (mbResults.length > 0) {
-        const best = mbResults[0];
-        rgid = best.rgid;
-        mbid = best.mbid;
-
-        // Get tracks — prefer release-group (more complete) over single release
-        if (rgid) {
-          const rgData = await musicbrainz.getReleaseGroupTracks(rgid);
-          if (rgData.tracks && rgData.tracks.length > 0) {
-            tracks = rgData.tracks;
-            mbid = rgData.releaseMbid || mbid;
-          }
-        }
-        if (!tracks && mbid) {
-          tracks = await musicbrainz.getReleaseTracks(mbid);
-        }
-      }
-
-      if (tracks && tracks.length > 0) {
-        // Queue YT downloads directly — fast path for playback
-        await ytQueueAlbum({ artist, album, tracks, mbid, rgid });
-        queued++;
-      } else {
-        // No MB match — fall back to upgrade job (searches torrent/Soulseek/YT)
-        jobQueue.enqueue(
-          'upgrade',
-          { artist, album },
-          { priority: 0, dedupeKey }
-        );
-        queued++;
-      }
-    } catch {
-      // Last resort: enqueue as upgrade job
-      try {
-        jobQueue.enqueue(
-          'upgrade',
-          { artist, album },
-          { priority: 0, dedupeKey }
-        );
-        queued++;
-      } catch {
-        notFound++;
-      }
-    }
+    toProcess.push({ artist, album, dedupeKey });
   }
 
+  // Return immediately — process in background
   res.json({
     found: albums.length,
     artists: uniqueArtists.size,
     alreadyInLibrary,
     alreadyQueued,
-    queued,
-    notFound,
+    toProcess: toProcess.length,
+    processing: true,
   });
+
+  // Background processing — no await, runs after response
+  if (toProcess.length > 0) {
+    processImportBatch(toProcess).catch(err =>
+      console.error('[import] Background batch failed:', err.message)
+    );
+  }
 });
+
+/**
+ * Background processor for last.fm import batch.
+ * For each album: MB lookup → smart dedup → ytQueueAlbum or upgrade job fallback.
+ * Logs progress to activity log for SSE consumers.
+ */
+async function processImportBatch(batch) {
+  const activity = require('../services/activity-log');
+  const mb = require('../services/musicbrainz');
+  const jobQueue = require('../services/job-queue');
+  const libraryCheck = require('../services/library-check');
+  const { ytQueueAlbum } = require('./youtube');
+
+  let queued = 0;
+  let skippedComplete = 0;
+  let failed = 0;
+
+  activity.log('import', 'info', `Starting import batch: ${batch.length} albums to process`);
+
+  for (let i = 0; i < batch.length; i++) {
+    const { artist, album, dedupeKey } = batch[i];
+
+    try {
+      // MusicBrainz lookup — search for the album, get tracks
+      const mbResults = await mb.searchReleases(`${artist} ${album}`);
+      let tracks = null;
+      let mbid = null;
+      let rgid = null;
+
+      if (mbResults && mbResults.length > 0) {
+        const best = mbResults[0];
+        mbid = best.mbid;
+        rgid = best.rgid;
+
+        // Prefer release group tracks (canonical), fall back to release tracks
+        if (rgid) {
+          const rgData = await mb.getReleaseGroupTracks(rgid);
+          if (rgData && rgData.tracks && rgData.tracks.length > 0) {
+            tracks = rgData.tracks;
+            mbid = mbid || rgData.releaseMbid;
+          }
+        }
+        if (!tracks && mbid) {
+          const relTracks = await mb.getReleaseTracks(mbid);
+          if (relTracks && relTracks.length > 0) {
+            tracks = relTracks;
+          }
+        }
+      }
+
+      // Smart dedup: if we have MB track count, check if library already has enough tracks
+      if (tracks && tracks.length > 0) {
+        const existing = libraryCheck.albumTrackCount(artist, album);
+        const excluded = libraryCheck.excludedTrackCount(artist, album);
+        if (existing + excluded >= tracks.length) {
+          skippedComplete++;
+          activity.log('import', 'info', `Skipped (complete): ${artist} — ${album} (${existing}+${excluded} >= ${tracks.length} tracks)`);
+          continue;
+        }
+
+        // Queue YT downloads — music playable within 30-60 seconds
+        await ytQueueAlbum({ artist, album, tracks, mbid, rgid });
+        queued++;
+        activity.log('import', 'success', `Queued YT: ${artist} — ${album} (${tracks.length} tracks)`, { progress: i + 1, total: batch.length });
+      } else {
+        // No MB match — fall back to upgrade job
+        jobQueue.enqueue(
+          'download',
+          { artist, album, source_meta: {} },
+          { priority: 0, dedupeKey }
+        );
+        queued++;
+        activity.log('import', 'info', `Queued upgrade job: ${artist} — ${album}`, { progress: i + 1, total: batch.length });
+      }
+    } catch (err) {
+      failed++;
+      activity.log('import', 'error', `Failed: ${artist} — ${album}: ${err.message}`, { progress: i + 1, total: batch.length });
+    }
+
+    // Rate limit: 1000ms between MB lookups
+    if (i < batch.length - 1) {
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+
+  activity.log('import', 'success', `Import batch complete: ${queued} queued, ${skippedComplete} complete, ${failed} failed`);
+}
+
+// Exported for testing
+router._processImportBatch = processImportBatch;
 
 // ─── DELETE /api/import/wanted ─────────────────────────────────────────────
 // Clear the wanted list
