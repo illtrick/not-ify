@@ -347,6 +347,99 @@ The wizard is NOT shown again after dismissal. Users configure services through 
 | User accounts | Web wizard | SQLite DB | Yes |
 | Scrobble history | Last.fm sync | SQLite DB | Yes |
 
+## Database Integration
+
+### Changes from current state
+
+The current DB seeds three hardcoded users (`default`, `nathan`, `sarah`) on every fresh initialization and auto-promotes the first non-default user to admin. This must change to support the first-run wizard.
+
+### What changes
+
+**1. Remove hardcoded user seeding** (db.js lines 186-190)
+
+Remove:
+```javascript
+upsertUser.run('default', 'Default');
+upsertUser.run('nathan', 'Nathan');
+upsertUser.run('sarah', 'Sarah');
+```
+
+On a fresh DB, the `users` table is now **empty**. The first-run wizard creates the first user.
+
+**2. Remove auto-admin promotion** (db.js lines 180-184)
+
+Remove the logic that promotes the first non-default user. Instead, the `POST /api/setup/account` endpoint explicitly creates the user with `role = 'admin'`.
+
+**3. Add user creation functions to db.js**
+
+```javascript
+function createUser(id, displayName, role = 'user') {
+  getDb().prepare('INSERT INTO users (id, display_name, role) VALUES (?, ?, ?)').run(id, displayName, role);
+  return { id, displayName, role };
+}
+
+function getUserCount() {
+  return getDb().prepare('SELECT COUNT(*) as count FROM users').get().count;
+}
+
+function getDefaultUserId() {
+  const row = getDb().prepare("SELECT id FROM users WHERE id != 'default' ORDER BY created_at ASC LIMIT 1").get();
+  return row?.id || null;
+}
+```
+
+**4. Replace `default` user fallback in user middleware**
+
+```javascript
+// Old:
+req.userId = req.headers['x-user-id'] || 'default';
+
+// New:
+req.userId = req.headers['x-user-id'] || db.getDefaultUserId();
+if (!req.userId) {
+  // No users exist — only setup routes allowed
+  if (req.path.startsWith('/api/setup/') || req.path === '/api/health') {
+    return next();
+  }
+  return res.status(403).json({ error: 'setup_required', setupUrl: '/setup' });
+}
+```
+
+**5. Add `setup_complete` flag**
+
+`POST /api/setup/complete` writes to `global_settings`:
+```javascript
+db.setGlobalSetting('setup_complete', true);
+```
+
+The setup middleware checks this on startup (cached in memory, not queried per-request):
+```javascript
+let setupComplete = db.getGlobalSetting('setup_complete') || db.getUserCount() > 0;
+```
+
+This means: if users exist (from old DB or wizard), setup is complete. The flag is a belt-and-suspenders check.
+
+### What does NOT change
+
+- All table schemas (no ALTER TABLE, no migrations)
+- `global_settings`, `lastfm_config`, `tracks`, `scrobbles`, `artist_affinity`, `mb_cache` tables
+- `isAdmin()` function — still reads role column
+- Admin guard middleware — unchanged
+- Legacy JSON migration — unchanged
+
+### Backward compatibility
+
+| Scenario | Behavior |
+|----------|----------|
+| **Existing DB with `nathan`/`sarah`** | Users table not empty → wizard doesn't trigger → app works normally |
+| **Existing DB, `default` user referenced** | `getDefaultUserId()` skips `default`, returns first real user |
+| **Fresh DB** | Empty users table → setup middleware redirects to wizard → user creates account |
+| **DB with users but no `setup_complete` flag** | `getUserCount() > 0` catches this → no wizard |
+
+### Schema (unchanged)
+
+No new tables needed. The `users` table already has `id`, `display_name`, `role`, `created_at`. The `global_settings` table already exists for the `setup_complete` flag. All setup API endpoints use existing tables.
+
 ## Docker Image Changes
 
 ### Entrypoint Modification
