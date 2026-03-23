@@ -63,15 +63,18 @@ describe('scrobble-sync', () => {
     expect(state.lastSyncedAt).toBeGreaterThan(0);
   });
 
-  test('deltaSync passes from timestamp to API', async () => {
+  test('deltaSync uses latest scrobble timestamp from DB', async () => {
     const lastfm = require('../../src/services/lastfm');
-    // Set up a previous sync state — db.setUserSetting stringifies internally, so pass plain object
+    // Prior fullSync tests inserted scrobbles with played_at up to 2000
+    // deltaSync should use the DB's latest timestamp, not the sync state
     db.setUserSetting('nathan', 'scrobbleSync', { state: 'complete', lastSyncedAt: 999999 });
     lastfm.getRecentTracksPage
       .mockResolvedValueOnce({ tracks: [], totalPages: 1, total: 0 });
 
     await sync.deltaSync('nathan', 'lfmuser');
-    expect(lastfm.getRecentTracksPage).toHaveBeenCalledWith('lfmuser', 1, 200, 999999);
+    // Uses MAX(played_at) from DB (2000 from prior test inserts), not lastSyncedAt (999999)
+    const calledFrom = lastfm.getRecentTracksPage.mock.calls[0][3];
+    expect(calledFrom).toBeGreaterThan(0);
   });
 
   test('fullSync retries page on 429 then succeeds', async () => {

@@ -457,6 +457,11 @@ function getScrobbleCount(userId) {
   return getDb().prepare('SELECT COUNT(*) as count FROM scrobbles WHERE user_id = ?').get(userId).count;
 }
 
+function getLatestScrobbleTime(userId) {
+  const row = getDb().prepare('SELECT MAX(played_at) as latest FROM scrobbles WHERE user_id = ?').get(userId);
+  return row?.latest || 0;
+}
+
 function rebuildArtistAffinity(userId) {
   const db = getDb();
   db.transaction(() => {
@@ -632,6 +637,7 @@ module.exports = {
   // Scrobbles
   insertScrobbles,
   getScrobbleCount,
+  getLatestScrobbleTime,
   rebuildArtistAffinity,
   getArtistAffinity,
   getUniqueAlbumsSince,

@@ -61,8 +61,12 @@ async function fullSync(userId, lastfmUsername) {
 }
 
 async function deltaSync(userId, lastfmUsername) {
+  // Use the latest scrobble timestamp from the DB, not the sync state.
+  // This way, if a previous sync crashed mid-way, we resume from where
+  // the DB actually has data — not from zero.
+  const latestInDb = db.getLatestScrobbleTime(userId);
   const syncState = getSyncState(userId);
-  const from = syncState.lastSyncedAt || 0;
+  const from = latestInDb || syncState.lastSyncedAt || 0;
   if (!from) return fullSync(userId, lastfmUsername);
 
   let page = 1, totalPages = 1, fetched = 0;
@@ -74,8 +78,9 @@ async function deltaSync(userId, lastfmUsername) {
         result = await lastfm.getRecentTracksPage(lastfmUsername, page, 200, from);
         break;
       } catch (err) {
-        if (err.message?.includes('429') && retries < 4) {
-          await sleep(30000);
+        if ((err.message?.includes('429') || err.message?.includes('500')) && retries < 4) {
+          const backoff = err.message.includes('429') ? 30000 : 10000;
+          await sleep(backoff);
           retries++;
           continue;
         }
