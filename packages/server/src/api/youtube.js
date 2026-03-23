@@ -112,7 +112,15 @@ async function ytQueueProcess() {
       activeYtDownloads.set(next.id, { abort, title: next.title });
 
       const promise = ytDownloadOne(next, abort)
-        .then(() => { next.status = 'done'; })
+        .then(() => {
+          next.status = 'done';
+          // Sync new track to DB so library API returns it immediately
+          try {
+            const library = require('./library');
+            library.syncAlbum(next.artist, next.album);
+            library.invalidateCache();
+          } catch {}
+        })
         .catch(err => {
           if (err.message === 'Download cancelled') {
             next.status = 'cancelled';
