@@ -499,6 +499,9 @@ function searchArtistAffinity(userId, query) {
 // --- Tracks ---
 
 function upsertTrack({ id, artist, album, title, trackNumber, format, filepath, fileSize }) {
+  // Delete any existing track with the same filepath but different id
+  // (happens when track ID generation changes across versions)
+  getDb().prepare('DELETE FROM tracks WHERE filepath = ? AND id != ?').run(filepath, id);
   return getDb().prepare(`
     INSERT INTO tracks (id, artist, album, title, track_number, format, filepath, file_size, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
