@@ -21,6 +21,12 @@ export function FolderBrowser({ initialPath, onSelect, onCancel }) {
       setParentPath(data.parent);
       setDirectories(data.directories || []);
     } catch (err) {
+      // If path doesn't exist, try parent directory, then fall back to root
+      const parent = path.replace(/[\\/][^\\/]+$/, '') || (navigator.platform?.includes('Win') ? 'C:\\' : '/');
+      if (path !== parent) {
+        setLoading(false);
+        return browse(parent);
+      }
       setError(err.body?.error || err.message || 'Cannot read directory');
     } finally {
       setLoading(false);
