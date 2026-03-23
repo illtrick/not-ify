@@ -49,8 +49,8 @@ services:
     container_name: not-ify-staging
     network_mode: host
     volumes:
-      - /share/CACHEDEV1_DATA/not-ify/staging/music:/app/music
       - /share/CACHEDEV1_DATA/not-ify/staging/config:/app/config
+      - /share/CACHEDEV3_DATA/Media/Music/Not-ify_Staging:/app/music
     environment:
       - NODE_ENV=staging
       - PORT=3001
