@@ -18,6 +18,10 @@ export function useCast() {
     const entry = { id: Date.now(), message, timestamp: new Date().toLocaleTimeString() };
     setCastLog(prev => [entry, ...prev].slice(0, 20)); // keep last 20
     console.log(`[cast] ${message}`);
+    // Auto-clear non-casting log entries after 5 seconds
+    setTimeout(() => {
+      setCastLog(prev => prev.filter(e => e.id !== entry.id));
+    }, 5000);
   }, []);
 
   // Refresh device list periodically

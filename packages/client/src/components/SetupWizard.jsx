@@ -215,6 +215,11 @@ function StepLibrary({ onNext }) {
           <div style={{ fontSize: 14, color: COLORS.textPrimary, fontFamily: 'monospace', wordBreak: 'break-all', marginBottom: 8 }}>
             {library.musicDir || 'Not set'}
           </div>
+          {library.exists && library.writable && library.musicDir === '/app/music' && (
+            <div style={{ fontSize: 12, color: COLORS.success, marginBottom: 4 }}>
+              Configured during setup — ready to use
+            </div>
+          )}
           {library.freeSpaceGB != null && (
             <div style={{ fontSize: 12, color: COLORS.textSecondary }}>
               {library.freeSpaceGB} GB free

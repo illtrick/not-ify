@@ -18,12 +18,19 @@ services:
       - SLSKD_URL=http://localhost:5030
       - SLSKD_API_KEY=${SLSKD_API_KEY}
       - SLSKD_DOWNLOADS_DIR=/app/slskd-downloads
+      - VPN_PROXY=${VPN_PROXY:-}
+      - GLUETUN_CONTROL_URL=${GLUETUN_CONTROL_URL:-}
+      - CLAM_ENABLED=${CLAM_ENABLED:-false}
+      - CLAM_HOST=${CLAM_HOST:-}
+      - CLAM_PORT=${CLAM_PORT:-3310}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${PORT:-3000}/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
+    labels:
+      - com.centurylinklabs.watchtower.scope=not-ify
 
   slskd:
     image: slskd/slskd:latest
@@ -42,6 +49,8 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
+    labels:
+      - com.centurylinklabs.watchtower.scope=not-ify
 
   watchtower:
     image: containrrr/watchtower
@@ -57,18 +66,28 @@ services:
       - com.centurylinklabs.watchtower.scope=not-ify
     command: --scope not-ify
 
-# Uncomment to enable VPN (configure in Settings after setup):
-#  gluetun:
-#    image: qmcgaw/gluetun
-#    container_name: gluetun
-#    restart: unless-stopped
-#    cap_add:
-#      - NET_ADMIN
-#    environment:
-#      - VPN_SERVICE_PROVIDER=private_internet_access
-#      - OPENVPN_USER=${VPN_USERNAME}
-#      - OPENVPN_PASSWORD=${VPN_PASSWORD}
-#      - SERVER_REGIONS=${VPN_REGION:-US East}
-#    ports:
-#      - "8888:8888"
-#      - "8000:8000/tcp"
+#VPN#  gluetun:
+#VPN#    image: qmcgaw/gluetun
+#VPN#    container_name: gluetun
+#VPN#    restart: unless-stopped
+#VPN#    cap_add:
+#VPN#      - NET_ADMIN
+#VPN#    ports:
+#VPN#      - "8888:8888"
+#VPN#      - "8000:8000/tcp"
+#VPN#    labels:
+#VPN#      - com.centurylinklabs.watchtower.scope=not-ify
+
+#CLAM#  clamav:
+#CLAM#    image: clamav/clamav:stable
+#CLAM#    container_name: clamav
+#CLAM#    restart: unless-stopped
+#CLAM#    network_mode: host
+#CLAM#    healthcheck:
+#CLAM#      test: ["CMD", "clamdcheck"]
+#CLAM#      interval: 60s
+#CLAM#      timeout: 10s
+#CLAM#      retries: 3
+#CLAM#      start_period: 120s
+#CLAM#    labels:
+#CLAM#      - com.centurylinklabs.watchtower.scope=not-ify

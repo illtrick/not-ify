@@ -13,13 +13,15 @@ source "${SCRIPT_DIR}/setup-lib.sh"
 # ═══════════════════════════════════════════════
 
 # Parse args
-INSTALL_DIR="" MUSIC_DIR="" PORT="" API_KEY=""
+INSTALL_DIR="" MUSIC_DIR="" PORT="" API_KEY="" ENABLE_VPN="n" ENABLE_CLAMAV="n"
 for arg in "$@"; do
   case "$arg" in
     --install-dir=*) INSTALL_DIR="${arg#*=}" ;;
     --music-dir=*)   MUSIC_DIR="${arg#*=}" ;;
     --port=*)        PORT="${arg#*=}" ;;
     --api-key=*)     API_KEY="${arg#*=}" ;;
+    --vpn=*)         ENABLE_VPN="${arg#*=}" ;;
+    --clamav=*)      ENABLE_CLAMAV="${arg#*=}" ;;
     --help|-h)
       echo "Not-ify setup (container-side)"
       echo ""
@@ -42,6 +44,8 @@ INSTALL_DIR="${INSTALL_DIR:-$NOTIFY_INSTALL_DIR}"
 MUSIC_DIR="${MUSIC_DIR:-$NOTIFY_MUSIC_DIR}"
 PORT="${PORT:-${NOTIFY_PORT:-3000}}"
 API_KEY="${API_KEY:-${NOTIFY_SLSKD_API_KEY:-$(generate_uuid)}}"
+ENABLE_VPN="${ENABLE_VPN:-${NOTIFY_ENABLE_VPN:-n}}"
+ENABLE_CLAMAV="${ENABLE_CLAMAV:-${NOTIFY_ENABLE_CLAMAV:-n}}"
 
 HOST_INSTALL="/host/install"
 
@@ -125,8 +129,28 @@ options:
   listen_port: 50300
 EOF
 
-# Copy compose template
+# Copy compose template and enable optional services
 cp "${SCRIPT_DIR}/docker-compose.template.yml" "${HOST_INSTALL}/docker-compose.yml"
+
+# Enable VPN (Gluetun) if requested
+if [ "$ENABLE_VPN" = "y" ]; then
+  sed -i 's/^#VPN#//' "${HOST_INSTALL}/docker-compose.yml"
+  # Add VPN proxy env to not-ify
+  cat >> "${HOST_INSTALL}/.env.local" << EOF
+VPN_PROXY=http://localhost:8888
+GLUETUN_CONTROL_URL=http://localhost:8000
+EOF
+fi
+
+# Enable ClamAV if requested
+if [ "$ENABLE_CLAMAV" = "y" ]; then
+  sed -i 's/^#CLAM#//' "${HOST_INSTALL}/docker-compose.yml"
+  cat >> "${HOST_INSTALL}/.env.local" << EOF
+CLAM_ENABLED=true
+CLAM_HOST=localhost
+CLAM_PORT=3310
+EOF
+fi
 
 success "Configuration written"
 
@@ -137,8 +161,12 @@ docker compose --env-file .env --env-file .env.local up -d 2>&1 | sed 's/^/  /'
 
 echo ""
 
-# Health checks
-for container in not-ify slskd watchtower; do
+# Health checks — build list of expected containers
+CONTAINERS="not-ify slskd watchtower"
+[ "$ENABLE_VPN" = "y" ] && CONTAINERS="$CONTAINERS gluetun"
+[ "$ENABLE_CLAMAV" = "y" ] && CONTAINERS="$CONTAINERS clamav"
+
+for container in $CONTAINERS; do
   if wait_healthy "$container" 60; then
     version_suffix=""
     if [ "$container" = "not-ify" ]; then
