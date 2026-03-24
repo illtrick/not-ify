@@ -5,6 +5,8 @@ const { Readable } = require('stream');
 const { createExtractorFromFile } = require('node-unrar-js');
 const AdmZip = require('adm-zip');
 const { getProxyFetch, recordFailure } = require('./proxy');
+const logger = require('./logger');
+const log = logger.createChild('pipeline');
 
 function getMusicDir() {
   try {
@@ -74,7 +76,7 @@ async function downloadFile(url, destPath, { inactivityTimeout = 60000 } = {}) {
     await new Promise(resolve => fileStream.on('finish', resolve));
   }
 
-  if (totalBytes > 0) console.log('');
+  if (totalBytes > 0) log.info({ event: 'download.complete', bytes: downloadedBytes }, `Download complete: ${formatBytes(downloadedBytes)}`);
   _lastCompletedAt = Date.now();
   return destPath;
   } catch (err) {
@@ -137,16 +139,16 @@ async function downloadAlbum(torrentInfo, rdService) {
       const filename = unrestricted.filename;
 
       if (!isAudioFile(filename)) {
-        console.log(`Skipping non-audio: ${filename}`);
+        log.info({ event: 'download.skipped', filename, reason: 'non-audio' }, `Skipping non-audio: ${filename}`);
         continue;
       }
 
       const destPath = path.join(destDir, sanitizePath(filename));
-      console.log(`Downloading: ${filename}`);
+      log.info({ event: 'download.started', filename }, `Downloading: ${filename}`);
       await downloadFile(unrestricted.download, destPath);
       downloadedFiles.push(destPath);
     } catch (err) {
-      console.error(`Failed to download link ${link}: ${err.message}`);
+      log.error({ event: 'download.failed', link, error: err.message }, `Failed to download link: ${err.message}`);
     }
   }
 
@@ -193,7 +195,7 @@ async function extractArchive(archivePath, destDir) {
   // Clean up the archive file
   try { fs.unlinkSync(archivePath); } catch {}
 
-  console.log(`Extracted ${audioFiles.length} audio file(s)`);
+  log.info({ event: 'download.extracted', count: audioFiles.length }, `Extracted ${audioFiles.length} audio file(s)`);
   return audioFiles;
 }
 
