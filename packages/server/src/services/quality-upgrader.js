@@ -16,6 +16,14 @@ const QUALITY_RANK = {
   mp3: 1,
 };
 
+let _log = null;
+function getLog() {
+  if (!_log) {
+    try { _log = require('./logger').createChild('upgrade'); } catch { _log = { info() {}, warn() {}, error() {} }; }
+  }
+  return _log;
+}
+
 /**
  * Return the numeric rank for a format string.
  * Unknown formats are ranked 0 (lowest).
@@ -85,6 +93,7 @@ class QualityUpgrader {
     }
 
     const candidates = [];
+    getLog().info({ event: 'upgrade.scan.started', totalAlbums: albumMap.size, targetQuality }, 'Upgrade scan started');
     for (const entry of albumMap.values()) {
       if (entry.bestRank < targetRank) {
         const dedupeKey = `upgrade:${entry.artist}|${entry.album}`;
@@ -94,9 +103,11 @@ class QualityUpgrader {
           { dedupeKey, priority: 0 }
         );
         candidates.push({ artist: entry.artist, album: entry.album, currentQuality: entry.bestFormat });
+        getLog().info({ event: 'upgrade.candidate.found', artist: entry.artist, album: entry.album, currentQuality: entry.bestFormat }, `Upgrade candidate: ${entry.artist} — ${entry.album} (${entry.bestFormat})`);
       }
     }
 
+    getLog().info({ event: 'upgrade.scan.complete', candidateCount: candidates.length, totalAlbums: albumMap.size }, `Upgrade scan complete: ${candidates.length} candidates from ${albumMap.size} albums`);
     return candidates;
   }
 
@@ -174,6 +185,10 @@ class QualityUpgrader {
 
     try {
       const source = await this.findBetterSource(artist, album, currentQuality);
+
+      if (source) {
+        getLog().info({ event: 'upgrade.queued', artist, album, magnetLink: source.magnetLink }, `Upgrade source found: ${artist} — ${album}`);
+      }
 
       if (!source) {
         this.jobQueue.complete(job.id, { noSource: true, artist, album });
