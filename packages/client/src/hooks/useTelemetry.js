@@ -11,12 +11,14 @@ export function useTelemetry() {
     const traceStart = performance.now();
 
     const emit = (event, eventDetail = {}) => {
+      const { trackId, ...rest } = eventDetail;
       const entry = {
         traceId,
         event,
         timestamp: Date.now(),
         latencyMs: Math.round(performance.now() - traceStart),
-        ...eventDetail,
+        trackId: trackId || null,
+        detail: Object.keys(rest).length > 0 ? rest : null,
       };
       queueRef.current.push(entry);
     };
@@ -28,13 +30,15 @@ export function useTelemetry() {
   }, []);
 
   // Emit a standalone event (not part of a trace)
-  const emit = useCallback((event, detail = {}) => {
+  const emit = useCallback((event, eventDetail = {}) => {
+    const { trackId, ...rest } = eventDetail;
     queueRef.current.push({
       traceId: null,
       event,
       timestamp: Date.now(),
       latencyMs: 0,
-      ...detail,
+      trackId: trackId || null,
+      detail: Object.keys(rest).length > 0 ? rest : null,
     });
   }, []);
 

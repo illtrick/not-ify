@@ -77,7 +77,8 @@ export function useSession({
 }
 
 function _applySession(s, { onRestoreVolume, onRestoreView, onRestoreAlbum, onRestoreQueue, onRestorePlaylist, onRestorePlaylistIdx, onRestoreTrack }) {
-  if (s.volume != null) onRestoreVolume?.(s.volume);
+  // Don't restore volume of 0 — likely a muted state, not intentional silence
+  if (s.volume != null && s.volume > 0) onRestoreVolume?.(s.volume);
   if (s.view) onRestoreView?.(s.view);
   if (s.selectedAlbum) onRestoreAlbum?.(s.selectedAlbum);
   if (s.queue) onRestoreQueue?.(s.queue);

@@ -159,6 +159,16 @@ export function usePlayer({
         telemetry.emit('track_advance', { fromTrackId, toTrackId: next.id, reason });
       } catch {}
 
+      // Check if this queued track now exists in the library (it may have been
+      // added to the queue as ytPending but since downloaded)
+      const libTrack = library.find(t =>
+        t.title === next.title && t.artist === (next.trackArtist || next.artist)
+      );
+      if (libTrack) {
+        playTrack(libTrack, playlist, playlistIdx, currentAlbumInfo, reason === 'ended' ? 'next' : 'queue');
+        return;
+      }
+
       if (next.ytPending) {
         cancelCrossfade();
         playFromYouTube(next.title, next.artist, next.album, next.coverArt, next.trackArtist);
