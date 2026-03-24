@@ -270,7 +270,7 @@ function bulkSetRecentlyPlayed(userId, list) {
   tx();
   const duration = performance.now() - start;
   if (duration > SLOW_QUERY_MS) {
-    getLog().warn({ event: 'db.query.slow', duration: Math.round(duration), sql: 'bulkSetRecentlyPlayed (transaction)', rows: list.length }, 'Slow transaction');
+    getLog().warn({ event: 'db.query.slow', duration: Math.round(duration), operation: 'bulkSetRecentlyPlayed (transaction)', rows: list.length }, 'Slow transaction');
   }
   return getRecentlyPlayed(userId);
 }
@@ -322,7 +322,13 @@ function addToScrobbleQueue(userId, { artist, track, album, timestamp, duration 
 function removeFromScrobbleQueue(ids) {
   if (!ids.length) return;
   const placeholders = ids.map(() => '?').join(',');
-  getDb().prepare(`DELETE FROM lastfm_scrobble_queue WHERE id IN (${placeholders})`).run(...ids);
+  const sql = `DELETE FROM lastfm_scrobble_queue WHERE id IN (${placeholders})`;
+  const start = performance.now();
+  getDb().prepare(sql).run(...ids);
+  const duration = performance.now() - start;
+  if (duration > SLOW_QUERY_MS) {
+    getLog().warn({ event: 'db.query.slow', duration: Math.round(duration), sql }, 'Slow query');
+  }
 }
 
 function getAllUsersWithScrobbleQueue() {
@@ -504,7 +510,7 @@ function insertScrobbles(userId, scrobbles) {
   tx();
   const duration = performance.now() - start;
   if (duration > SLOW_QUERY_MS) {
-    getLog().warn({ event: 'db.query.slow', duration: Math.round(duration), sql: 'insertScrobbles (transaction)', rows: scrobbles.length }, 'Slow transaction');
+    getLog().warn({ event: 'db.query.slow', duration: Math.round(duration), operation: 'insertScrobbles (transaction)', rows: scrobbles.length }, 'Slow transaction');
   }
 }
 
@@ -531,7 +537,7 @@ function rebuildArtistAffinity(userId) {
   tx();
   const duration = performance.now() - start;
   if (duration > SLOW_QUERY_MS) {
-    getLog().warn({ event: 'db.query.slow', duration: Math.round(duration), sql: 'rebuildArtistAffinity (transaction)' }, 'Slow transaction');
+    getLog().warn({ event: 'db.query.slow', duration: Math.round(duration), operation: 'rebuildArtistAffinity (transaction)' }, 'Slow transaction');
   }
 }
 
@@ -651,7 +657,7 @@ function syncAlbumTracks(artist, album, tracksArray) {
   tx();
   const duration = performance.now() - start;
   if (duration > SLOW_QUERY_MS) {
-    getLog().warn({ event: 'db.query.slow', duration: Math.round(duration), sql: 'syncAlbumTracks (transaction)', rows: tracksArray.length }, 'Slow transaction');
+    getLog().warn({ event: 'db.query.slow', duration: Math.round(duration), operation: 'syncAlbumTracks (transaction)', rows: tracksArray.length }, 'Slow transaction');
   }
 }
 
@@ -676,7 +682,7 @@ function pruneDeletedTracks(validFilepaths) {
   tx();
   const duration = performance.now() - start;
   if (duration > SLOW_QUERY_MS) {
-    getLog().warn({ event: 'db.query.slow', duration: Math.round(duration), sql: 'pruneDeletedTracks (transaction)', rows: toDelete.length }, 'Slow transaction');
+    getLog().warn({ event: 'db.query.slow', duration: Math.round(duration), operation: 'pruneDeletedTracks (transaction)', rows: toDelete.length }, 'Slow transaction');
   }
 }
 
