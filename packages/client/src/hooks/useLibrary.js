@@ -1,8 +1,10 @@
 import { useState, useMemo } from 'react';
 import * as api from '@not-ify/shared';
 import { buildTrackPath } from '../utils';
+import { useTelemetry } from './useTelemetry';
 
 export function useLibrary({ recentlyPlayed = [] } = {}) {
+  const telemetry = useTelemetry();
   const [library, setLibrary] = useState([]);
   const [librarySortBy, setLibrarySortBy] = useState('recents');
   const [libraryFilter, setLibraryFilter] = useState('');
@@ -10,8 +12,12 @@ export function useLibrary({ recentlyPlayed = [] } = {}) {
 
   async function loadLibrary() {
     try {
+      try { telemetry.emit('library_fetch_start', {}); } catch {}
+      const fetchStart = performance.now();
       const data = await api.getLibrary();
+      const latencyMs = Math.round(performance.now() - fetchStart);
       setLibrary(Array.isArray(data) ? data : []);
+      try { telemetry.emit('library_fetch_complete', { trackCount: Array.isArray(data) ? data.length : 0, latencyMs }); } catch {}
     } catch (err) {
       console.error('Library load failed:', err);
     }

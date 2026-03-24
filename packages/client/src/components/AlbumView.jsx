@@ -6,6 +6,7 @@ import { Icon } from './Icon';
 import { AlbumArt } from './AlbumArt';
 import { AlbumCard } from './AlbumCard';
 import { QualityBadge } from './QualityBadge';
+import { useTelemetry } from '../hooks/useTelemetry';
 
 export function AlbumView({
   selectedAlbum,
@@ -42,6 +43,8 @@ export function AlbumView({
   getTrackDlStatus,
   onUpgradeTriggered,
 }) {
+  const telemetry = useTelemetry();
+  const renderStartRef = useRef(null);
   const albumHeaderRef = useRef(null);
   const [showStickyHeader, setShowStickyHeader] = useState(false);
   const [upgradeState, setUpgradeState] = useState(null); // null | 'triggering' | 'queued' | 'error'
@@ -74,6 +77,47 @@ export function AlbumView({
     api.getAlbumUpgradeHistory(artist, album)
       .then(r => setLastUpgrade(r?.lastAttempt || null))
       .catch(() => {});
+  }, [selectedAlbum]);
+
+  // Record render start timestamp when album changes
+  useEffect(() => {
+    if (selectedAlbum) {
+      renderStartRef.current = performance.now();
+    }
+  }, [selectedAlbum]);
+
+  // Emit render timing after paint
+  useEffect(() => {
+    if (selectedAlbum && renderStartRef.current) {
+      try {
+        const latencyMs = Math.round(performance.now() - renderStartRef.current);
+        telemetry.emit('render_complete', { component: 'album_view', latencyMs });
+      } catch {}
+    }
+  }, [selectedAlbum]);
+
+  // Layout anomaly detection — runs after tracks render
+  useEffect(() => {
+    if (!selectedAlbum) return;
+    const { tracks: albumTracks, fromSearch: isFromSearch } = selectedAlbum;
+    if (!albumTracks) return;
+    try {
+      const active = albumTracks.filter(t => !t.excluded);
+      const isLibAlbum = !isFromSearch && active.length > 0;
+
+      // Detect empty track list when tracks should exist
+      if (isLibAlbum && active.length === 0 && albumTracks.length > 0) {
+        telemetry.emit('layout_anomaly', { component: 'album_tracks', issue: 'empty_after_render' });
+      }
+
+      // Detect format badges showing missing format for library tracks
+      if (isLibAlbum && active.length > 0) {
+        const missingFormat = active.filter(t => !t.format || t.format === '\u2014').length;
+        if (missingFormat > 0) {
+          telemetry.emit('layout_anomaly', { component: 'format_badge', issue: 'missing_format', count: missingFormat });
+        }
+      }
+    } catch {}
   }, [selectedAlbum]);
 
   if (!selectedAlbum) return null;

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { COLORS } from '../constants';
 import { Icon } from './Icon';
 import * as api from '@not-ify/shared';
+import { postTelemetry } from '@not-ify/shared';
 import { trackSseOpen, trackSseClose, trackSseEvent, copyDiagnostics } from '../services/client-diagnostics';
 
 const CATEGORY_COLORS = {
@@ -299,6 +300,12 @@ export function ActivityLog({ open, onClose, onUpgradeComplete }) {
       } catch {}
     }
 
+    function emitTelemetry(event, detail = {}) {
+      try {
+        postTelemetry([{ traceId: null, event, timestamp: Date.now(), latencyMs: 0, ...detail }]).catch(() => {});
+      } catch {}
+    }
+
     function connectSse() {
       const es = new EventSource(url);
       eventSourceRef.current = es;
@@ -306,10 +313,12 @@ export function ActivityLog({ open, onClose, onUpgradeComplete }) {
       es.onmessage = handleMessage;
       es.onerror = () => {
         trackSseClose('activity');
+        try { emitTelemetry('sse_disconnect', { stream: 'activity' }); } catch {}
         es.close();
         // Retry after 3 seconds — creates a fresh EventSource
         setTimeout(() => {
           if (eventSourceRef.current === es || !eventSourceRef.current) {
+            try { emitTelemetry('sse_reconnect', { stream: 'activity' }); } catch {}
             connectSse();
           }
         }, 3000);
