@@ -4,6 +4,8 @@ const jobQueue = require('./job-queue');
 const db = require('./db');
 const { getExistingQuality, isUpgrade } = require('./library-check');
 const activity = require('./activity-log');
+const logger = require('./logger');
+const log = logger.createChild('jobs');
 
 const POLL_INTERVAL = 5000; // 5 seconds
 const BACKOFF = [60000, 300000, 900000]; // 1min, 5min, 15min
@@ -92,6 +94,7 @@ async function executeJob(job) {
   // existingQuality === null: album not in library — continue to download
 
   const start = Date.now();
+  log.info({ event: 'job.started', jobId: job.id, type: job.type, artist: payload.artist, album: payload.album }, `Job started: ${payload.artist} — ${payload.album}`);
   let timeoutTimer;
 
   try {
@@ -112,6 +115,7 @@ async function executeJob(job) {
     } else {
       jobQueue.complete(job.id, result || {});
       jobsProcessed++; lastJobAt = Date.now();
+      log.info({ event: 'job.complete', jobId: job.id, type: job.type, duration, outcome, artist: payload.artist, album: payload.album }, `Job complete: ${payload.artist} — ${payload.album} (${duration}ms)`);
     }
     db.addJobLog({
       job_id: job.id,
@@ -142,6 +146,8 @@ async function executeJob(job) {
       jobQueue.fail(job.id, err.message, retryAfter);
     }
     jobsFailed++; lastErrorAt = Date.now();
+    const eventName = err.message === 'Job timeout exceeded' ? 'job.timeout' : 'job.failed';
+    log.error({ event: eventName, jobId: job.id, type: job.type, duration, error: err.message, artist: payload.artist, album: payload.album }, `Job failed: ${payload.artist} — ${payload.album}: ${err.message}`);
     db.addJobLog({
       job_id: job.id,
       artist: payload.artist,
@@ -179,7 +185,7 @@ function fillSlots() {
       // Fire-and-forget — completion triggers fillSlots again
       executeJob(job)
         .catch((err) => {
-          console.error(`[job-worker] executeJob error (${type}):`, err.message);
+          log.error({ event: 'job.failed', type, error: err.message }, `executeJob error (${type}): ${err.message}`);
         })
         .finally(() => {
           untrackJob(type, job.id);
@@ -201,7 +207,7 @@ function fillSlots() {
       trackJob(fType, fallbackJob.id);
       executeJob(fallbackJob)
         .catch((err) => {
-          console.error(`[job-worker] executeJob error (${fType}):`, err.message);
+          log.error({ event: 'job.failed', type: fType, error: err.message }, `executeJob error (${fType}): ${err.message}`);
         })
         .finally(() => {
           untrackJob(fType, fallbackJob.id);
@@ -229,7 +235,7 @@ async function poll() {
     fillSlots();
   } catch (err) {
     // log but don't crash
-    console.error('[job-worker] poll error:', err.message);
+    log.error({ event: 'job.poll.error', error: err.message }, `Poll error: ${err.message}`);
   }
   if (running) {
     pollTimer = setTimeout(poll, POLL_INTERVAL);

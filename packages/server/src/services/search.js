@@ -1,6 +1,8 @@
 const { getProxyFetch, recordFailure } = require('./proxy');
 const { cleanSearchQuery, foldDiacritics } = require('./query-utils');
 const { searchSoulseekCascade, checkHealth: slskHealth } = require('./soulseek');
+const logger = require('./logger');
+const log = logger.createChild('search');
 
 const APIBAY_BASE = 'https://apibay.org';
 
@@ -28,7 +30,7 @@ async function searchMusic(query) {
     const res = await proxyFetch(url, { signal: AbortSignal.timeout(10000) });
 
     if (!res.ok) {
-      console.error(`ApiBay returned ${res.status}`);
+      log.error({ event: 'search.source.error', source: 'apibay', status: res.status }, `ApiBay returned ${res.status}`);
       return [];
     }
 
@@ -55,7 +57,7 @@ async function searchMusic(query) {
     torrentCache.set(cacheKey, { data: results, expires: Date.now() + TORRENT_CACHE_TTL });
     return results;
   } catch (err) {
-    console.error(`Search failed: ${err.message}`);
+    log.error({ event: 'search.source.error', source: 'apibay', error: err.message }, `Search failed: ${err.message}`);
     recordFailure('apibay', err.message);
     return [];
   }
@@ -278,7 +280,7 @@ async function searchForUpgrade({ artist, album, currentQuality = 'unknown' }) {
       }
     }
   } catch (err) {
-    console.error(`[search] Soulseek search failed: ${err.message}`);
+    log.error({ event: 'search.source.error', source: 'soulseek', error: err.message }, `Soulseek search failed: ${err.message}`);
   }
 
   if (allResults.length === 0) return null;

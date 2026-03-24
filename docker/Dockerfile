@@ -19,7 +19,7 @@ RUN npm run build -w @not-ify/client
 # Stage 2: Production image — only runtime deps
 FROM node:20-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg curl ca-certificates unrar-free python3 file bash whiptail jq \
+    ffmpeg curl ca-certificates unrar-free python3 file bash whiptail jq tini \
     && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
        -o /usr/local/bin/yt-dlp && chmod +x /usr/local/bin/yt-dlp \
     && rm -rf /var/lib/apt/lists/*
@@ -58,7 +58,11 @@ COPY scripts/entrypoint.sh /app/scripts/entrypoint.sh
 COPY scripts/setup.sh /app/scripts/setup.sh
 COPY scripts/setup-lib.sh /app/scripts/setup-lib.sh
 COPY scripts/docker-compose.template.yml /app/scripts/docker-compose.template.yml
+COPY scripts/healthcheck.js /app/scripts/healthcheck.js
 RUN chmod +x /app/scripts/*.sh
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD node /app/scripts/healthcheck.js
 
 EXPOSE 3000
 

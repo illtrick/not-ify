@@ -1,5 +1,7 @@
 const Database = require('better-sqlite3');
 const path = require('path');
+const fs = require('fs');
+const { performance } = require('perf_hooks');
 
 const CONFIG_DIR = process.env.CONFIG_DIR || '/app/config';
 const DB_PATH = path.join(CONFIG_DIR, 'notify.db');
@@ -9,7 +11,6 @@ let _db = null;
 function getDb() {
   if (_db) return _db;
 
-  const fs = require('fs');
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
 
   _db = new Database(DB_PATH);
@@ -181,32 +182,75 @@ function getDb() {
   return _db;
 }
 
+// --- Timed Executors ---
+let _log = null;
+function getLog() {
+  if (!_log) {
+    try { _log = require('./logger').createChild('db'); } catch { _log = { warn() {} }; }
+  }
+  return _log;
+}
+
+const SLOW_QUERY_MS = 100;
+
+function timedRun(sql, ...params) {
+  const start = performance.now();
+  const result = getDb().prepare(sql).run(...params);
+  const duration = performance.now() - start;
+  if (duration > SLOW_QUERY_MS) {
+    getLog().warn({ event: 'db.query.slow', duration: Math.round(duration), sql }, 'Slow query');
+  }
+  return result;
+}
+
+function timedGet(sql, ...params) {
+  const start = performance.now();
+  const result = getDb().prepare(sql).get(...params);
+  const duration = performance.now() - start;
+  if (duration > SLOW_QUERY_MS) {
+    getLog().warn({ event: 'db.query.slow', duration: Math.round(duration), sql }, 'Slow query');
+  }
+  return result;
+}
+
+function timedAll(sql, ...params) {
+  const start = performance.now();
+  const result = getDb().prepare(sql).all(...params);
+  const duration = performance.now() - start;
+  if (duration > SLOW_QUERY_MS) {
+    getLog().warn({ event: 'db.query.slow', duration: Math.round(duration), sql }, 'Slow query');
+  }
+  return result;
+}
+
 // --- Recently Played ---
 
 const MAX_RP = 50;
 
 function getRecentlyPlayed(userId) {
-  const db = getDb();
-  return db.prepare(
-    'SELECT artist, album, cover_art as coverArt, mbid, rgid, played_at as playedAt FROM recently_played WHERE user_id = ? ORDER BY played_at DESC LIMIT ?'
-  ).all(userId, MAX_RP);
+  return timedAll(
+    'SELECT artist, album, cover_art as coverArt, mbid, rgid, played_at as playedAt FROM recently_played WHERE user_id = ? ORDER BY played_at DESC LIMIT ?',
+    userId, MAX_RP
+  );
 }
 
 function addRecentlyPlayed(userId, { artist, album, coverArt, mbid, rgid }) {
-  const db = getDb();
   const now = Date.now();
   // Remove existing entry for same album (dedup)
-  db.prepare(
-    'DELETE FROM recently_played WHERE user_id = ? AND LOWER(artist || \':\' || album) = LOWER(? || \':\' || ?)'
-  ).run(userId, artist, album);
+  timedRun(
+    'DELETE FROM recently_played WHERE user_id = ? AND LOWER(artist || \':\' || album) = LOWER(? || \':\' || ?)',
+    userId, artist, album
+  );
   // Insert new
-  db.prepare(
-    'INSERT INTO recently_played (user_id, artist, album, cover_art, mbid, rgid, played_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  ).run(userId, artist, album, coverArt || null, mbid || null, rgid || null, now);
+  timedRun(
+    'INSERT INTO recently_played (user_id, artist, album, cover_art, mbid, rgid, played_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    userId, artist, album, coverArt || null, mbid || null, rgid || null, now
+  );
   // Trim to MAX_RP
-  db.prepare(
-    'DELETE FROM recently_played WHERE user_id = ? AND id NOT IN (SELECT id FROM recently_played WHERE user_id = ? ORDER BY played_at DESC LIMIT ?)'
-  ).run(userId, userId, MAX_RP);
+  timedRun(
+    'DELETE FROM recently_played WHERE user_id = ? AND id NOT IN (SELECT id FROM recently_played WHERE user_id = ? ORDER BY played_at DESC LIMIT ?)',
+    userId, userId, MAX_RP
+  );
   return getRecentlyPlayed(userId);
 }
 
@@ -216,20 +260,25 @@ function bulkSetRecentlyPlayed(userId, list) {
   const ins = db.prepare(
     'INSERT INTO recently_played (user_id, artist, album, cover_art, mbid, rgid, played_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
   );
-  db.transaction(() => {
+  const tx = db.transaction(() => {
     del.run(userId);
     for (const r of list.slice(0, MAX_RP)) {
       ins.run(userId, r.artist, r.album, r.coverArt || r.cover_art || null, r.mbid || null, r.rgid || null, r.playedAt || r.played_at || Date.now());
     }
-  })();
+  });
+  const start = performance.now();
+  tx();
+  const duration = performance.now() - start;
+  if (duration > SLOW_QUERY_MS) {
+    getLog().warn({ event: 'db.query.slow', duration: Math.round(duration), operation: 'bulkSetRecentlyPlayed (transaction)', rows: list.length }, 'Slow transaction');
+  }
   return getRecentlyPlayed(userId);
 }
 
 // --- Last.fm Config ---
 
 function getLastfmConfig(userId) {
-  const db = getDb();
-  const row = db.prepare('SELECT * FROM lastfm_config WHERE user_id = ?').get(userId);
+  const row = timedGet('SELECT * FROM lastfm_config WHERE user_id = ?', userId);
   if (!row) return {};
   return {
     apiKey: row.api_key,
@@ -240,10 +289,9 @@ function getLastfmConfig(userId) {
 }
 
 function saveLastfmConfig(userId, updates) {
-  const db = getDb();
   const existing = getLastfmConfig(userId);
   const merged = { ...existing, ...updates };
-  db.prepare(`
+  timedRun(`
     INSERT INTO lastfm_config (user_id, api_key, api_secret, session_key, username)
     VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(user_id) DO UPDATE SET
@@ -251,69 +299,66 @@ function saveLastfmConfig(userId, updates) {
       api_secret = excluded.api_secret,
       session_key = excluded.session_key,
       username = excluded.username
-  `).run(userId, merged.apiKey || null, merged.apiSecret || null, merged.sessionKey || null, merged.username || null);
+  `, userId, merged.apiKey || null, merged.apiSecret || null, merged.sessionKey || null, merged.username || null);
 }
 
 function clearLastfmConfig(userId) {
-  const db = getDb();
-  db.prepare('DELETE FROM lastfm_config WHERE user_id = ?').run(userId);
+  timedRun('DELETE FROM lastfm_config WHERE user_id = ?', userId);
 }
 
 // --- Last.fm Scrobble Queue ---
 
 function getScrobbleQueue(userId) {
-  const db = getDb();
-  return db.prepare('SELECT * FROM lastfm_scrobble_queue WHERE user_id = ? ORDER BY timestamp').all(userId);
+  return timedAll('SELECT * FROM lastfm_scrobble_queue WHERE user_id = ? ORDER BY timestamp', userId);
 }
 
 function addToScrobbleQueue(userId, { artist, track, album, timestamp, duration }) {
-  const db = getDb();
-  db.prepare(
-    'INSERT INTO lastfm_scrobble_queue (user_id, artist, track, album, timestamp, duration) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(userId, artist, track, album || null, timestamp, duration || null);
+  timedRun(
+    'INSERT INTO lastfm_scrobble_queue (user_id, artist, track, album, timestamp, duration) VALUES (?, ?, ?, ?, ?, ?)',
+    userId, artist, track, album || null, timestamp, duration || null
+  );
 }
 
 function removeFromScrobbleQueue(ids) {
   if (!ids.length) return;
-  const db = getDb();
   const placeholders = ids.map(() => '?').join(',');
-  db.prepare(`DELETE FROM lastfm_scrobble_queue WHERE id IN (${placeholders})`).run(...ids);
+  const sql = `DELETE FROM lastfm_scrobble_queue WHERE id IN (${placeholders})`;
+  const start = performance.now();
+  getDb().prepare(sql).run(...ids);
+  const duration = performance.now() - start;
+  if (duration > SLOW_QUERY_MS) {
+    getLog().warn({ event: 'db.query.slow', duration: Math.round(duration), sql }, 'Slow query');
+  }
 }
 
 function getAllUsersWithScrobbleQueue() {
-  const db = getDb();
-  return db.prepare('SELECT DISTINCT user_id FROM lastfm_scrobble_queue').all().map(r => r.user_id);
+  return timedAll('SELECT DISTINCT user_id FROM lastfm_scrobble_queue').map(r => r.user_id);
 }
 
 // --- Global Settings ---
 
 function getGlobalSetting(key) {
-  const db = getDb();
-  const row = db.prepare('SELECT value FROM global_settings WHERE key = ?').get(key);
+  const row = timedGet('SELECT value FROM global_settings WHERE key = ?', key);
   return row ? JSON.parse(row.value) : null;
 }
 
 function setGlobalSetting(key, value) {
-  const db = getDb();
-  db.prepare('INSERT OR REPLACE INTO global_settings (key, value) VALUES (?, ?)').run(key, JSON.stringify(value));
+  timedRun('INSERT OR REPLACE INTO global_settings (key, value) VALUES (?, ?)', key, JSON.stringify(value));
 }
 
 // --- User Settings ---
 
 function getUserSetting(userId, key) {
-  const db = getDb();
-  const row = db.prepare('SELECT value FROM user_settings WHERE user_id = ? AND key = ?').get(userId, key);
+  const row = timedGet('SELECT value FROM user_settings WHERE user_id = ? AND key = ?', userId, key);
   return row ? JSON.parse(row.value) : null;
 }
 
 function setUserSetting(userId, key, value) {
-  const db = getDb();
-  db.prepare('INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, ?, ?)').run(userId, key, JSON.stringify(value));
+  timedRun('INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, ?, ?)', userId, key, JSON.stringify(value));
 }
 
 function getAllUserSettings(userId) {
-  const db = getDb();
-  const rows = db.prepare('SELECT key, value FROM user_settings WHERE user_id = ?').all(userId);
+  const rows = timedAll('SELECT key, value FROM user_settings WHERE user_id = ?', userId);
   const settings = {};
   for (const r of rows) {
     settings[r.key] = JSON.parse(r.value);
@@ -326,64 +371,59 @@ function getAllUserSettings(userId) {
 const MAX_SEARCH_HISTORY = 20;
 
 function getSearchHistory(userId) {
-  const db = getDb();
-  return db.prepare(
-    'SELECT query, searched_at as searchedAt FROM search_history WHERE user_id = ? ORDER BY searched_at DESC LIMIT ?'
-  ).all(userId, MAX_SEARCH_HISTORY);
+  return timedAll(
+    'SELECT query, searched_at as searchedAt FROM search_history WHERE user_id = ? ORDER BY searched_at DESC LIMIT ?',
+    userId, MAX_SEARCH_HISTORY
+  );
 }
 
 function addSearchHistory(userId, query) {
-  const db = getDb();
   // Remove duplicate
-  db.prepare('DELETE FROM search_history WHERE user_id = ? AND LOWER(query) = LOWER(?)').run(userId, query);
-  db.prepare('INSERT INTO search_history (user_id, query, searched_at) VALUES (?, ?, ?)').run(userId, query, Date.now());
+  timedRun('DELETE FROM search_history WHERE user_id = ? AND LOWER(query) = LOWER(?)', userId, query);
+  timedRun('INSERT INTO search_history (user_id, query, searched_at) VALUES (?, ?, ?)', userId, query, Date.now());
   // Trim
-  db.prepare(
-    'DELETE FROM search_history WHERE user_id = ? AND id NOT IN (SELECT id FROM search_history WHERE user_id = ? ORDER BY searched_at DESC LIMIT ?)'
-  ).run(userId, userId, MAX_SEARCH_HISTORY);
+  timedRun(
+    'DELETE FROM search_history WHERE user_id = ? AND id NOT IN (SELECT id FROM search_history WHERE user_id = ? ORDER BY searched_at DESC LIMIT ?)',
+    userId, userId, MAX_SEARCH_HISTORY
+  );
 }
 
 function removeSearchHistory(userId, query) {
-  const db = getDb();
-  db.prepare('DELETE FROM search_history WHERE user_id = ? AND query = ?').run(userId, query);
+  timedRun('DELETE FROM search_history WHERE user_id = ? AND query = ?', userId, query);
 }
 
 function clearSearchHistory(userId) {
-  const db = getDb();
-  db.prepare('DELETE FROM search_history WHERE user_id = ?').run(userId);
+  timedRun('DELETE FROM search_history WHERE user_id = ?', userId);
 }
 
 // --- Favorites ---
 
 function getFavorites(userId) {
-  const db = getDb();
-  return db.prepare(
-    'SELECT track_id as trackId, artist, album, title, added_at as addedAt FROM favorites WHERE user_id = ? ORDER BY added_at DESC'
-  ).all(userId);
+  return timedAll(
+    'SELECT track_id as trackId, artist, album, title, added_at as addedAt FROM favorites WHERE user_id = ? ORDER BY added_at DESC',
+    userId
+  );
 }
 
 function addFavorite(userId, { trackId, artist, album, title }) {
-  const db = getDb();
-  db.prepare(
-    'INSERT OR IGNORE INTO favorites (user_id, track_id, artist, album, title, added_at) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(userId, trackId, artist, album, title, Date.now());
+  timedRun(
+    'INSERT OR IGNORE INTO favorites (user_id, track_id, artist, album, title, added_at) VALUES (?, ?, ?, ?, ?, ?)',
+    userId, trackId, artist, album, title, Date.now()
+  );
 }
 
 function removeFavorite(userId, trackId) {
-  const db = getDb();
-  db.prepare('DELETE FROM favorites WHERE user_id = ? AND track_id = ?').run(userId, trackId);
+  timedRun('DELETE FROM favorites WHERE user_id = ? AND track_id = ?', userId, trackId);
 }
 
 function isFavorite(userId, trackId) {
-  const db = getDb();
-  return !!db.prepare('SELECT 1 FROM favorites WHERE user_id = ? AND track_id = ?').get(userId, trackId);
+  return !!timedGet('SELECT 1 FROM favorites WHERE user_id = ? AND track_id = ?', userId, trackId);
 }
 
 // --- User Session ---
 
 function getUserSession(userId) {
-  const db = getDb();
-  const row = db.prepare('SELECT queue, state FROM user_session WHERE user_id = ?').get(userId);
+  const row = timedGet('SELECT queue, state FROM user_session WHERE user_id = ?', userId);
   if (!row) return { queue: [], state: {} };
   return {
     queue: JSON.parse(row.queue),
@@ -392,55 +432,47 @@ function getUserSession(userId) {
 }
 
 function saveUserSession(userId, { queue, state }) {
-  const db = getDb();
-  db.prepare(`
+  timedRun(`
     INSERT INTO user_session (user_id, queue, state)
     VALUES (?, ?, ?)
     ON CONFLICT(user_id) DO UPDATE SET
       queue = excluded.queue,
       state = excluded.state
-  `).run(userId, JSON.stringify(queue || []), JSON.stringify(state || {}));
+  `, userId, JSON.stringify(queue || []), JSON.stringify(state || {}));
 }
 
 // --- Users ---
 
 function getUsers() {
-  const db = getDb();
-  return db.prepare("SELECT id, display_name as displayName, role FROM users WHERE id != 'default' ORDER BY display_name").all();
+  return timedAll("SELECT id, display_name as displayName, role FROM users WHERE id != 'default' ORDER BY display_name");
 }
 
 function isAdmin(userId) {
-  const db = getDb();
-  const row = db.prepare("SELECT role FROM users WHERE id = ?").get(userId);
+  const row = timedGet("SELECT role FROM users WHERE id = ?", userId);
   return row?.role === 'admin';
 }
 
 function isValidUser(userId) {
-  const db = getDb();
-  return !!db.prepare('SELECT 1 FROM users WHERE id = ?').get(userId);
+  return !!timedGet('SELECT 1 FROM users WHERE id = ?', userId);
 }
 
 function createUser(id, displayName, role = 'user') {
-  const db = getDb();
-  db.prepare('INSERT INTO users (id, display_name, role) VALUES (?, ?, ?)').run(id, displayName, role);
+  timedRun('INSERT INTO users (id, display_name, role) VALUES (?, ?, ?)', id, displayName, role);
   return { id, displayName, role };
 }
 
 function getUserCount() {
-  const db = getDb();
-  return db.prepare("SELECT COUNT(*) as count FROM users WHERE id != 'default'").get().count;
+  return timedGet("SELECT COUNT(*) as count FROM users WHERE id != 'default'").count;
 }
 
 function getDefaultUserId() {
-  const db = getDb();
-  const row = db.prepare("SELECT id FROM users WHERE id != 'default' ORDER BY created_at ASC LIMIT 1").get();
+  const row = timedGet("SELECT id FROM users WHERE id != 'default' ORDER BY created_at ASC LIMIT 1");
   return row?.id || null;
 }
 
 function isSetupComplete() {
   try {
-    const db = getDb();
-    const flag = db.prepare("SELECT value FROM global_settings WHERE key = 'setup_complete'").get();
+    const flag = timedGet("SELECT value FROM global_settings WHERE key = 'setup_complete'");
     if (flag && JSON.parse(flag.value) === true) return true;
     return getUserCount() > 0;
   } catch {
@@ -451,17 +483,15 @@ function isSetupComplete() {
 // --- Job Log ---
 
 function addJobLog(entry) {
-  const db = getDb();
-  db.prepare(`INSERT INTO job_log (job_id, artist, album, attempt, duration_ms, outcome, fail_reason, quality)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
+  timedRun(`INSERT INTO job_log (job_id, artist, album, attempt, duration_ms, outcome, fail_reason, quality)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     entry.job_id, entry.artist, entry.album, entry.attempt,
     entry.duration_ms, entry.outcome, entry.fail_reason || null, entry.quality || null
   );
 }
 
 function getJobLogs(limit = 100) {
-  const db = getDb();
-  return db.prepare(`SELECT * FROM job_log ORDER BY created_at DESC LIMIT ?`).all(limit);
+  return timedAll(`SELECT * FROM job_log ORDER BY created_at DESC LIMIT ?`, limit);
 }
 
 // --- Scrobbles ---
@@ -476,50 +506,61 @@ function insertScrobbles(userId, scrobbles) {
       stmt.run(userId, s.artist, s.album || '', s.track, s.played_at);
     }
   });
+  const start = performance.now();
   tx();
+  const duration = performance.now() - start;
+  if (duration > SLOW_QUERY_MS) {
+    getLog().warn({ event: 'db.query.slow', duration: Math.round(duration), operation: 'insertScrobbles (transaction)', rows: scrobbles.length }, 'Slow transaction');
+  }
 }
 
 function getScrobbleCount(userId) {
-  return getDb().prepare('SELECT COUNT(*) as count FROM scrobbles WHERE user_id = ?').get(userId).count;
+  return timedGet('SELECT COUNT(*) as count FROM scrobbles WHERE user_id = ?', userId).count;
 }
 
 function getLatestScrobbleTime(userId) {
-  const row = getDb().prepare('SELECT MAX(played_at) as latest FROM scrobbles WHERE user_id = ?').get(userId);
+  const row = timedGet('SELECT MAX(played_at) as latest FROM scrobbles WHERE user_id = ?', userId);
   return row?.latest || 0;
 }
 
 function rebuildArtistAffinity(userId) {
   const db = getDb();
-  db.transaction(() => {
+  const tx = db.transaction(() => {
     db.prepare('DELETE FROM artist_affinity WHERE user_id = ?').run(userId);
     db.prepare(`
       INSERT INTO artist_affinity (user_id, artist, play_count, last_played_at)
       SELECT user_id, artist, COUNT(*) as play_count, MAX(played_at) as last_played_at
       FROM scrobbles WHERE user_id = ? GROUP BY user_id, artist
     `).run(userId);
-  })();
+  });
+  const start = performance.now();
+  tx();
+  const duration = performance.now() - start;
+  if (duration > SLOW_QUERY_MS) {
+    getLog().warn({ event: 'db.query.slow', duration: Math.round(duration), operation: 'rebuildArtistAffinity (transaction)' }, 'Slow transaction');
+  }
 }
 
 function getArtistAffinity(userId) {
-  return getDb().prepare('SELECT * FROM artist_affinity WHERE user_id = ? ORDER BY play_count DESC').all(userId);
+  return timedAll('SELECT * FROM artist_affinity WHERE user_id = ? ORDER BY play_count DESC', userId);
 }
 
 function getUniqueAlbumsSince(userId, days) {
   const since = Math.floor(Date.now() / 1000) - (days * 86400);
-  return getDb().prepare(`
+  return timedAll(`
     SELECT DISTINCT artist, album FROM scrobbles
     WHERE user_id = ? AND played_at >= ? AND album != ''
     ORDER BY artist, album
-  `).all(userId, since);
+  `, userId, since);
 }
 
 function searchArtistAffinity(userId, query) {
   const pattern = '%' + query + '%';
-  return getDb().prepare(`
+  return timedAll(`
     SELECT * FROM artist_affinity
     WHERE user_id = ? AND artist LIKE ? AND play_count >= 2
     ORDER BY play_count DESC LIMIT 3
-  `).all(userId, pattern);
+  `, userId, pattern);
 }
 
 // Returns the top artists blending all-time affinity with recent listening.
@@ -527,7 +568,7 @@ function searchArtistAffinity(userId, query) {
 // Used for pre-warming the MB cache on startup.
 function getTopArtists(limit = 30) {
   const thirtyDaysAgo = Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
-  return getDb().prepare(`
+  return timedAll(`
     SELECT name, SUM(score) as play_count FROM (
       SELECT artist as name, SUM(play_count) as score
       FROM artist_affinity
@@ -541,7 +582,7 @@ function getTopArtists(limit = 30) {
     GROUP BY name
     ORDER BY play_count DESC
     LIMIT ?
-  `).all(thirtyDaysAgo, limit);
+  `, thirtyDaysAgo, limit);
 }
 
 // --- Tracks ---
@@ -549,8 +590,8 @@ function getTopArtists(limit = 30) {
 function upsertTrack({ id, artist, album, title, trackNumber, format, filepath, fileSize }) {
   // Delete any existing track with the same filepath but different id
   // (happens when track ID generation changes across versions)
-  getDb().prepare('DELETE FROM tracks WHERE filepath = ? AND id != ?').run(filepath, id);
-  return getDb().prepare(`
+  timedRun('DELETE FROM tracks WHERE filepath = ? AND id != ?', filepath, id);
+  return timedRun(`
     INSERT INTO tracks (id, artist, album, title, track_number, format, filepath, file_size, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
     ON CONFLICT(id) DO UPDATE SET
@@ -559,27 +600,27 @@ function upsertTrack({ id, artist, album, title, trackNumber, format, filepath, 
       file_size = excluded.file_size,
       track_number = excluded.track_number,
       updated_at = unixepoch()
-  `).run(id, artist, album, title, trackNumber || null, format, filepath, fileSize || null);
+  `, id, artist, album, title, trackNumber || null, format, filepath, fileSize || null);
 }
 
 function getTrackById(id) {
-  return getDb().prepare('SELECT * FROM tracks WHERE id = ?').get(id);
+  return timedGet('SELECT * FROM tracks WHERE id = ?', id);
 }
 
 function getAllTracks() {
-  return getDb().prepare('SELECT * FROM tracks ORDER BY artist, album, track_number, title').all();
+  return timedAll('SELECT * FROM tracks ORDER BY artist, album, track_number, title');
 }
 
 function getTracksByAlbum(artist, album) {
-  return getDb().prepare('SELECT * FROM tracks WHERE artist = ? AND album = ? ORDER BY track_number, title').all(artist, album);
+  return timedAll('SELECT * FROM tracks WHERE artist = ? AND album = ? ORDER BY track_number, title', artist, album);
 }
 
 function removeTrackByFilepath(filepath) {
-  return getDb().prepare('DELETE FROM tracks WHERE filepath = ?').run(filepath);
+  return timedRun('DELETE FROM tracks WHERE filepath = ?', filepath);
 }
 
 function removeTrackById(id) {
-  return getDb().prepare('DELETE FROM tracks WHERE id = ?').run(id);
+  return timedRun('DELETE FROM tracks WHERE id = ?', id);
 }
 
 /**
@@ -600,7 +641,7 @@ function syncAlbumTracks(artist, album, tracksArray) {
   `);
   const filepaths = tracksArray.map(t => t.filepath);
 
-  db.transaction(() => {
+  const tx = db.transaction(() => {
     for (const t of tracksArray) {
       upsert.run(t.id, t.artist, t.album, t.title, t.trackNumber || null, t.format, t.filepath, t.fileSize || null);
     }
@@ -611,7 +652,13 @@ function syncAlbumTracks(artist, album, tracksArray) {
     } else {
       db.prepare('DELETE FROM tracks WHERE artist = ? AND album = ?').run(artist, album);
     }
-  })();
+  });
+  const start = performance.now();
+  tx();
+  const duration = performance.now() - start;
+  if (duration > SLOW_QUERY_MS) {
+    getLog().warn({ event: 'db.query.slow', duration: Math.round(duration), operation: 'syncAlbumTracks (transaction)', rows: tracksArray.length }, 'Slow transaction');
+  }
 }
 
 /**
@@ -620,51 +667,79 @@ function syncAlbumTracks(artist, album, tracksArray) {
  */
 function pruneDeletedTracks(validFilepaths) {
   if (validFilepaths.size === 0) {
-    getDb().prepare('DELETE FROM tracks').run();
+    timedRun('DELETE FROM tracks');
     return;
   }
   // SQLite has a variable limit, batch deletes
-  const all = getDb().prepare('SELECT id, filepath FROM tracks').all();
+  const all = timedAll('SELECT id, filepath FROM tracks');
   const toDelete = all.filter(t => !validFilepaths.has(t.filepath));
   if (toDelete.length === 0) return;
   const del = getDb().prepare('DELETE FROM tracks WHERE id = ?');
-  getDb().transaction(() => {
+  const tx = getDb().transaction(() => {
     for (const t of toDelete) del.run(t.id);
-  })();
+  });
+  const start = performance.now();
+  tx();
+  const duration = performance.now() - start;
+  if (duration > SLOW_QUERY_MS) {
+    getLog().warn({ event: 'db.query.slow', duration: Math.round(duration), operation: 'pruneDeletedTracks (transaction)', rows: toDelete.length }, 'Slow transaction');
+  }
 }
 
 // --- MB Cache ---
 
 function mbCacheGet(key) {
-  let db;
-  try { db = getDb(); } catch { return null; }
-  const row = db.prepare('SELECT data, expires_at FROM mb_cache WHERE key = ?').get(key);
+  try { getDb(); } catch { return null; }
+  const row = timedGet('SELECT data, expires_at FROM mb_cache WHERE key = ?', key);
   if (!row) return null;
   if (Date.now() > row.expires_at) {
-    db.prepare('DELETE FROM mb_cache WHERE key = ?').run(key);
+    timedRun('DELETE FROM mb_cache WHERE key = ?', key);
     return null;
   }
-  db.prepare('UPDATE mb_cache SET hit_count = hit_count + 1 WHERE key = ?').run(key);
+  timedRun('UPDATE mb_cache SET hit_count = hit_count + 1 WHERE key = ?', key);
   return JSON.parse(row.data);
 }
 
 function mbCacheSet(key, data, ttlMs) {
-  const db = getDb();
   const now = Date.now();
-  db.prepare(`INSERT OR REPLACE INTO mb_cache (key, data, expires_at, created_at, hit_count)
-              VALUES (?, ?, ?, ?, 0)`).run(key, JSON.stringify(data), now + ttlMs, now);
+  timedRun(`INSERT OR REPLACE INTO mb_cache (key, data, expires_at, created_at, hit_count)
+              VALUES (?, ?, ?, ?, 0)`, key, JSON.stringify(data), now + ttlMs, now);
 }
 
 function mbCacheCleanup() {
-  const db = getDb();
-  const result = db.prepare('DELETE FROM mb_cache WHERE expires_at < ?').run(Date.now());
+  const result = timedRun('DELETE FROM mb_cache WHERE expires_at < ?', Date.now());
   return result.changes;
 }
 
 function mbCacheStats() {
-  const db = getDb();
-  const row = db.prepare('SELECT COUNT(*) as total, SUM(hit_count) as hits FROM mb_cache').get();
-  return row;
+  return timedGet('SELECT COUNT(*) as total, SUM(hit_count) as hits FROM mb_cache');
+}
+
+// --- Diagnostics ---
+
+function benchmark() {
+  const start = performance.now();
+  getDb().prepare('SELECT 1').get();
+  const duration = Math.round((performance.now() - start) * 100) / 100;
+  return { duration };
+}
+
+function getWalSize() {
+  const walPath = path.join(CONFIG_DIR, 'notify.db-wal');
+  try {
+    const stat = fs.statSync(walPath);
+    return stat.size;
+  } catch {
+    return 0;
+  }
+}
+
+function checkpoint() {
+  getDb().pragma('wal_checkpoint(TRUNCATE)');
+}
+
+function optimize() {
+  getDb().pragma('optimize');
 }
 
 // --- Cleanup ---
@@ -746,4 +821,9 @@ module.exports = {
   mbCacheSet,
   mbCacheCleanup,
   mbCacheStats,
+  // Diagnostics
+  benchmark,
+  getWalSize,
+  checkpoint,
+  optimize,
 };

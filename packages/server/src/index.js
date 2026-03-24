@@ -12,6 +12,10 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const logger = require('./services/logger');
+const log = logger.createChild('server');
+const healthMonitor = require('./services/health-monitor');
+const gracefulShutdown = require('./services/graceful-shutdown');
 
 const rd = require('./services/realdebrid');
 const db = require('./services/db');
@@ -36,6 +40,12 @@ app.use(express.json());
 // Setup middleware — blocks non-setup routes until first-run wizard is complete
 app.use(setupMiddleware);
 
+// Request correlation ID
+app.use((req, res, next) => {
+  req.id = crypto.randomUUID();
+  next();
+});
+
 // User identification middleware — sets req.userId on every request
 app.use(userMiddleware);
 
@@ -45,6 +55,10 @@ app.use(express.static(path.join(__dirname, '../../client/dist')));
 // Health check — includes version for client compatibility checking
 const pkg = require('../../../package.json');
 app.get('/api/health', (req, res) => {
+  const status = gracefulShutdown.getHealthStatus();
+  if (status !== 'ok') {
+    return res.status(503).json({ status, version: pkg.version, apiVersion: 1, service: 'not-ify-server' });
+  }
   res.json({ status: 'ok', version: pkg.version, apiVersion: 1, service: 'not-ify-server' });
 });
 
@@ -138,7 +152,7 @@ async function fetchAndCacheCover(coverUrl, cachePath, missPath, res) {
     fs.writeFileSync(cachePath, buf);
     res.setHeader('Cache-Control', 'public, max-age=31536000').setHeader('Content-Type', 'image/jpeg').send(buf);
   } catch (err) {
-    console.error(`Cover art fetch failed: ${err.message}`);
+    log.warn({ event: 'server.cover.error', error: err.message }, `Cover art fetch failed: ${err.message}`);
     res.status(404).end();
   }
 }
@@ -176,7 +190,7 @@ app.get('/api/cover/search', async (req, res) => {
       }
     }
   } catch (err) {
-    console.error(`iTunes cover search failed: ${err.message}`);
+    log.warn({ event: 'server.cover.search.error', source: 'itunes', error: err.message }, `iTunes cover search failed: ${err.message}`);
   }
 
   // Try Deezer
@@ -195,7 +209,7 @@ app.get('/api/cover/search', async (req, res) => {
       }
     }
   } catch (err) {
-    console.error(`Deezer cover search failed: ${err.message}`);
+    log.warn({ event: 'server.cover.search.error', source: 'deezer', error: err.message }, `Deezer cover search failed: ${err.message}`);
   }
 
   // All failed
@@ -234,7 +248,7 @@ app.get('/api/artist/image', async (req, res) => {
       }
     }
   } catch (err) {
-    console.error(`Artist image fetch failed: ${err.message}`);
+    log.warn({ event: 'server.artist.image.error', error: err.message }, `Artist image fetch failed: ${err.message}`);
   }
 
   fs.writeFileSync(missPath, '');
@@ -292,7 +306,7 @@ app.get('/api/wiki/summary', async (req, res) => {
     wikiCache.set(title, { data: result, expires: Date.now() + WIKI_CACHE_TTL });
     res.json(result);
   } catch (err) {
-    console.error(`Wikipedia fetch failed: ${err.message}`);
+    log.warn({ event: 'server.wiki.error', error: err.message }, `Wikipedia fetch failed: ${err.message}`);
     res.status(502).json({ error: 'Wikipedia fetch failed' });
   }
 });
@@ -345,7 +359,7 @@ app.get('/api/cover/rg/:rgid', async (req, res) => {
       }
       fs.writeFileSync(missPath, '');
     } catch (err) {
-      console.error(`Cover art fetch failed (rg): ${err.message}`);
+      log.warn({ event: 'server.cover.error', type: 'release-group', error: err.message }, `Cover art fetch failed (rg): ${err.message}`);
       fs.writeFileSync(missPath, '');
     }
   }
@@ -370,7 +384,7 @@ app.get('/api/cover/rg/:rgid', async (req, res) => {
         }
         fs.writeFileSync(mbMissPath, '');
       } catch (err) {
-        console.error(`Cover art fetch failed (mbid): ${err.message}`);
+        log.warn({ event: 'server.cover.error', type: 'release', error: err.message }, `Cover art fetch failed (mbid): ${err.message}`);
         fs.writeFileSync(mbMissPath, '');
       }
     }
@@ -476,13 +490,19 @@ app.get('/api/activity', (req, res) => {
   res.json(activityLog.getEntries({ since, category, limit }));
 });
 // SSE stream for real-time activity events
+const sseConnections = new Set();
+
 app.get('/api/activity/stream', (req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
   res.write(':\n\n');
+  sseConnections.add(res);
   const remove = activityLog.onEntry((entry) => {
     try { res.write(`data: ${JSON.stringify(entry)}\n\n`); } catch {}
   });
-  req.on('close', remove);
+  req.on('close', () => {
+    remove();
+    sseConnections.delete(res);
+  });
 });
 
 // --- Per-user API endpoints ---
@@ -549,6 +569,14 @@ app.put('/api/settings', (req, res) => {
   res.json({ success: true });
 });
 
+// Express error handler (must have 4 parameters)
+app.use((err, req, res, _next) => {
+  log.error({ event: 'error.express.middleware', requestId: req.id, method: req.method, url: req.url, error: err.message, stack: err.stack }, `Express error: ${err.message}`);
+  if (!res.headersSent) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // SPA fallback — serve index.html for non-API routes
 app.get('*', (req, res) => {
   const indexPath = path.join(__dirname, '../../client/dist/index.html');
@@ -561,7 +589,12 @@ app.get('*', (req, res) => {
 
 // Safety net — log unhandled rejections instead of crashing the process
 process.on('unhandledRejection', (reason) => {
-  console.error('[unhandledRejection]', reason instanceof Error ? reason.message : reason);
+  log.error({ event: 'error.unhandled.rejection', error: reason instanceof Error ? reason.message : String(reason), stack: reason instanceof Error ? reason.stack : undefined }, `Unhandled rejection: ${reason instanceof Error ? reason.message : reason}`);
+});
+
+process.on('uncaughtException', (err) => {
+  log.fatal({ event: 'error.uncaught.exception', error: err.message, stack: err.stack }, `Uncaught exception: ${err.message}`);
+  gracefulShutdown.executeShutdown().finally(() => process.exit(1));
 });
 
 // Only bind to a port when run directly (not when required by tests)
@@ -580,13 +613,13 @@ if (require.main === module) {
           const stat = fs.statSync(entryPath);
           if (Date.now() - stat.mtimeMs > ONE_HOUR) {
             fs.rmSync(entryPath, { recursive: true, force: true });
-            console.log(`[startup] Cleaned up stale staging dir: ${entry.name}`);
+            log.info({ event: 'server.staging.cleanup', dir: entry.name }, `Cleaned up stale staging dir: ${entry.name}`);
           }
         }
       }
     }
   } catch (err) {
-    console.warn('[startup] Staging cleanup failed:', err.message);
+    log.warn({ event: 'server.staging.cleanup.error', error: err.message }, `Staging cleanup failed: ${err.message}`);
   }
 
   // Start DLNA device discovery (disabled in CI/test via DLNA_ENABLED=false)
@@ -599,7 +632,7 @@ if (require.main === module) {
   const jobWorker = require('./services/job-worker');
   jobWorker.setProcessor(require('./services/job-processor').process);
   jobWorker.start();
-  console.log('[job-worker] Started polling for queued jobs');
+  log.info({ event: 'server.jobworker.started' }, 'Job worker started');
 
   // Start quality upgrader background tick (every 5 minutes)
   // Only runs when the system is idle (no active downloads)
@@ -608,13 +641,13 @@ if (require.main === module) {
   const upgrader = getUpgrader();
   let upgraderRunning = false;
   const UPGRADER_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-  setInterval(async () => {
+  const upgraderInterval = setInterval(async () => {
     if (upgraderRunning) return; // prevent concurrent ticks
     upgraderRunning = true;
     try {
       await upgrader.tick();
     } catch (err) {
-      console.error('[upgrader] tick error:', err.message);
+      log.error({ event: 'upgrade.tick.error', error: err.message }, `Upgrader tick error: ${err.message}`);
     } finally {
       upgraderRunning = false;
     }
@@ -628,8 +661,59 @@ if (require.main === module) {
   const scrobbleSync = require('./services/scrobble-sync');
   scrobbleSync.startDeltaSyncScheduler();
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Not-ify server running on port ${PORT}`);
+  log.info({ event: 'server.starting', port: PORT, env: process.env.NODE_ENV || 'development' }, 'Server starting');
+
+  const server = app.listen(PORT, '0.0.0.0', async () => {
+    log.info({ event: 'server.listening', port: PORT }, `Not-ify server running on port ${PORT}`);
+
+    // Startup recovery — check for unclean previous shutdown
+    gracefulShutdown.checkStartupRecovery({
+      resetStuckJobs: () => {
+        const db = require('./services/db');
+        const result = db.getDb().prepare("UPDATE jobs SET status = 'pending', retries = retries + 1 WHERE status = 'active'").run();
+        return result.changes;
+      },
+    });
+
+    // Start health monitoring
+    const jobQueue = require('./services/job-queue');
+    healthMonitor.start(() => ({
+      jobStats: jobQueue.getStats(),
+      sseClients: sseConnections.size,
+    }));
+
+    // Run startup benchmark
+    const dbService = require('./services/db');
+    await healthMonitor.runStartupBenchmark(dbService);
+
+    // Register graceful shutdown with all services
+    gracefulShutdown.register({
+      httpServer: server,
+      sseConnections,
+      jobWorker,
+      upgraderInterval,
+      scrobbleSync,
+      dlna: process.env.DLNA_ENABLED !== 'false' ? require('./services/dlna') : null,
+      db: {
+        checkpoint: () => dbService.checkpoint(),
+        optimize: () => dbService.optimize(),
+        close: () => dbService.close(),
+      },
+      flushScrobbles: async () => {
+        try {
+          const lastfm = require('./services/lastfm-client');
+          const allQueued = dbService.getAllUsersWithScrobbleQueue();
+          for (const userId of allQueued) {
+            const queue = dbService.getScrobbleQueue(userId);
+            if (queue.length > 0) await lastfm.submitScrobbles(userId, queue);
+          }
+        } catch {}
+      },
+      resetActiveJobs: () => {
+        dbService.getDb().prepare("UPDATE jobs SET status = 'pending', retries = retries + 1 WHERE status = 'active'").run();
+      },
+    });
+    gracefulShutdown.installSignalHandlers();
   });
 
   // Pre-warm MB cache from scrobble data (fire-and-forget, don't block startup)

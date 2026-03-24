@@ -2,6 +2,14 @@
 
 const { getDb } = require('./db');
 
+let _log = null;
+function getLog() {
+  if (!_log) {
+    try { _log = require('./logger').createChild('jobs'); } catch { _log = { info() {}, warn() {} }; }
+  }
+  return _log;
+}
+
 const DEFAULT_MAX_RETRIES = 3;
 
 function initSchema() {
@@ -67,7 +75,9 @@ function enqueue(type, payload, { priority = 0, maxRetries = DEFAULT_MAX_RETRIES
     VALUES (?, 'pending', ?, ?, ?, ?)
   `).run(type, priority, JSON.stringify(payload), maxRetries, dedupeKey || null);
 
-  return result.lastInsertRowid;
+  const jobId = result.lastInsertRowid;
+  getLog().info({ event: 'job.queued', jobId, type, priority, dedupeKey: dedupeKey || null }, `Job queued: ${type} #${jobId}`);
+  return jobId;
 }
 
 /**
@@ -101,7 +111,11 @@ function dequeue(type) {
     return { ...job, status: 'active' };
   });
 
-  return dequeueTransaction(type || null);
+  const job = dequeueTransaction(type || null);
+  if (job) {
+    getLog().info({ event: 'job.dequeued', jobId: job.id, type: job.type }, `Job dequeued: ${job.type} #${job.id}`);
+  }
+  return job;
 }
 
 /**
@@ -142,6 +156,7 @@ function fail(id, error, retryAfter) {
   });
 
   failTransaction(id, error, retryAfter);
+  getLog().info({ event: 'job.failed', jobId: id, error }, `Job failed: #${id}`);
 }
 
 /**
@@ -152,6 +167,7 @@ function fail(id, error, retryAfter) {
 function skip(id, reason) {
   const db = getDb();
   db.prepare(`UPDATE jobs SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(reason, id);
+  getLog().info({ event: 'job.skipped', jobId: id, reason }, `Job skipped: #${id} (${reason})`);
 }
 
 /**
