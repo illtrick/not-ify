@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import * as api from '@not-ify/shared';
 import { buildTrackPath } from '../utils';
+import { useTelemetry } from './useTelemetry';
 
 export function usePlayer({
   queue = [],
@@ -36,6 +37,11 @@ export function usePlayer({
   const preBufferedTrackRef = useRef(null);
   const recentlyPlayedAddedRef = useRef(false);
 
+  // Telemetry — safe to call unconditionally (it's a hook)
+  const telemetry = useTelemetry();
+  const traceRef = useRef(null);
+  const prevQueueLenRef = useRef(queue.length);
+
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = volume;
   }, [volume]);
@@ -43,6 +49,16 @@ export function usePlayer({
   useEffect(() => {
     try { localStorage.setItem('notify_crossfade', String(crossfadeDuration)); } catch {}
   }, [crossfadeDuration]);
+
+  // Queue state telemetry — emit when queue length changes
+  useEffect(() => {
+    if (queue.length !== prevQueueLenRef.current) {
+      prevQueueLenRef.current = queue.length;
+      try {
+        telemetry.emit('queue_state', { length: queue.length, trackIds: queue.map(t => t.id) });
+      } catch {}
+    }
+  }, [queue, telemetry]);
 
   // -------------------------------------------------------------------------
   // Core playback
@@ -68,7 +84,17 @@ export function usePlayer({
     preBufferedTrackRef.current = null;
   }
 
-  function playTrack(track, pl, idx, albumInfo) {
+  function playTrack(track, pl, idx, albumInfo, _source) {
+    // Telemetry: start a trace for the play request
+    try {
+      const source = _source || 'direct';
+      traceRef.current = telemetry.startTrace('play_requested', {
+        trackId: track.id,
+        title: track.title,
+        source,
+      });
+    } catch {}
+
     cancelCrossfade();
     const i = idx ?? (pl ? pl.findIndex(t => t.id === track.id) : 0);
     setCurrentTrack(track);
@@ -78,7 +104,17 @@ export function usePlayer({
     if (pl) { setPlaylist(pl); setPlaylistIdx(i >= 0 ? i : 0); }
     if (audioRef.current) {
       audioRef.current.volume = volume;
-      audioRef.current.src = track.path || buildTrackPath(track.id);
+      const src = track.path || buildTrackPath(track.id);
+      audioRef.current.src = src;
+
+      // Telemetry: audio source set
+      try {
+        traceRef.current?.emit('audio_src_set', {
+          streamUrl: src,
+          isYtPreview: !!track.isYtPreview,
+        });
+      } catch {}
+
       audioRef.current.play().catch(() => {});
     }
     recentlyPlayedAddedRef.current = false;
@@ -110,21 +146,36 @@ export function usePlayer({
     lastfm.nowPlaying(artist, nextTrack.title, album);
   }
 
-  function playNext() {
+  function playNext(_reason) {
+    const fromTrackId = currentTrack?.id || null;
+    const reason = _reason || 'skip';
+
     if (queue.length > 0) {
       const [next, ...rest] = queue;
       setQueue(rest);
+
+      // Telemetry: track advance
+      try {
+        telemetry.emit('track_advance', { fromTrackId, toTrackId: next.id, reason });
+      } catch {}
+
       if (next.ytPending) {
         cancelCrossfade();
         playFromYouTube(next.title, next.artist, next.album, next.coverArt, next.trackArtist);
         return;
       }
-      playTrack(next, playlist, playlistIdx, currentAlbumInfo);
+      playTrack(next, playlist, playlistIdx, currentAlbumInfo, reason === 'ended' ? 'next' : 'queue');
       return;
     }
     if (!playlist.length) return;
     const next = (playlistIdx + 1) % playlist.length;
-    playTrack(playlist[next], null, next);
+
+    // Telemetry: track advance (playlist)
+    try {
+      telemetry.emit('track_advance', { fromTrackId, toTrackId: playlist[next]?.id, reason });
+    } catch {}
+
+    playTrack(playlist[next], null, next, undefined, reason === 'ended' ? 'next' : 'skip');
     setPlaylistIdx(next);
   }
 
@@ -132,7 +183,7 @@ export function usePlayer({
     if (!playlist.length) return;
     if (audioRef.current?.currentTime > 3) { audioRef.current.currentTime = 0; return; }
     const prev = (playlistIdx - 1 + playlist.length) % playlist.length;
-    playTrack(playlist[prev], null, prev);
+    playTrack(playlist[prev], null, prev, undefined, 'prev');
     setPlaylistIdx(prev);
   }
 
@@ -310,6 +361,14 @@ export function usePlayer({
       }
     },
     onEnded: () => {
+      // Telemetry: audio ended
+      try {
+        traceRef.current?.emit('audio_ended', {
+          trackId: currentTrack?.id,
+          durationPlayed: audioRef.current?.currentTime,
+        });
+      } catch {}
+
       if (crossfadeAnimRef.current) return;
       const nextTrack = peekNextTrack();
       if (nextTrack && !nextTrack.ytPending && preBufferedTrackRef.current?.id === nextTrack.id && nextAudioRef.current) {
@@ -325,22 +384,52 @@ export function usePlayer({
         }
         _applyTrackState(nextTrack);
       } else {
-        playNext();
+        playNext('ended');
       }
     },
-    onPlay: () => setIsPlaying(true),
+    onCanPlay: () => {
+      // Telemetry: audio can play
+      try {
+        traceRef.current?.emit('audio_canplay', { trackId: currentTrack?.id });
+      } catch {}
+    },
+    onPlay: () => {
+      setIsPlaying(true);
+      // Telemetry: audio playing
+      try {
+        traceRef.current?.emit('audio_playing', { trackId: currentTrack?.id });
+      } catch {}
+    },
     onPause: () => setIsPlaying(false),
-    onError: () => {
+    onError: (e) => {
+      // Telemetry: audio error
+      try {
+        traceRef.current?.emit('audio_error', {
+          trackId: currentTrack?.id,
+          error: e?.target?.error?.message || 'unknown',
+        });
+      } catch {}
+
       if (currentTrack) {
         console.warn('Audio load failed for:', currentTrack.title, '— skipping to next');
         // Auto-advance to next track (handles deleted/missing tracks)
         if (playlist.length > 0 && playlistIdx < playlist.length - 1) {
-          playNext();
+          playNext('error');
         } else {
           setCurrentTrack(null);
           setIsPlaying(false);
         }
       }
+    },
+    onStalled: () => {
+      // Telemetry: audio stalled
+      try {
+        const buf = audioRef.current?.buffered;
+        const buffered = buf && buf.length > 0
+          ? Array.from({ length: buf.length }, (_, i) => [buf.start(i), buf.end(i)])
+          : [];
+        telemetry.emit('audio_stall', { trackId: currentTrack?.id, buffered });
+      } catch {}
     },
   };
 

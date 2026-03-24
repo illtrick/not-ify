@@ -35,6 +35,7 @@ import { useArtistPage } from './hooks/useArtistPage';
 import { useCast } from './hooks/useCast';
 import { useServiceConfig } from './hooks/useServiceConfig';
 import { onApiRequest, startErrorCapture } from './services/client-diagnostics';
+import { useTelemetry } from './hooks/useTelemetry';
 
 
 // ---------------------------------------------------------------------------
@@ -69,7 +70,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
   // Artist page
   const {
     selectedArtist, artistReleases, artistDetails, artistBio, artistTopTracks,
-    openArtistPage,
+    openArtistPage: _openArtistPageInner,
   } = useArtistPage({ setView, prevViewRef, view });
 
   // ===== HOOKS =====
@@ -108,7 +109,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
     streamingResults,
     otherResults,
     searchHistory,
-    handleSearch,
+    handleSearch: _handleSearchInner,
     removeFromSearchHistory,
   } = useSearch({ setView });
 
@@ -185,6 +186,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
   const moreByArtist = useMoreByArtist(selectedAlbum, view, searchArtistResults);
   const { trackDurations, setTrackDurations } = useTrackDurations(selectedAlbum);
   const cast = useCast();
+  const telemetry = useTelemetry();
 
   // Service config (admin only)
   const rdConfig = useServiceConfig({
@@ -459,6 +461,36 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
     return null;
   }
 
+  // ── Telemetry-wrapped search ────────────────────────────────────────────
+  async function handleSearch(e, overrideQuery) {
+    const q = (overrideQuery || query).trim();
+    const searchStart = performance.now();
+    try { telemetry.emit('search_start', { query: q }); } catch {}
+    await _handleSearchInner(e, overrideQuery);
+    try { telemetry.emit('search_complete', { query: q, latencyMs: Math.round(performance.now() - searchStart), resultCount: searchAlbums.length }); } catch {}
+  }
+
+  // ── Telemetry-wrapped artist page navigation ─────────────────────────
+  function openArtistPage(mbid, name, type) {
+    try { telemetry.emit('nav_artist', { mbid, name }); } catch {}
+    return _openArtistPageInner(mbid, name, type);
+  }
+
+  // ── Recently-played click with telemetry ──────────────────────────────
+  function openRecentlyPlayed(r, libMatch) {
+    try { telemetry.emit('nav_album', { source: 'recently_played', artist: r.artist, album: r.album }); } catch {}
+    if (libMatch) {
+      // Inline the library-open logic to avoid double-emitting nav_album
+      loadLibrary();
+      const pl = libMatch.tracks.map(t => ({ ...t, path: buildTrackPath(t.id), coverArt: libMatch.coverArt }));
+      setSelectedAlbum({ artist: libMatch.artist, album: libMatch.album, tracks: pl, coverArt: libMatch.coverArt, mbid: libMatch.mbid, sources: [], fromSearch: false });
+      prevViewRef.current = view;
+      setView('album');
+    } else {
+      _handleSearchInner(null, `${r.artist} ${r.album}`);
+    }
+  }
+
   // ===== SESSION =====
   useSession({
     audioRef,
@@ -519,6 +551,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
   // Open album detail
   // -------------------------------------------------------------------------
   function openAlbumFromSearch(album) {
+    try { telemetry.emit('nav_album', { source: 'search', artist: album.artist, album: album.album }); } catch {}
     // Check if this album already exists in the library
     const libMatch = libraryAlbums().find(la =>
       la.artist.toLowerCase() === album.artist.toLowerCase() &&
@@ -551,6 +584,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
   }
 
   function openAlbumFromLibrary(artist, albumName, tracks, coverArt, mbid) {
+    try { telemetry.emit('nav_album', { source: 'library', artist, album: albumName }); } catch {}
     // Refresh library to get latest format info (badges may be stale after upgrades)
     loadLibrary();
     const pl = tracks.map(t => ({ ...t, path: buildTrackPath(t.id), coverArt }));
@@ -983,6 +1017,8 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
         onPlay={audioHandlers.onPlay}
         onPause={audioHandlers.onPause}
         onError={audioHandlers.onError}
+        onCanPlay={audioHandlers.onCanPlay}
+        onStalled={audioHandlers.onStalled}
       />
       {/* Hidden secondary audio element for gapless pre-buffering and crossfade */}
       <audio ref={nextAudioRef} preload="auto" style={{ display: 'none' }} />
