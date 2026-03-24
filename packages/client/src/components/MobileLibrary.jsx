@@ -17,6 +17,7 @@ export function MobileLibrary({
   setShowSettings,
   openAlbumFromLibrary,
   openAlbumFromSearch,
+  openRecentlyPlayed,
   openArtistPage,
   handleSearch,
   playTrack,
@@ -39,8 +40,7 @@ export function MobileLibrary({
                     la.artist.toLowerCase() === r.artist.toLowerCase() &&
                     la.album.toLowerCase() === r.album.toLowerCase()
                   );
-                  if (libMatch) openAlbumFromLibrary(libMatch.artist, libMatch.album, libMatch.tracks, libMatch.coverArt, libMatch.mbid);
-                  else handleSearch(null, `${r.artist} ${r.album}`);
+                  openRecentlyPlayed(r, libMatch);
                 }}>
                 <AlbumArt src={r.coverArt} size={120} radius={6} artist={r.artist} album={r.album} />
                 <div style={{ fontSize: 13, fontWeight: 600, color: COLORS.textPrimary, marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.album}</div>

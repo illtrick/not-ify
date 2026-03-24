@@ -810,6 +810,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
             librarySortBy={librarySortBy} setLibrarySortBy={setLibrarySortBy}
             openAlbumFromLibrary={openAlbumFromLibrary}
             openAlbumFromSearch={openAlbumFromSearch}
+            openRecentlyPlayed={openRecentlyPlayed}
             openArtistPage={openArtistPage}
             handleSearch={handleSearch}
             playTrack={handlePlayTrack}
@@ -844,6 +845,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
                 setShowSettings={setShowSettings}
                 openAlbumFromLibrary={openAlbumFromLibrary}
                 openAlbumFromSearch={openAlbumFromSearch}
+                openRecentlyPlayed={openRecentlyPlayed}
                 openArtistPage={openArtistPage}
                 handleSearch={handleSearch}
                 playTrack={handlePlayTrack}
@@ -867,6 +869,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
                     libraryAlbums={libraryAlbums}
                     openAlbumFromLibrary={openAlbumFromLibrary}
                     openAlbumFromSearch={openAlbumFromSearch}
+                    openRecentlyPlayed={openRecentlyPlayed}
                     openArtistPage={openArtistPage}
                     startDownload={startDownload}
                     startYtDownload={startYtDownload}

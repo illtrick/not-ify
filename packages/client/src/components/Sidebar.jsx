@@ -21,6 +21,7 @@ export function Sidebar({
   librarySortBy, setLibrarySortBy,
   openAlbumFromLibrary,
   openAlbumFromSearch,
+  openRecentlyPlayed,
   openArtistPage,
   handleSearch,
   playTrack,
@@ -99,8 +100,7 @@ export function Sidebar({
                       la.artist.toLowerCase() === r.artist.toLowerCase() &&
                       la.album.toLowerCase() === r.album.toLowerCase()
                     );
-                    if (libMatch) openAlbumFromLibrary(libMatch.artist, libMatch.album, libMatch.tracks, libMatch.coverArt, libMatch.mbid);
-                    else handleSearch(null, `${r.artist} ${r.album}`);
+                    openRecentlyPlayed(r, libMatch);
                   }}
                   style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px', borderRadius: 4, cursor: 'pointer' }}
                   onMouseEnter={e => e.currentTarget.style.background = COLORS.hover}

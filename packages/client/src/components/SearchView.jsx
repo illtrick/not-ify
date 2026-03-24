@@ -15,7 +15,7 @@ export function SearchView({
   streamingResults, otherResults, searchHistory,
   removeFromSearchHistory,
   recentlyPlayed, lastfmTopArtists,
-  libraryAlbums, openAlbumFromLibrary, openAlbumFromSearch, openArtistPage,
+  libraryAlbums, openAlbumFromLibrary, openAlbumFromSearch, openRecentlyPlayed, openArtistPage,
   startDownload, startYtDownload, playStreamingResult,
   isInLibrary, downloading,
   isMobile,
@@ -234,10 +234,7 @@ export function SearchView({
                   return (
                     <div key={i}
                       style={{ background: COLORS.card, borderRadius: 8, padding: 12, cursor: 'pointer', transition: 'background 0.15s' }}
-                      onClick={() => {
-                        if (libAlbum) openAlbumFromLibrary(libAlbum.artist, libAlbum.album, libAlbum.tracks, libAlbum.coverArt, libAlbum.mbid);
-                        else handleSearch(null, `${r.artist} ${r.album}`);
-                      }}
+                      onClick={() => openRecentlyPlayed(r, libAlbum)}
                       onMouseEnter={e => e.currentTarget.style.background = COLORS.hover}
                       onMouseLeave={e => e.currentTarget.style.background = COLORS.card}
                     >
