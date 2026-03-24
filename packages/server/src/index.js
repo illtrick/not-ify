@@ -37,6 +37,10 @@ const COVERS_DIR = path.join(CONFIG_DIR, 'covers');
 app.use(cors());
 app.use(express.json());
 
+// Telemetry — must be before setup gate so it works during first-run wizard
+const telemetryRouter = require('./api/telemetry');
+app.use('/api/telemetry', telemetryRouter);
+
 // Setup middleware — blocks non-setup routes until first-run wizard is complete
 app.use(setupMiddleware);
 

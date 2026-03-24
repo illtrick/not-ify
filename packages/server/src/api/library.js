@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const db = require('../services/db');
 const streamAuth = require('../services/stream-auth');
+const { log } = require('../services/activity-log');
 const { generateTrackId, extractTrackNumber, titleFromFilename } = require('../services/track-id');
 
 // Clean folder-derived names: decode HTML entities and strip torrent artifacts
@@ -304,6 +305,8 @@ router.get('/library', (req, res) => {
 // GET /api/stream/:id — serve audio with range request support
 // Accepts either normal authenticated requests or HMAC-signed URLs (for DLNA devices)
 router.get('/stream/:id', (req, res) => {
+  const streamStart = Date.now();
+
   const { sig, exp } = req.query;
   if (sig && exp) {
     if (!streamAuth.verifySignature(req.params.id, sig, exp)) {
@@ -345,6 +348,15 @@ router.get('/stream/:id', (req, res) => {
     });
     fs.createReadStream(filePath).pipe(res);
   }
+
+  res.on('finish', () => {
+    log('player', 'info', 'stream_served', {
+      traceId: req.headers['x-trace-id'],
+      trackId: req.params.id,
+      bytes: res.getHeader('content-length'),
+      latencyMs: Date.now() - streamStart,
+    });
+  });
 });
 
 // POST /api/library/dedupe — Remove duplicate tracks, keep highest quality
