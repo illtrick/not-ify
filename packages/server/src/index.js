@@ -152,7 +152,7 @@ async function fetchAndCacheCover(coverUrl, cachePath, missPath, res) {
     fs.writeFileSync(cachePath, buf);
     res.setHeader('Cache-Control', 'public, max-age=31536000').setHeader('Content-Type', 'image/jpeg').send(buf);
   } catch (err) {
-    console.error(`Cover art fetch failed: ${err.message}`);
+    log.warn({ event: 'server.cover.error', error: err.message }, `Cover art fetch failed: ${err.message}`);
     res.status(404).end();
   }
 }
@@ -190,7 +190,7 @@ app.get('/api/cover/search', async (req, res) => {
       }
     }
   } catch (err) {
-    console.error(`iTunes cover search failed: ${err.message}`);
+    log.warn({ event: 'server.cover.search.error', source: 'itunes', error: err.message }, `iTunes cover search failed: ${err.message}`);
   }
 
   // Try Deezer
@@ -209,7 +209,7 @@ app.get('/api/cover/search', async (req, res) => {
       }
     }
   } catch (err) {
-    console.error(`Deezer cover search failed: ${err.message}`);
+    log.warn({ event: 'server.cover.search.error', source: 'deezer', error: err.message }, `Deezer cover search failed: ${err.message}`);
   }
 
   // All failed
@@ -248,7 +248,7 @@ app.get('/api/artist/image', async (req, res) => {
       }
     }
   } catch (err) {
-    console.error(`Artist image fetch failed: ${err.message}`);
+    log.warn({ event: 'server.artist.image.error', error: err.message }, `Artist image fetch failed: ${err.message}`);
   }
 
   fs.writeFileSync(missPath, '');
@@ -306,7 +306,7 @@ app.get('/api/wiki/summary', async (req, res) => {
     wikiCache.set(title, { data: result, expires: Date.now() + WIKI_CACHE_TTL });
     res.json(result);
   } catch (err) {
-    console.error(`Wikipedia fetch failed: ${err.message}`);
+    log.warn({ event: 'server.wiki.error', error: err.message }, `Wikipedia fetch failed: ${err.message}`);
     res.status(502).json({ error: 'Wikipedia fetch failed' });
   }
 });
@@ -359,7 +359,7 @@ app.get('/api/cover/rg/:rgid', async (req, res) => {
       }
       fs.writeFileSync(missPath, '');
     } catch (err) {
-      console.error(`Cover art fetch failed (rg): ${err.message}`);
+      log.warn({ event: 'server.cover.error', type: 'release-group', error: err.message }, `Cover art fetch failed (rg): ${err.message}`);
       fs.writeFileSync(missPath, '');
     }
   }
@@ -384,7 +384,7 @@ app.get('/api/cover/rg/:rgid', async (req, res) => {
         }
         fs.writeFileSync(mbMissPath, '');
       } catch (err) {
-        console.error(`Cover art fetch failed (mbid): ${err.message}`);
+        log.warn({ event: 'server.cover.error', type: 'release', error: err.message }, `Cover art fetch failed (mbid): ${err.message}`);
         fs.writeFileSync(mbMissPath, '');
       }
     }
