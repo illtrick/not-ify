@@ -101,7 +101,13 @@ export function usePlayer({
     setCurrentCoverArt(track.coverArt || null);
     setCurrentAlbumInfo(albumInfo || { artist: track.artist, album: track.album, coverArt: track.coverArt });
     setIsPlaying(true);
-    if (pl) { setPlaylist(pl); setPlaylistIdx(i >= 0 ? i : 0); }
+    if (pl) {
+      setPlaylist(pl);
+      setPlaylistIdx(i >= 0 ? i : 0);
+      // Clear the manual queue when starting a new album/playlist
+      // so stale yt-pending or cross-album tracks don't hijack playback
+      setQueue([]);
+    }
     if (audioRef.current) {
       audioRef.current.volume = volume;
       const src = track.path || buildTrackPath(track.id);

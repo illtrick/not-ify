@@ -1,0 +1,135 @@
+{
+  "version": "1.6.2",
+  "testPlanVersion": "1.0",
+  "timestamp": "2026-03-24T23:40:00Z",
+  "environment": "staging",
+  "url": "http://192.168.0.34:3000",
+  "summary": {
+    "total": 28,
+    "tested": 7,
+    "passed": 5,
+    "failed": 2,
+    "skipped": 21,
+    "criticalBugs": 1,
+    "notes": "Stopped early due to critical queue bug - queue not replaced when playing different album"
+  },
+  "results": [
+    {
+      "id": "1.1",
+      "name": "Home page load",
+      "group": "Navigation & Rendering",
+      "pass": true,
+      "metrics": {
+        "loadTimeMs": 3692,
+        "libraryCount": 4,
+        "consoleErrors": 0,
+        "searchBarVisible": true,
+        "recentlyPlayedCount": 2
+      },
+      "notes": "Loaded to album view (Animals). Nav timing from performance API."
+    },
+    {
+      "id": "1.2",
+      "name": "Search results render",
+      "group": "Navigation & Rendering",
+      "pass": true,
+      "metrics": {
+        "searchTimeMs": 1099,
+        "resultCount": 14,
+        "hasAlbumArt": true,
+        "topResult": "Hail to the Thief: Live Recordings 2003-2009",
+        "artistResults": 5
+      },
+      "notes": "Telemetry reports 1099ms. Visual: Top Result, Artists section, 14+ album cards."
+    },
+    {
+      "id": "1.3",
+      "name": "Album detail navigation (from search)",
+      "group": "Navigation & Rendering",
+      "pass": true,
+      "metrics": {
+        "navTimeMs": 2500,
+        "trackCount": 12,
+        "hasAlbumArt": true,
+        "hasBadges": false,
+        "albumTitle": "OK Computer"
+      },
+      "notes": "No badges expected (not in library). Track list, More by Radiohead section all rendered."
+    },
+    {
+      "id": "1.4",
+      "name": "Album detail navigation (from library sidebar)",
+      "group": "Navigation & Rendering",
+      "pass": true,
+      "metrics": {
+        "navTimeMs": 500,
+        "trackCount": 5,
+        "badgeCount": 5,
+        "albumTitle": "Animals"
+      },
+      "notes": "All 5 tracks have MP3 badges. Fast nav from sidebar."
+    },
+    {
+      "id": "2.1",
+      "name": "Play library track (big play button)",
+      "group": "Playback — Basic",
+      "pass": true,
+      "metrics": {
+        "clickToPlayMs": 500,
+        "audioSrc": "/api/stream/5a85d0f6ca30c7d5",
+        "isLibraryStream": true,
+        "isYtStream": false,
+        "volume": 0.8,
+        "readyState": 4
+      },
+      "notes": "Track 1 Pigs on the Wing Part 1 plays from library. Volume 0.8 (not zero). Highlight + now-playing bar correct."
+    },
+    {
+      "id": "2.5",
+      "name": "Volume control",
+      "group": "Playback — Basic",
+      "pass": true,
+      "metrics": {
+        "initialVolume": 0.8,
+        "volumeMatch": true
+      },
+      "notes": "Volume at 0.8 on initial play. Not muted."
+    },
+    {
+      "id": "3.1",
+      "name": "Next button (same album)",
+      "group": "Playback — Track Advancement",
+      "pass": false,
+      "metrics": {
+        "advanceTimeMs": null,
+        "correctNextTrack": false,
+        "sameAlbum": false,
+        "actualNextTrack": "Elivagar (Heilung)",
+        "queueContents": ["yt-pending-7", "yt-pending-8", "yt-pending-9"]
+      },
+      "notes": "CRITICAL: Queue was not replaced when clicking play on Animals. Still held stale OK Computer yt-pending tracks. Track ended → advanced to yt-pending-7 → then jumped to Heilung Elivagar (wrong album entirely). Root cause: clicking big play button on a library album does not clear/replace the playback queue."
+    },
+    {
+      "id": "5.2",
+      "name": "Replace queue (play different album)",
+      "group": "Queue & Playlist Behavior",
+      "pass": false,
+      "metrics": {
+        "ghostTracks": 3,
+        "correctAlbum": false,
+        "queueSource": "stale OK Computer session"
+      },
+      "notes": "Same root cause as 3.1. Playing Animals via big play button did not replace queue. Stale yt-pending tracks from previous OK Computer browse persisted."
+    }
+  ],
+  "criticalBugs": [
+    {
+      "id": "QB-001",
+      "severity": "critical",
+      "title": "Queue not replaced when playing album from library",
+      "description": "Clicking the big play button on a library album plays track 1 but does not replace the playback queue. The queue retains tracks from a previously browsed album (including yt-pending tracks). When track 1 ends, playback advances to the stale queue entries, jumping to a completely different album.",
+      "repro": "1. Search for an album (e.g. OK Computer). 2. Navigate to a library album (e.g. Animals). 3. Click big play button. 4. Wait for track 1 to end or click Next. 5. Observe: plays track from step 1's album, not step 2's.",
+      "telemetryEvidence": "track_advance fromTrackId=5a85d0f6ca30c7d5 toTrackId=yt-pending-7 (wrong album)"
+    }
+  ]
+}
