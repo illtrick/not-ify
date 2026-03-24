@@ -677,6 +677,14 @@ export function completeSetup() {
   return post('/api/setup/complete');
 }
 
+// ---------------------------------------------------------------------------
+// Telemetry
+// ---------------------------------------------------------------------------
+
+export function postTelemetry(events) {
+  return post('/api/telemetry', { events });
+}
+
 // Activity log — verbose download/pipeline events for debugging
 export function getActivityLog({ since, category, limit } = {}) {
   const params = new URLSearchParams();
