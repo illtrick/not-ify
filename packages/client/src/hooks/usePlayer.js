@@ -260,9 +260,27 @@ export function usePlayer({
 
   function preBufferNext() {
     const nextTrack = peekNextTrack();
-    if (!nextTrack || nextTrack.ytPending) return;
+    if (!nextTrack) return;
     if (preBufferedTrackRef.current?.id === nextTrack.id) return;
     if (!nextAudioRef.current) return;
+
+    // Check if a YT-pending track has been downloaded to library since queuing
+    if (nextTrack.ytPending) {
+      const libTrack = library.find(t =>
+        t.title === nextTrack.title && t.artist === (nextTrack.trackArtist || nextTrack.artist)
+      );
+      if (libTrack) {
+        // Track was downloaded — pre-buffer from library
+        const nextSrc = libTrack.path || buildTrackPath(libTrack.id);
+        nextAudioRef.current.src = nextSrc;
+        nextAudioRef.current.load();
+        preBufferedTrackRef.current = libTrack;
+        return;
+      }
+      // Still pending — can't pre-buffer, skip
+      return;
+    }
+
     const nextSrc = nextTrack.path || buildTrackPath(nextTrack.id);
     nextAudioRef.current.src = nextSrc;
     nextAudioRef.current.load();
@@ -370,7 +388,8 @@ export function usePlayer({
         }
         if (fadeTime > 0 && remaining <= fadeTime && remaining > 0.5) {
           const nextTrack = peekNextTrack();
-          if (nextTrack && !nextTrack.ytPending) {
+          // Allow crossfade if next track is pre-buffered (including downloaded yt-pending tracks)
+          if (nextTrack && (!nextTrack.ytPending || preBufferedTrackRef.current?.id)) {
             startCrossfade(nextTrack, remaining);
           }
         }
