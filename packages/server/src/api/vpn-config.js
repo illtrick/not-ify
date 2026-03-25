@@ -2,40 +2,62 @@ const express = require('express');
 const router = express.Router();
 const db = require('../services/db');
 const { getProxyFetch, getFailureSummary } = require('../services/proxy');
+const vpnProviders = require('../services/vpn-providers');
+const containerManager = require('../services/container-manager');
 
-// Common PIA regions (source: PIA server list, March 2026)
-const PIA_REGIONS = [
-  'US East', 'US West', 'US California', 'US Chicago', 'US Denver',
-  'US Florida', 'US Houston', 'US Las Vegas', 'US New York', 'US Seattle',
-  'US Silicon Valley', 'US Washington DC', 'US Atlanta',
-  'CA Montreal', 'CA Ontario', 'CA Toronto', 'CA Vancouver',
-  'UK London', 'UK Manchester', 'UK Southampton',
-  'DE Berlin', 'DE Frankfurt',
-  'Netherlands', 'Switzerland', 'Sweden', 'Norway', 'Denmark', 'Finland',
-  'France', 'Belgium', 'Austria', 'Czech Republic', 'Poland', 'Romania',
-  'Spain', 'Italy', 'Ireland', 'Iceland',
-  'AU Melbourne', 'AU Sydney', 'AU Perth',
-  'Japan', 'Singapore', 'Hong Kong', 'Israel', 'India',
-  'Brazil', 'Argentina', 'Mexico',
-];
+// GET /api/vpn/providers — list of supported VPN providers with regions
+router.get('/providers', (req, res) => {
+  const providers = vpnProviders.getProviders();
+  res.json(providers);
+});
+
+// GET /api/vpn/providers/:id/regions — regions for a specific provider
+router.get('/providers/:id/regions', (req, res) => {
+  const regions = vpnProviders.getProviderRegions(req.params.id);
+  if (regions.length === 0) return res.status(404).json({ error: 'Provider not found' });
+  res.json(regions);
+});
 
 router.get('/regions', (req, res) => {
-  res.json(PIA_REGIONS);
+  // Legacy endpoint — returns regions for configured provider
+  const config = db.getGlobalSetting('vpnConfig');
+  const providerId = config?.provider || 'private internet access';
+  const regions = vpnProviders.getProviderRegions(providerId);
+  res.json(regions);
 });
 
 router.get('/status', (req, res) => {
   const config = db.getGlobalSetting('vpnConfig');
   if (!config) return res.json({ configured: false });
-  // Explicit destructuring — never leak password
-  const { username, region } = config;
-  res.json({ configured: true, username, region });
+  const { username, region, provider } = config;
+  res.json({ configured: true, username, region, provider: provider || 'private internet access' });
 });
 
-router.post('/config', (req, res) => {
-  const { username, password, region } = req.body;
+router.post('/config', async (req, res) => {
+  const { username, password, region, provider } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'Missing username or password' });
-  db.setGlobalSetting('vpnConfig', { username, password, region: region || 'US East' });
-  res.json({ saved: true });
+
+  const vpnProvider = provider || 'private internet access';
+  const vpnRegion = region || 'US East';
+
+  // Save to DB
+  db.setGlobalSetting('vpnConfig', { username, password, region: vpnRegion, provider: vpnProvider });
+
+  // Persist to .env so gluetun picks up creds on restart
+  const envUpdated = containerManager.updateEnvFile({
+    VPN_PROVIDER: vpnProvider,
+    VPN_USERNAME: username,
+    VPN_PASSWORD: password,
+    VPN_REGION: vpnRegion,
+  });
+
+  // Restart gluetun to pick up new creds
+  let restarted = false;
+  if (containerManager.dockerAvailable()) {
+    restarted = await containerManager.restartContainer('gluetun').catch(() => false);
+  }
+
+  res.json({ saved: true, persistent: envUpdated, restarted });
 });
 
 async function checkService(name, url, proxyFetch, timeoutMs = 10000) {

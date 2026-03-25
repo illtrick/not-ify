@@ -538,8 +538,24 @@ export function getVpnStatus() {
   return get('/api/vpn/status');
 }
 
+export function getVpnProviders() {
+  return get('/api/vpn/providers');
+}
+
+export function getVpnProviderRegions(providerId) {
+  return get(`/api/vpn/providers/${encodeURIComponent(providerId)}/regions`);
+}
+
 export function getVpnRegions() {
   return get('/api/vpn/regions');
+}
+
+export function getContainerStatus() {
+  return get('/api/containers/status');
+}
+
+export function restartContainer(name) {
+  return post(`/api/containers/${encodeURIComponent(name)}/restart`);
 }
 
 export function saveVpnConfig(body) {

@@ -485,6 +485,10 @@ app.use('/api/vpn', adminGuard, vpnConfigRouter);
 const serverAdminRouter = require('./api/server-admin');
 app.use('/api/server', adminGuard, serverAdminRouter);
 
+// Container management API (admin only) — restart sibling containers, check status
+const containersRouter = require('./api/containers');
+app.use('/api/containers', adminGuard, containersRouter);
+
 // Activity log API — verbose download/pipeline event stream for debugging UI
 const activityLog = require('./services/activity-log');
 app.get('/api/activity', (req, res) => {

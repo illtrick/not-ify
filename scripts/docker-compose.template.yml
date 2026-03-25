@@ -8,6 +8,7 @@ services:
       - ${CONFIG_DIR}:/app/config
       - ${MUSIC_DIR}:/app/music
       - ${SLSKD_DOWNLOADS_DIR:-./slskd-downloads}:/app/slskd-downloads
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - NODE_ENV=${NODE_ENV:-production}
       - PORT=${PORT:-3000}
@@ -23,6 +24,7 @@ services:
       - CLAM_ENABLED=${CLAM_ENABLED:-false}
       - CLAM_HOST=${CLAM_HOST:-}
       - CLAM_PORT=${CLAM_PORT:-3310}
+      - INSTALL_DIR=${INSTALL_DIR:-}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${PORT:-3000}/api/health"]
       interval: 30s
@@ -46,7 +48,7 @@ services:
       - SLSKD_SLSK_USERNAME=${SLSKD_SLSK_USERNAME:-}
       - SLSKD_SLSK_PASSWORD=${SLSKD_SLSK_PASSWORD:-}
       - SLSKD_SLSK_LISTEN_PORT=50300
-      - SLSKD_WEB_AUTHENTICATION__API_KEYS__${SLSKD_API_KEY}__ROLE=administrator
+      # API key configured via config file (slskd doesn't support API keys via env vars)
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5030/api/v0/application"]
       interval: 30s

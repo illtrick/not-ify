@@ -49,7 +49,15 @@ router.post('/config', async (req, res) => {
   const existing = db.getGlobalSetting('soulseekConfig') || {};
   db.setGlobalSetting('soulseekConfig', { ...existing, username, password });
 
+  // Persist to .env so creds survive container restarts
+  const containerManager = require('../services/container-manager');
+  const envUpdated = containerManager.updateEnvFile({
+    SLSKD_SLSK_USERNAME: username,
+    SLSKD_SLSK_PASSWORD: password,
+  });
+
   // Push credentials to slskd via PATCH /api/v0/options
+  let slskdSync = false;
   try {
     const response = await fetch(`${getSlskdUrl()}/api/v0/options`, {
       method: 'PATCH',
@@ -60,14 +68,16 @@ router.post('/config', async (req, res) => {
       body: JSON.stringify({ soulseek: { username, password } }),
       signal: AbortSignal.timeout(8000),
     });
-    if (!response.ok) {
-      return res.json({ saved: true, slskdSync: false, error: `slskd returned HTTP ${response.status}` });
+    slskdSync = response.ok;
+  } catch {
+    // API push failed — restart slskd so it picks up from env vars
+    if (envUpdated) {
+      console.log('[soulseek-config] API push failed, restarting slskd container...');
+      await containerManager.restartContainer('slskd').catch(() => {});
     }
-    res.json({ saved: true, slskdSync: true });
-  } catch (err) {
-    // Saved to our DB but couldn't push to slskd
-    res.json({ saved: true, slskdSync: false, error: err.message });
   }
+
+  res.json({ saved: true, slskdSync, persistent: envUpdated });
 });
 
 // POST /api/soulseek/test — verify connection to Soulseek network

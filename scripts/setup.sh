@@ -107,13 +107,17 @@ MUSIC_DIR=${MUSIC_DIR}
 CONFIG_DIR=${INSTALL_DIR}/config
 SLSKD_API_KEY=${API_KEY}
 SLSKD_DOWNLOADS_DIR=${INSTALL_DIR}/slskd-downloads
+INSTALL_DIR=${INSTALL_DIR}
 
 # Soulseek (slskd) — placeholder creds, update in Settings UI
 SLSKD_SLSK_USERNAME=${SLSK_AUTO_USER}
 SLSKD_SLSK_PASSWORD=${SLSK_AUTO_PASS}
 EOF
 
-# Create slskd data dir (for DB, not config — config via env vars)
+# Create slskd data dir and write API key config
+# NOTE: slskd env vars work for username/password but NOT for API keys.
+# API keys must be in the config file. slskd overwrites the config on first boot,
+# so we write it AFTER starting containers and then restart slskd (see below).
 mkdir -p "${HOST_INSTALL}/slskd"
 
 # Copy compose template and enable optional services
@@ -154,6 +158,20 @@ cd "${HOST_INSTALL}"
 docker compose up -d 2>&1 | sed 's/^/  /'
 
 echo ""
+
+# Write slskd API key config AFTER first boot (slskd overwrites config on first start)
+# API keys can only be configured via config file, not env vars
+info "Configuring slskd API key..."
+sleep 5
+docker exec slskd sh -c "cat > /app/slskd.yml << SLSKDEOF
+web:
+  authentication:
+    api_keys:
+      notify:
+        key: ${API_KEY}
+        role: administrator
+SLSKDEOF" 2>/dev/null || true
+docker restart slskd 2>/dev/null || true
 
 # Health checks — build list of expected containers
 CONTAINERS="not-ify slskd watchtower"
