@@ -228,9 +228,13 @@ export function SearchView({
               <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 16 }}>Recently Played</div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 16 }}>
                 {recentlyPlayed.map((r, i) => {
-                  const libAlbum = libraryAlbums().find(la =>
-                    la.artist.toLowerCase() === r.artist.toLowerCase() && la.album.toLowerCase() === r.album.toLowerCase()
-                  );
+                  const rArtist = r.artist.toLowerCase();
+                  const rAlbum = r.album.toLowerCase();
+                  const libAlbum = libraryAlbums().find(la => {
+                    const lArtist = la.artist.toLowerCase();
+                    const lAlbum = la.album.toLowerCase();
+                    return lArtist === rArtist && (lAlbum === rAlbum || rAlbum.startsWith(lAlbum) || lAlbum.startsWith(rAlbum));
+                  });
                   return (
                     <div key={i}
                       style={{ background: COLORS.card, borderRadius: 8, padding: 12, cursor: 'pointer', transition: 'background 0.15s' }}

@@ -685,6 +685,14 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
       ytPending: true, // needs YT search when it's time to play
     }));
     setQueue(queueTracks);
+    // Also set as playlist so playNext has a fallback when queue is consumed
+    // (e.g., after tracks are downloaded and played from library, queue empties)
+    const allTracks = [
+      { id: `yt-pending-${tracks[0].position || 0}`, title: tracks[0].title, artist: tracks[0].artist || albumArtist, trackArtist: tracks[0].artist, album: albumName, coverArt, isYtPreview: true, ytPending: true },
+      ...queueTracks,
+    ];
+    setPlaylist(allTracks);
+    setPlaylistIdx(0);
 
     // Auto-acquire the FULL album in background (not just the tracks from click position)
     // Use mbTracks (full tracklist from state) rather than `tracks` (which may be a subset)

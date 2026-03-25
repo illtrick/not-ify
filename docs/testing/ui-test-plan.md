@@ -301,6 +301,80 @@ Each run produces a JSON file:
 
 ---
 
+## Group 9: UX Quality & Edge Cases
+
+### 9.1 — Gapless playback gap
+- **Action:** Play a library album, seek track 1 to near-end (last 5s), let it auto-advance
+- **Measure:** Ms gap between `audio_ended` on track N and `audio_playing` on track N+1
+- **Pass:** < 1000ms gap, no silence longer than 1s
+- **Metrics:** `gapMs`, `stalls`
+
+### 9.2 — Session persistence
+- **Action:** Play a track, note position. Close browser tab. Reopen app URL.
+- **Measure:** Does the app restore the last-played context?
+- **Pass:** Recently played shows the album, now-playing bar is empty (acceptable) or restored
+- **Metrics:** `recentlyPlayedRestored`, `nowPlayingRestored`
+
+### 9.3 — Track order verification
+- **Action:** Open a known album (e.g., Animals — 5 tracks). Verify track numbers are 1-5 sequential.
+- **Measure:** Track numbers in DOM match expected order
+- **Pass:** All tracks numbered sequentially, no gaps, no duplicates
+- **Metrics:** `trackNumbers`, `sequential`, `duplicates`
+
+### 9.4 — Cover art load rate
+- **Action:** Search for a well-known artist, count albums with loaded art vs placeholder
+- **Measure:** % of album cards with non-placeholder images
+- **Pass:** > 70% have album art loaded
+- **Metrics:** `totalCards`, `artLoaded`, `artMissing`, `loadRate`
+
+### 9.5 — Infinite loading states
+- **Action:** Trigger a search, verify search spinner disappears. Open album, verify tracks render.
+- **Measure:** Max time any loading state persists
+- **Pass:** No spinner/loading state visible after 30s
+- **Metrics:** `maxLoadingMs`, `infiniteSpinner`
+
+### 9.6 — Scrobble fires on playback
+- **Action:** Play a library track for > 30 seconds. Check activity log for Last.fm scrobble event.
+- **Measure:** Scrobble event presence and timing
+- **Pass:** Scrobble event within 60s of playback crossing 30s mark (or skip if Last.fm not configured)
+- **Metrics:** `scrobbleFired`, `scrobbleDelayMs`
+
+### 9.7 — Click debounce (double-click play)
+- **Action:** Double-click the big play button rapidly
+- **Measure:** Number of `play_requested` telemetry events
+- **Pass:** Exactly 1 play_requested event (debounced), audio plays once
+- **Metrics:** `playRequestCount`, `audioOverlap`
+
+### 9.8 — Mobile responsiveness
+- **Action:** Resize browser to 375x812 (mobile viewport)
+- **Measure:** Core controls visible — search, library, play/pause, track name
+- **Pass:** All core controls accessible, no overflow/clipping
+- **Metrics:** `searchVisible`, `playerVisible`, `controlsAccessible`
+
+---
+
+## Test Diversity Requirements
+
+To avoid only testing cached/happy paths, each run must include:
+
+**Album diversity (minimum 3 albums per run):**
+- 1x **Library album** (already downloaded, has format badges) — e.g., Animals, Sehnsucht
+- 1x **Fresh search album** (never cached, triggers MB + cover art lookup) — use a different artist each run
+- 1x **Partially downloaded album** (some tracks in library, some pending) — if available
+
+**Artist diversity:**
+- Rotate test artists across runs to avoid MB cache giving false-positive speed results
+- Suggested rotation: Run 1: Radiohead, Run 2: Tool, Run 3: Björk, Run 4: Aphex Twin, Run 5: Nina Simone
+
+**Action diversity per run:**
+- At least 1 search → album nav → play flow (cold path)
+- At least 1 library sidebar → play flow (warm path)
+- At least 1 recently played → play flow
+- At least 1 next/prev track advancement
+- At least 1 album switch mid-playback (queue replacement test)
+
+---
+
 ## Trend Tracking
 
 After each run, compare against previous runs:
@@ -308,8 +382,8 @@ After each run, compare against previous runs:
 ```
 | Version | Date       | Pass Rate | Avg Latency | Playback P50 | Stalls | Errors |
 |---------|------------|-----------|-------------|--------------|--------|--------|
-| 1.6.2   | 2026-03-24 |    /28    |       ms    |         ms   |        |        |
-| 1.6.3   |            |    /28    |       ms    |         ms   |        |        |
+| 1.6.2   | 2026-03-24 |  5/7     |    1800ms   |       500ms  |   1    |   1    |
+| 1.6.3   |            |    /36   |       ms    |         ms   |        |        |
 ```
 
 Key metrics to trend:

@@ -128,7 +128,13 @@ export function AlbumView({
   const libraryFormatMap = React.useMemo(() => {
     const map = new Map();
     if (library) {
-      library.filter(t => t.artist === artist && t.album === album).forEach(t => {
+      const lAlbum = (album || '').toLowerCase();
+      const lArtist = (artist || '').toLowerCase();
+      library.filter(t => {
+        const tAlbum = (t.album || '').toLowerCase();
+        const tArtist = (t.artist || '').toLowerCase();
+        return tArtist === lArtist && (tAlbum === lAlbum || lAlbum.startsWith(tAlbum) || tAlbum.startsWith(lAlbum));
+      }).forEach(t => {
         map.set(t.id, t.format);
         // Also map by title for MB track matching
         const key = `${(t.title || '').toLowerCase()}`;

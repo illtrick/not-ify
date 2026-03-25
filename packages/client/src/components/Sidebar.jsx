@@ -96,10 +96,13 @@ export function Sidebar({
               return (
                 <div key={`rp-${i}`}
                   onClick={() => {
-                    const libMatch = libraryAlbums().find(la =>
-                      la.artist.toLowerCase() === r.artist.toLowerCase() &&
-                      la.album.toLowerCase() === r.album.toLowerCase()
-                    );
+                    const rArtist = r.artist.toLowerCase();
+                    const rAlbum = r.album.toLowerCase();
+                    const libMatch = libraryAlbums().find(la => {
+                      const lArtist = la.artist.toLowerCase();
+                      const lAlbum = la.album.toLowerCase();
+                      return lArtist === rArtist && (lAlbum === rAlbum || rAlbum.startsWith(lAlbum) || lAlbum.startsWith(rAlbum));
+                    });
                     openRecentlyPlayed(r, libMatch);
                   }}
                   style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px', borderRadius: 4, cursor: 'pointer' }}
