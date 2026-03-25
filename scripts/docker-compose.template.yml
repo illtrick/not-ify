@@ -43,6 +43,10 @@ services:
       - ${MUSIC_DIR}:/music:ro
     environment:
       - SLSKD_HTTP_PORT=5030
+      - SLSKD_SLSK_USERNAME=${SLSKD_SLSK_USERNAME:-}
+      - SLSKD_SLSK_PASSWORD=${SLSKD_SLSK_PASSWORD:-}
+      - SLSKD_SLSK_LISTEN_PORT=50300
+      - SLSKD_WEB_AUTHENTICATION__API_KEYS__${SLSKD_API_KEY}__ROLE=administrator
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5030/api/v0/application"]
       interval: 30s
@@ -72,6 +76,11 @@ services:
 #VPN#    restart: unless-stopped
 #VPN#    cap_add:
 #VPN#      - NET_ADMIN
+#VPN#    environment:
+#VPN#      - VPN_SERVICE_PROVIDER=${VPN_PROVIDER:-private internet access}
+#VPN#      - OPENVPN_USER=${VPN_USERNAME:-}
+#VPN#      - OPENVPN_PASSWORD=${VPN_PASSWORD:-}
+#VPN#      - SERVER_REGIONS=${VPN_REGION:-US East}
 #VPN#    ports:
 #VPN#      - "8888:8888"
 #VPN#      - "8000:8000/tcp"
