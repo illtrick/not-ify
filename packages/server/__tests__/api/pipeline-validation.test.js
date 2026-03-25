@@ -68,6 +68,7 @@ jest.mock('../../src/services/youtube', () => ({
 const mockValidateFile = jest.fn();
 jest.mock('../../src/services/file-validator', () => ({
   validateFile: mockValidateFile,
+  scanClamAV: jest.fn().mockResolvedValue({ name: 'clam', passed: true, detail: 'clean' }),
 }));
 
 // ---------------------------------------------------------------------------

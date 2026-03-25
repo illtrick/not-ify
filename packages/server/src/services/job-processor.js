@@ -322,6 +322,8 @@ async function processDownload(job, payload) {
     const skippedWorse = [];
     const skippedExcluded = [];
     const failedFiles = [];
+    const deferClam = !payload.upgradeFrom;
+    const filesToScanLater = [];
 
     for (const link of links) {
       let unrestricted;
@@ -361,8 +363,6 @@ async function processDownload(job, payload) {
 
       // Validate + replace each file immediately
       // ClamAV is deferred so tracks land in the library quickly — scan runs async after sync
-      const deferClam = !payload.upgradeFrom;
-      const filesToScanLater = [];
       for (const filePath of filesToProcess) {
         const validation = await fileValidator.validateFile(filePath, { deferClam });
         if (!validation.passed) {
