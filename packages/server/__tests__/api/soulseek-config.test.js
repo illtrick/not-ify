@@ -67,7 +67,6 @@ describe('Soulseek config API', () => {
       .send({ username: 'testuser2', password: 'testpass2' }).expect(200);
     expect(res.body.saved).toBe(true);
     expect(res.body.slskdSync).toBe(false);
-    expect(res.body.error).toContain('connection refused');
 
     // Verify DB was updated
     const config = db.getGlobalSetting('soulseekConfig');

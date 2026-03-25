@@ -38,6 +38,10 @@ export function SettingsModal({
   const [vpnUser, setVpnUser] = useState('');
   const [vpnPass, setVpnPass] = useState('');
   const [vpnRegion, setVpnRegion] = useState('US East');
+  const [vpnProvider, setVpnProvider] = useState('');
+  const [vpnCustomProvider, setVpnCustomProvider] = useState('');
+  const [vpnProviders, setVpnProviders] = useState([]);
+  const [providerRegions, setProviderRegions] = useState([]);
 
   // Soulseek inputs
   const [slskUsername, setSlskUsername] = useState('');
@@ -174,8 +178,27 @@ export function SettingsModal({
     if (vpnConfig?.status) {
       if (vpnConfig.status.username) setVpnUser(vpnConfig.status.username);
       if (vpnConfig.status.region) setVpnRegion(vpnConfig.status.region);
+      if (vpnConfig.status.provider) setVpnProvider(vpnConfig.status.provider);
     }
   }, [vpnConfig?.status]);
+
+  // Load VPN providers list
+  useEffect(() => {
+    if (isAdmin) {
+      import('@not-ify/shared').then(api => {
+        api.getVpnProviders().then(providers => setVpnProviders(providers)).catch(() => {});
+      });
+    }
+  }, [isAdmin]);
+
+  // Load regions when provider changes
+  useEffect(() => {
+    if (vpnProvider && vpnProvider !== 'custom') {
+      import('@not-ify/shared').then(api => {
+        api.getVpnProviderRegions(vpnProvider).then(regions => setProviderRegions(regions)).catch(() => setProviderRegions([]));
+      });
+    }
+  }, [vpnProvider]);
 
   if (!showSettings) return null;
 
@@ -452,20 +475,54 @@ export function SettingsModal({
         {isAdmin && vpnConfig && (
           <div style={{ ...sectionStyle, marginTop: 24 }}>
             <div style={sectionHeaderStyle}>
-              <span style={sectionTitleStyle}>VPN (PIA)</span>
+              <span style={sectionTitleStyle}>VPN</span>
               <StatusDot status={vpnConfig.status?.configured ? 'ok' : null} />
             </div>
+            {vpnConfig.testResult?.ip && (
+              <div style={{ fontSize: 12, color: COLORS.success, marginBottom: 8 }}>
+                Connected — IP: {vpnConfig.testResult.ip} ({vpnConfig.testResult.region || vpnRegion})
+              </div>
+            )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 8 }}>
+              <select
+                value={vpnProvider}
+                onChange={(e) => {
+                  setVpnProvider(e.target.value);
+                  setVpnRegion('');
+                  // Fetch regions for new provider
+                  if (e.target.value) {
+                    import('@not-ify/shared').then(api => {
+                      api.getVpnProviderRegions(e.target.value).then(regions => {
+                        setProviderRegions(regions);
+                      }).catch(() => setProviderRegions([]));
+                    });
+                  }
+                }}
+                style={inputStyle}
+              >
+                <option value="">Select VPN provider...</option>
+                {(vpnProviders || []).map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                <option value="custom">Other (enter gluetun provider name)</option>
+              </select>
+              {vpnProvider === 'custom' && (
+                <input
+                  type="text"
+                  placeholder="Gluetun provider name (e.g., vyprvpn)"
+                  value={vpnCustomProvider}
+                  onChange={(e) => setVpnCustomProvider(e.target.value)}
+                  style={inputStyle}
+                />
+              )}
               <input
                 type="text"
-                placeholder="PIA username"
+                placeholder="Username"
                 value={vpnUser}
                 onChange={(e) => setVpnUser(e.target.value)}
                 style={inputStyle}
               />
               <input
                 type="password"
-                placeholder="PIA password"
+                placeholder="Password"
                 value={vpnPass}
                 onChange={(e) => setVpnPass(e.target.value)}
                 style={inputStyle}
@@ -476,20 +533,21 @@ export function SettingsModal({
                 style={inputStyle}
               >
                 <option value="">Select region...</option>
-                {(vpnRegions || []).map(r => <option key={r} value={r}>{r}</option>)}
+                {(providerRegions.length > 0 ? providerRegions : vpnRegions || []).map(r => <option key={r} value={r}>{r}</option>)}
               </select>
             </div>
+            {vpnConfig.saving && (
+              <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 8 }}>
+                Saving... Restarting VPN container...
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <button
                 onClick={async () => {
-                  await vpnConfig.save({ username: vpnUser, password: vpnPass, region: vpnRegion });
-                  if (vpnRegion) {
-                    try {
-                      await switchVpnRegion(vpnRegion);
-                      // Auto-test after region switch to verify new connection
-                      setTimeout(() => vpnConfig.test(), 5000);
-                    } catch {}
-                  }
+                  const provider = vpnProvider === 'custom' ? vpnCustomProvider : vpnProvider;
+                  await vpnConfig.save({ username: vpnUser, password: vpnPass, region: vpnRegion, provider });
+                  // Auto-test after save to verify connection
+                  setTimeout(() => vpnConfig.test(), 10000);
                 }}
                 disabled={vpnConfig.saving}
                 style={vpnConfig.saving ? buttonDisabledStyle : buttonPrimaryStyle}
@@ -503,6 +561,9 @@ export function SettingsModal({
               >
                 {vpnConfig.testing ? 'Testing...' : 'Test Connection'}
               </button>
+            </div>
+            <div style={{ fontSize: 11, color: COLORS.textSecondary, marginTop: 8 }}>
+              Don't have a VPN? Not-ify works without one — torrent downloads will use your regular connection.
             </div>
             {vpnConfig.testResult && (
               <div style={{ marginTop: 8, fontSize: 12 }}>
