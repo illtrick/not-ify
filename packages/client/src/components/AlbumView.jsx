@@ -255,7 +255,7 @@ export function AlbumView({
             <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>Album</div>
             <h1 style={{ fontSize: isMobile ? 28 : 52, fontWeight: 900, color: COLORS.textPrimary, margin: '0 0 8px', lineHeight: 1.15, letterSpacing: '-0.5px' }}>{album}</h1>
             <div style={{ fontSize: 16, color: 'rgba(255,255,255,0.7)', marginBottom: 8, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
-              <div style={{ width: 24, height: 24, borderRadius: '50%', background: albumColor ? `rgb(${albumColor.join(',')})` : COLORS.hover, flexShrink: 0 }} />
+              {/* Color circle removed — clean layout */}
               <span
                 style={{ cursor: 'pointer', transition: 'color 0.15s', fontWeight: 600 }}
                 onClick={async () => {
@@ -317,8 +317,8 @@ export function AlbumView({
                 );
               })()}
 
-              {/* Upgrade to FLAC button — only for library albums with lossy tracks */}
-              {isLib && pl.length > 0 && hasLossyTracks(pl) && (
+              {/* Upgrade button — show on all library albums (server decides if upgrade is possible) */}
+              {isLib && pl.length > 0 && (
                 <button
                   onClick={async () => {
                     if (upgradeState === 'triggering' || upgradeState === 'queued') return;
@@ -350,7 +350,7 @@ export function AlbumView({
                   title={lastUpgrade ? `Last attempt: ${lastUpgrade.outcome}${lastUpgrade.reason ? ' — ' + lastUpgrade.reason : ''} (${(() => { const ago = Date.now() - lastUpgrade.timestamp; if (ago < 60000) return 'just now'; if (ago < 3600000) return Math.round(ago/60000) + 'm ago'; if (ago < 86400000) return Math.round(ago/3600000) + 'h ago'; return Math.round(ago/86400000) + 'd ago'; })()})` : 'Queue this album for quality upgrade'}
                 >
                   {upgradeState === 'triggering' && <span className="spin-slow" style={{ display: 'inline-flex' }}>{Icon.music(12, COLORS.textSecondary)}</span>}
-                  {upgradeState === 'queued' ? 'Upgrade queued' : upgradeState === 'error' ? 'Upgrade failed' : lastUpgrade ? `Upgrade (tried ${(() => { const ago = Date.now() - lastUpgrade.timestamp; if (ago < 60000) return 'just now'; if (ago < 3600000) return Math.round(ago/60000) + 'm ago'; if (ago < 86400000) return Math.round(ago/3600000) + 'h ago'; return Math.round(ago/86400000) + 'd ago'; })()})` : 'Upgrade'}
+                  {upgradeState === 'queued' ? 'Upgrade queued' : upgradeState === 'error' ? 'Upgrade failed' : 'Upgrade'}
                 </button>
               )}
             </div>
@@ -488,7 +488,8 @@ export function AlbumView({
             );
             const isActive = (currentTrack?.isYtPreview
                 && currentTrack?.title === t.title
-                && currentTrack?.artist === artist)
+                && currentTrack?.artist === artist
+                && currentAlbumInfo?.album === album)
               || (!currentTrack?.isYtPreview
                   && currentTrack?.title === t.title
                   && (currentAlbumInfo?.album === album || currentTrack?.album === album));

@@ -165,7 +165,7 @@ function getTrackMap() {
     title: r.title,
     artist: r.artist,
     album: r.album,
-    year: null,
+    year: r.year || null,
     coverArt: null,
     mbid: null,
     path: `/api/stream/${r.id}`,
@@ -258,6 +258,7 @@ function syncAlbum(artist, album) {
       format: t.format,
       filepath: t.filepath,
       fileSize: t.fileSize,
+      year: t.year || null,
     }))
   );
   invalidateCache();

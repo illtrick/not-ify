@@ -7,6 +7,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 - **MINOR** (0.x.0): New features, meaningful improvements
 - **PATCH** (0.0.x): Bug fixes, polish, iteration on current features
 
+## [1.7.1] - 2026-03-25
+
+### Changed
+- **Album header cleanup**: Removed decorative color circle next to artist name
+- **Upgrade button**: Now shows on all library albums (not just lossy), simplified label to "Upgrade" with hover tooltip for last attempt timestamp
+
+### Fixed
+- **Now-playing indicator (BUG-008)**: Added album context check to YT preview track matching — indicator no longer leaks to tracks on a different album
+- **Year in library album header (BUG-009)**: Year now stored in SQLite `tracks` table (non-destructive migration), populated from `.metadata.json` during library sync. Client falls back to recently-played cache. Reduces online dependency on MusicBrainz for offline use.
+- **Rapid next skip**: Multiple rapid next clicks now correctly advance through consecutive tracks instead of all landing on the same track (uses ref to track pending index across React render cycles)
+- **Year in download metadata**: YouTube album downloads now write `year` to `.metadata.json` so it persists for offline access
+
 ## [1.7.0] - 2026-03-25
 
 ### Changed

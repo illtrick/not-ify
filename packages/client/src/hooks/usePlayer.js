@@ -199,7 +199,13 @@ export function usePlayer({
       return;
     }
     if (!playlist.length) return;
-    const next = (playlistIdx + 1) % playlist.length;
+    // Use pendingIdxRef to handle rapid clicks — each click advances from the
+    // last requested position, not the stale React state
+    const baseIdx = pendingIdxRef.current != null ? pendingIdxRef.current : playlistIdx;
+    const next = (baseIdx + 1) % playlist.length;
+    pendingIdxRef.current = next;
+    // Clear the pending ref after React has a chance to flush state
+    setTimeout(() => { pendingIdxRef.current = null; }, 0);
 
     // Telemetry: track advance (playlist)
     try {
@@ -209,6 +215,10 @@ export function usePlayer({
     playTrack(playlist[next], null, next, undefined, reason === 'ended' ? 'next' : 'skip');
     setPlaylistIdx(next);
   }
+
+  // Track pending playlist index for rapid next clicks — prevents all clicks
+  // reading the same stale playlistIdx from the same React render cycle
+  const pendingIdxRef = useRef(null);
 
   const prevRestartedAt = useRef(0);
   function playPrev() {

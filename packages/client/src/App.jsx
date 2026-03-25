@@ -600,7 +600,10 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
     // Refresh library to get latest format info (badges may be stale after upgrades)
     loadLibrary();
     const pl = tracks.map(t => ({ ...t, path: buildTrackPath(t.id), coverArt }));
-    const year = tracks.find(t => t.year)?.year || '';
+    // Year: try track metadata first, then recently played cache, then previous search result
+    const year = tracks.find(t => t.year)?.year
+      || recentlyPlayed.find(r => r.artist === artist && r.album === albumName)?.year
+      || '';
     setSelectedAlbum({ artist, album: albumName, year, tracks: pl, coverArt, mbid, sources: [], fromSearch: false });
     prevViewRef.current = view;
     setView('album');

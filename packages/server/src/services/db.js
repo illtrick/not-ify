@@ -179,6 +179,13 @@ function getDb() {
     _db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
   }
 
+  // Migration: add year column to tracks table (offline-friendly album metadata)
+  try {
+    _db.prepare("SELECT year FROM tracks LIMIT 1").get();
+  } catch {
+    _db.exec("ALTER TABLE tracks ADD COLUMN year TEXT");
+  }
+
   return _db;
 }
 
@@ -630,20 +637,21 @@ function removeTrackById(id) {
 function syncAlbumTracks(artist, album, tracksArray) {
   const db = getDb();
   const upsert = db.prepare(`
-    INSERT INTO tracks (id, artist, album, title, track_number, format, filepath, file_size, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
+    INSERT INTO tracks (id, artist, album, title, track_number, format, filepath, file_size, year, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
     ON CONFLICT(id) DO UPDATE SET
       format = excluded.format,
       filepath = excluded.filepath,
       file_size = excluded.file_size,
       track_number = excluded.track_number,
+      year = COALESCE(excluded.year, year),
       updated_at = unixepoch()
   `);
   const filepaths = tracksArray.map(t => t.filepath);
 
   const tx = db.transaction(() => {
     for (const t of tracksArray) {
-      upsert.run(t.id, t.artist, t.album, t.title, t.trackNumber || null, t.format, t.filepath, t.fileSize || null);
+      upsert.run(t.id, t.artist, t.album, t.title, t.trackNumber || null, t.format, t.filepath, t.fileSize || null, t.year || null);
     }
     // Remove tracks for this artist+album that are no longer on disk
     if (filepaths.length > 0) {
