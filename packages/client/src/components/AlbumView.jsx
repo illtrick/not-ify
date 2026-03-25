@@ -371,7 +371,8 @@ export function AlbumView({
           </div>
           {pl.map((track, idx) => {
             const isActive = currentTrack?.id === track.id
-              || (currentTrack?.isYtPreview && currentTrack?.title === track.title);
+              || (currentTrack?.isYtPreview && currentTrack?.title === track.title
+                  && currentAlbumInfo?.artist === artist && currentAlbumInfo?.album === album);
             const isHovered = hoveredTrack === track.id;
             const trackArtist = track.artist || artist;
             return (

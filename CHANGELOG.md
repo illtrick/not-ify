@@ -7,6 +7,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 - **MINOR** (0.x.0): New features, meaningful improvements
 - **PATCH** (0.0.x): Bug fixes, polish, iteration on current features
 
+## [1.7.0] - 2026-03-25
+
+### Changed
+- **Library-first streaming**: When playing a track that exists in the library, always use the library stream even if playback was initiated from a search/YT context — YouTube is now the fallback only when the track isn't downloaded yet
+- **Async ClamAV for initial downloads**: File validation now defers ClamAV scanning on initial downloads so tracks become streamable immediately after ffprobe passes. ClamAV runs async after the library sync — if a file fails, it's removed and the library is re-synced. Upgrade downloads still run ClamAV synchronously before replacing existing files.
+
+### Fixed
+- **Recently played navigation**: Clicking an album in the "Recently Played" sidebar now opens the album detail view directly instead of triggering a keyword search (uses saved MBID for MusicBrainz track fetch)
+- **Previous track button**: Double-pressing previous within 2 seconds now goes to the previous track instead of restarting the current track twice
+- **Stale now-playing indicator**: The pink play icon on track rows no longer appears on wrong tracks from different albums — the YT preview title match now also checks artist + album
+- **Library album year/duration**: Albums opened from the library sidebar now show the year and total duration in the header (extracted from track metadata)
+
 ## [1.6.0] - 2026-03-23
 
 ### Added

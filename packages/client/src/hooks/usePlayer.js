@@ -110,7 +110,22 @@ export function usePlayer({
     }
     if (audioRef.current) {
       audioRef.current.volume = volume;
-      const src = track.path || buildTrackPath(track.id);
+      // Library-first: if this is a YT preview but the track exists in the library,
+      // use the library stream (faster, higher quality, no YT dependency)
+      let src = track.path || buildTrackPath(track.id);
+      if (track.isYtPreview && library.length > 0) {
+        const titleLower = (track.title || '').toLowerCase();
+        const artistLower = (track.artist || albumInfo?.artist || '').toLowerCase();
+        const libMatch = library.find(t =>
+          (t.title || '').toLowerCase() === titleLower &&
+          (t.artist || '').toLowerCase() === artistLower
+        );
+        if (libMatch) {
+          src = buildTrackPath(libMatch.id);
+          // Update current track to reflect library state
+          setCurrentTrack({ ...track, id: libMatch.id, path: undefined, isYtPreview: false, format: libMatch.format });
+        }
+      }
       audioRef.current.src = src;
 
       // Telemetry: audio source set
@@ -195,9 +210,17 @@ export function usePlayer({
     setPlaylistIdx(next);
   }
 
+  const prevRestartedAt = useRef(0);
   function playPrev() {
     if (!playlist.length) return;
-    if (audioRef.current?.currentTime > 3) { audioRef.current.currentTime = 0; return; }
+    const now = Date.now();
+    const recentlyRestarted = (now - prevRestartedAt.current) < 2000;
+    if (audioRef.current?.currentTime > 3 && !recentlyRestarted) {
+      audioRef.current.currentTime = 0;
+      prevRestartedAt.current = now;
+      return;
+    }
+    prevRestartedAt.current = 0;
     const prev = (playlistIdx - 1 + playlist.length) % playlist.length;
     playTrack(playlist[prev], null, prev, undefined, 'prev');
     setPlaylistIdx(prev);

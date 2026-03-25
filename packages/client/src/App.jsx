@@ -483,11 +483,23 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
       // Inline the library-open logic to avoid double-emitting nav_album
       loadLibrary();
       const pl = libMatch.tracks.map(t => ({ ...t, path: buildTrackPath(t.id), coverArt: libMatch.coverArt }));
-      setSelectedAlbum({ artist: libMatch.artist, album: libMatch.album, tracks: pl, coverArt: libMatch.coverArt, mbid: libMatch.mbid, sources: [], fromSearch: false });
+      const year = libMatch.year || libMatch.tracks.find(t => t.year)?.year || '';
+      setSelectedAlbum({ artist: libMatch.artist, album: libMatch.album, year, tracks: pl, coverArt: libMatch.coverArt, mbid: libMatch.mbid, sources: [], fromSearch: false });
       prevViewRef.current = view;
       setView('album');
     } else {
-      _handleSearchInner(null, `${r.artist} ${r.album}`);
+      // No library match — open as search-sourced album using saved metadata
+      // so the user sees the album detail view (not a keyword search)
+      setSelectedAlbum({
+        artist: r.artist, album: r.album, year: r.year || '',
+        coverArt: r.coverArt,
+        mbid: r.mbid, rgid: r.rgid,
+        sources: [],
+        tracks: [],
+        fromSearch: !!(r.mbid || r.rgid),  // triggers MB track fetch if we have an ID
+      });
+      prevViewRef.current = view;
+      setView('album');
     }
   }
 
@@ -588,7 +600,8 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
     // Refresh library to get latest format info (badges may be stale after upgrades)
     loadLibrary();
     const pl = tracks.map(t => ({ ...t, path: buildTrackPath(t.id), coverArt }));
-    setSelectedAlbum({ artist, album: albumName, tracks: pl, coverArt, mbid, sources: [], fromSearch: false });
+    const year = tracks.find(t => t.year)?.year || '';
+    setSelectedAlbum({ artist, album: albumName, year, tracks: pl, coverArt, mbid, sources: [], fromSearch: false });
     prevViewRef.current = view;
     setView('album');
   }

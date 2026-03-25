@@ -160,7 +160,16 @@ async function checkClamAV(filePath) {
   }
 }
 
-async function validateFile(filePath) {
+/**
+ * Validate a downloaded audio file.
+ * @param {string} filePath — path to the file
+ * @param {object} [opts]
+ * @param {boolean} [opts.deferClam=false] — if true, skip ClamAV in this call
+ *   (caller is responsible for running scanClamAV() async afterward).
+ *   Use for initial downloads where streaming speed matters.
+ *   Always run sync (deferClam=false) for upgrades that replace existing files.
+ */
+async function validateFile(filePath, opts = {}) {
   const results = { path: filePath, passed: true, checks: [] };
 
   // 1. Size check
@@ -188,11 +197,15 @@ async function validateFile(filePath) {
     results.passed = false;
   }
 
-  // 4. ClamAV scan (if enabled)
-  const clamCheck = await checkClamAV(filePath);
-  results.checks.push(clamCheck);
-  if (!clamCheck.skipped && !clamCheck.passed) {
-    results.passed = false;
+  // 4. ClamAV scan — sync for upgrades, deferred for initial downloads
+  if (!opts.deferClam) {
+    const clamCheck = await checkClamAV(filePath);
+    results.checks.push(clamCheck);
+    if (!clamCheck.skipped && !clamCheck.passed) {
+      results.passed = false;
+    }
+  } else {
+    results.checks.push({ name: 'clam', skipped: true, detail: 'deferred (async)' });
   }
 
   const _mime = results.checks.find(c => c.name === 'mime');
@@ -207,6 +220,14 @@ async function validateFile(filePath) {
   return results;
 }
 
+/**
+ * Run ClamAV scan independently. Use after validateFile({ deferClam: true }).
+ * Returns the clam check result. If the file fails, caller should remove it.
+ */
+async function scanClamAV(filePath) {
+  return checkClamAV(filePath);
+}
+
 function getStatus() {
   return {
     toolsProbed: _toolStatus !== null,
@@ -216,6 +237,7 @@ function getStatus() {
 
 module.exports = {
   validateFile,
+  scanClamAV,
   getStatus,
   _test: { checkMimeType, checkFfprobe, checkFileSize, checkClamAV },
 };

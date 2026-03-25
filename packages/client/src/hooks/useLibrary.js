@@ -57,7 +57,8 @@ export function useLibrary({ recentlyPlayed = [] } = {}) {
     for (const [artist, albumMap] of Object.entries(grouped)) {
       for (const [albumName, { tracks, coverArt, mbid }] of Object.entries(albumMap)) {
         if (!mergedAlbumNames.has(albumName)) {
-          albums.push({ artist, album: albumName, tracks, coverArt, mbid, trackCount: tracks.length });
+          const year = tracks.find(t => t.year)?.year || null;
+          albums.push({ artist, album: albumName, tracks, coverArt, mbid, trackCount: tracks.length, year });
         }
       }
     }

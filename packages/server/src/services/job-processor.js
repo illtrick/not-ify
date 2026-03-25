@@ -360,8 +360,11 @@ async function processDownload(job, payload) {
       }
 
       // Validate + replace each file immediately
+      // ClamAV is deferred so tracks land in the library quickly — scan runs async after sync
+      const deferClam = !payload.upgradeFrom;
+      const filesToScanLater = [];
       for (const filePath of filesToProcess) {
-        const validation = await fileValidator.validateFile(filePath);
+        const validation = await fileValidator.validateFile(filePath, { deferClam });
         if (!validation.passed) {
           const failedChecks = validation.checks.filter(c => !c.passed && !c.skipped).map(c => c.name).join(', ');
           log('pipeline', 'info', `[job ${job.id}] Validation failed for ${path.basename(filePath)}: ${failedChecks}`);
@@ -374,6 +377,7 @@ async function processDownload(job, payload) {
         upgraded.push(...trackResult.upgraded);
         skippedWorse.push(...trackResult.skippedWorse);
         skippedExcluded.push(...trackResult.skippedExcluded);
+        if (deferClam) filesToScanLater.push(...trackResult.upgraded);
 
         // Clean up staging copy
         try { fs.unlinkSync(filePath); } catch {}
@@ -394,6 +398,26 @@ async function processDownload(job, payload) {
       library.syncAlbum(artist, album);
       library.invalidateCache();
     } catch (e) { console.warn('[pipeline] syncAlbum failed:', e.message); }
+
+    // Async ClamAV scan for deferred files — runs after tracks are already streamable
+    if (filesToScanLater.length > 0) {
+      setImmediate(async () => {
+        for (const f of filesToScanLater) {
+          const destPath = path.join(destDir, path.basename(f));
+          if (!fs.existsSync(destPath)) continue;
+          const clamResult = await fileValidator.scanClamAV(destPath);
+          if (!clamResult.skipped && !clamResult.passed) {
+            log('pipeline', 'warn', `[job ${job.id}] Async ClamAV failed for ${path.basename(f)}: ${clamResult.detail} — removing file`);
+            try { fs.unlinkSync(destPath); } catch {}
+            try {
+              const library = require('../api/library');
+              library.syncAlbum(artist, album);
+              library.invalidateCache();
+            } catch {}
+          }
+        }
+      });
+    }
 
     return {
       success: true,
@@ -599,8 +623,8 @@ async function processSoulseekDownload(job, payload) {
         const stagingPath = path.join(stagingDir, safeName);
         fs.copyFileSync(foundPath, stagingPath);
 
-        // Validate (MIME + ffprobe + ClamAV)
-        const fileVal = await fileValidator.validateFile(stagingPath);
+        // Validate (MIME + ffprobe; ClamAV deferred for initial downloads)
+        const fileVal = await fileValidator.validateFile(stagingPath, { deferClam: true });
         if (!fileVal.passed) {
           const failedChecks = fileVal.checks.filter(c => !c.passed && !c.skipped).map(c => c.name).join(', ');
           log('pipeline', 'info', `[job ${job.id}] Validation failed for ${bn}: ${failedChecks}`);
@@ -671,6 +695,26 @@ async function processSoulseekDownload(job, payload) {
       library.syncAlbum(artist, album);
       library.invalidateCache();
     } catch (e) { console.warn('[pipeline] syncAlbum failed:', e.message); }
+
+    // Async ClamAV scan for deferred files — runs after tracks are already streamable
+    if (upgraded.length > 0) {
+      setImmediate(async () => {
+        for (const f of upgraded) {
+          const destPath = path.join(destDir, path.basename(f));
+          if (!fs.existsSync(destPath)) continue;
+          const clamResult = await fileValidator.scanClamAV(destPath);
+          if (!clamResult.skipped && !clamResult.passed) {
+            log('pipeline', 'warn', `[job ${job.id}] Async ClamAV failed for ${path.basename(f)}: ${clamResult.detail} — removing file`);
+            try { fs.unlinkSync(destPath); } catch {}
+            try {
+              const library = require('../api/library');
+              library.syncAlbum(artist, album);
+              library.invalidateCache();
+            } catch {}
+          }
+        }
+      });
+    }
 
     return {
       success: true,
