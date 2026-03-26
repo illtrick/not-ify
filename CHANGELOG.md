@@ -7,6 +7,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 - **MINOR** (0.x.0): New features, meaningful improvements
 - **PATCH** (0.0.x): Bug fixes, polish, iteration on current features
 
+## [1.7.2] - 2026-03-25
+
+### Fixed
+- **BUG-014: Playback controls broken on first-search album view**: Track click handlers captured stale YT preview IDs/paths via closure. AlbumView now replaces stale track objects with live library versions when tracks download, so play/pause/skip work correctly without navigating away.
+- **BUG-011: Intermittent pause delay (2-4s)**: Pause now cancels any active crossfade and uses a synchronous ref to prevent `onEnded` from auto-advancing after user clicks pause. Previously, a race between the pause click and track-end event could cause the next track to start playing.
+
 ## [1.7.1] - 2026-03-25
 
 ### Changed

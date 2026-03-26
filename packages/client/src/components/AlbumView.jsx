@@ -123,10 +123,13 @@ export function AlbumView({
   if (!selectedAlbum) return null;
   const { artist, album, year, coverArt, tracks, sources, fromSearch, trackCount } = selectedAlbum;
 
-  // Enrich tracks with latest format info from library (badges stay fresh after upgrades)
-  // Library is re-fetched via SSE on upgrade events — see App.jsx SSE listener
-  const libraryFormatMap = React.useMemo(() => {
-    const map = new Map();
+  // Build a map of library tracks for this album — keyed by both ID and lowercase title.
+  // When tracks download while the user stays on the page, this map lets us replace stale
+  // YT preview / MB track objects with the real library versions (correct ID, path, format).
+  // Library is re-fetched via SSE on upgrade events — see App.jsx SSE listener.
+  const libraryTrackMap = React.useMemo(() => {
+    const byId = new Map();
+    const byTitle = new Map();
     if (library) {
       const lAlbum = (album || '').toLowerCase();
       const lArtist = (artist || '').toLowerCase();
@@ -135,13 +138,12 @@ export function AlbumView({
         const tArtist = (t.artist || '').toLowerCase();
         return tArtist === lArtist && (tAlbum === lAlbum || lAlbum.startsWith(tAlbum) || tAlbum.startsWith(lAlbum));
       }).forEach(t => {
-        map.set(t.id, t.format);
-        // Also map by title for MB track matching
-        const key = `${(t.title || '').toLowerCase()}`;
-        if (!map.has(key)) map.set(key, t.format);
+        byId.set(t.id, t);
+        const key = (t.title || '').toLowerCase();
+        if (!byTitle.has(key)) byTitle.set(key, t);
       });
     }
-    return map;
+    return { byId, byTitle };
   }, [library, artist, album]);
 
   // Separate active tracks from excluded ones (excluded come from server with excluded:true)
@@ -149,9 +151,22 @@ export function AlbumView({
   const excludedTracks = tracks.filter(t => t.excluded);
   const isLib = !fromSearch && (activeTracks.length > 0 || excludedTracks.length > 0);
 
+  // Build the live playlist: replace stale track objects with library versions when available.
+  // This ensures click handlers always capture fresh track IDs/paths — fixing the stale-closure
+  // bug where playback controls break when staying on an album page during downloads.
   const pl = activeTracks.map(t => {
-    const liveFormat = libraryFormatMap.get(t.id) || libraryFormatMap.get((t.title || '').toLowerCase());
-    return liveFormat && liveFormat !== t.format ? { ...t, format: liveFormat } : t;
+    const libTrack = libraryTrackMap.byId.get(t.id)
+      || libraryTrackMap.byTitle.get((t.title || '').toLowerCase());
+    if (libTrack) {
+      return {
+        ...t,                          // preserve MB metadata (trackNumber, coverArt, etc.)
+        id: libTrack.id,               // use library track ID
+        path: undefined,               // clear stale YT path — buildTrackPath(id) will be used
+        format: libTrack.format,       // use live format
+        isYtPreview: false,            // no longer a preview
+      };
+    }
+    return t;
   });
 
   const primarySrc = sources?.[0];

@@ -36,6 +36,7 @@ export function usePlayer({
   const crossfadeAnimRef = useRef(null);
   const preBufferedTrackRef = useRef(null);
   const recentlyPlayedAddedRef = useRef(false);
+  const isPlayingRef = useRef(false); // sync mirror of isPlaying — prevents race in event handlers
 
   // Telemetry — safe to call unconditionally (it's a hook)
   const telemetry = useTelemetry();
@@ -101,6 +102,7 @@ export function usePlayer({
     setCurrentCoverArt(track.coverArt || null);
     setCurrentAlbumInfo(albumInfo || { artist: track.artist, album: track.album, coverArt: track.coverArt });
     setIsPlaying(true);
+    isPlayingRef.current = true;
     if (pl) {
       setPlaylist(pl);
       setPlaylistIdx(i >= 0 ? i : 0);
@@ -147,8 +149,16 @@ export function usePlayer({
 
   function togglePlay() {
     if (!audioRef.current || !currentTrack) return;
-    if (isPlaying) { audioRef.current.pause(); setIsPlaying(false); }
-    else { audioRef.current.play().catch(() => {}); setIsPlaying(true); }
+    if (isPlaying) {
+      audioRef.current.pause();
+      cancelCrossfade(); // stop any active crossfade that would keep audio playing
+      setIsPlaying(false);
+      isPlayingRef.current = false;
+    } else {
+      audioRef.current.play().catch(() => {});
+      setIsPlaying(true);
+      isPlayingRef.current = true;
+    }
   }
 
   function _applyTrackState(nextTrack) {
@@ -437,6 +447,8 @@ export function usePlayer({
         });
       } catch {}
 
+      // Don't auto-advance if user paused (race between pause click and track end)
+      if (!isPlayingRef.current) return;
       if (crossfadeAnimRef.current) return;
       const nextTrack = peekNextTrack();
       if (nextTrack && !nextTrack.ytPending && preBufferedTrackRef.current?.id === nextTrack.id && nextAudioRef.current) {
