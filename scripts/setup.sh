@@ -128,10 +128,10 @@ if [ "$ENABLE_VPN" = "y" ]; then
   sed -i 's/^#VPN#//' "${HOST_INSTALL}/docker-compose.yml"
   # Add VPN + gluetun env vars
   # Use credentials from bootstrap wizard if provided, otherwise empty (configured in Settings UI)
-  local vpn_provider="${NOTIFY_VPN_PROVIDER:-private internet access}"
-  local vpn_username="${NOTIFY_VPN_USERNAME:-}"
-  local vpn_password="${NOTIFY_VPN_PASSWORD:-}"
-  local vpn_region="${NOTIFY_VPN_REGION:-US East}"
+  vpn_provider="${NOTIFY_VPN_PROVIDER:-private internet access}"
+  vpn_username="${NOTIFY_VPN_USERNAME:-}"
+  vpn_password="${NOTIFY_VPN_PASSWORD:-}"
+  vpn_region="${NOTIFY_VPN_REGION:-US East}"
   cat >> "${HOST_INSTALL}/.env" << EOF
 
 # VPN (Gluetun)

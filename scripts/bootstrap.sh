@@ -204,15 +204,17 @@ trap cleanup INT TERM
 
 clear
 echo ""
-echo -e "${DIM}  ┌──────────────────────────────────────────────────────────────────┐${NC}"
-echo -e "${DIM}  │${NC}                                                                  ${DIM}│${NC}"
-echo -e "${DIM}  │${NC}       ${BOLD}█▄  █  ▄▀▀▄  ▀█▀       █  █▀▀  ▀▄ ▄▀${NC}                    ${DIM}│${NC}"
-echo -e "${DIM}  │${NC}       ${BOLD}█ ▀ █  █  █   █    ▄▄   █  █▀▀    █${NC}                     ${DIM}│${NC}"
-echo -e "${DIM}  │${NC}       ${BOLD}▀   ▀   ▀▀    ▀         ▀  ▀      ▀${NC}                     ${DIM}│${NC}"
-echo -e "${DIM}  │${NC}                                                                  ${DIM}│${NC}"
-echo -e "${DIM}  │${NC}           ${RED}» » »   O W N   Y O U R   S O U N D   « « «${NC}           ${DIM}│${NC}"
-echo -e "${DIM}  │${NC}                                                                  ${DIM}│${NC}"
-echo -e "${DIM}  └──────────────────────────────────────────────────────────────────┘${NC}"
+echo -e "${DIM}  +--------------------------------------------------------------------+${NC}"
+echo -e "${DIM}  |${NC}                                                                    ${DIM}|${NC}"
+echo -e "${DIM}  |${NC}           ${GREEN}##  ## ####### #######     ## ####### ##   ##${NC}            ${DIM}|${NC}"
+echo -e "${DIM}  |${NC}           ${GREEN}### ## ##   ##    ##       ## ##       ##  ##${NC}            ${DIM}|${NC}"
+echo -e "${DIM}  |${NC}            ${GREEN}## ### ##   ##    ##   --- ## #####     ####${NC}            ${DIM}|${NC}"
+echo -e "${DIM}  |${NC}            ${GREEN}##  ## ##   ##    ##       ## ##         ##${NC}             ${DIM}|${NC}"
+echo -e "${DIM}  |${NC}            ${GREEN}##  ## #######    ##       ## ##         ##${NC}             ${DIM}|${NC}"
+echo -e "${DIM}  |${NC}                                                                    ${DIM}|${NC}"
+echo -e "${DIM}  |${NC}               ${RED}>>>  O W N   Y O U R   S O U N D  <<<${NC}                ${DIM}|${NC}"
+echo -e "${DIM}  |${NC}                                                                    ${DIM}|${NC}"
+echo -e "${DIM}  +--------------------------------------------------------------------+${NC}"
 echo ""
 echo -e "  ${DIM}Self-hosted music server setup.${NC}"
 echo -e "  ${DIM}Press 'q' at any prompt to quit.${NC}"
@@ -387,8 +389,19 @@ if confirm "Enable VPN?"; then
     echo -ne "  VPN password: "
     read -rs VPN_PASSWORD
     echo ""
-    VPN_REGION=$(ask "VPN region:" "US East")
-    success "VPN configured: ${BOLD}${VPN_PROVIDER}${NC} (${VPN_REGION})"
+    # Auto-select a known working region per provider — user can change in Settings
+    case "$VPN_PROVIDER" in
+      "private internet access") VPN_REGION="US East" ;;
+      "mullvad")                 VPN_REGION="us-nyc" ;;
+      "nordvpn")                 VPN_REGION="United States" ;;
+      "surfshark")               VPN_REGION="us-nyc" ;;
+      *)                         VPN_REGION="" ;;
+    esac
+    if [ -n "$VPN_REGION" ]; then
+      success "VPN configured: ${BOLD}${VPN_PROVIDER}${NC} (${VPN_REGION} — change in Settings)"
+    else
+      success "VPN configured: ${BOLD}${VPN_PROVIDER}${NC}"
+    fi
   else
     success "VPN will be installed — configure credentials in Settings"
   fi
