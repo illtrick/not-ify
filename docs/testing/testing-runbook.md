@@ -378,14 +378,86 @@ Update after each run:
 
 ---
 
-## 7. Known Issues (as of v1.6.8)
+## 7. Automated Test Suite
+
+### Overview
+
+Run before manual testing to verify core pipeline logic. All tests use real filesystem and real SQLite — no mocked FS.
+
+```bash
+# Full server test suite (575 tests, ~3s)
+cd packages/server && npx jest --testPathIgnorePatterns='search.test'
+
+# Pipeline e2e only (16 tests, <1s)
+cd packages/server && npx jest __tests__/services/pipeline-e2e.test.js --verbose
+```
+
+### Test Coverage Map
+
+| Test File | Tests | Scope |
+|-----------|-------|-------|
+| `pipeline-e2e.test.js` | 16 | **Full pipeline**: service pre-flight, RD torrent path, Soulseek path, metadata integrity, year COALESCE, upgrade flow |
+| `pipeline-integration.test.js` | 1 | Job queue → processor wiring (mocked FS) |
+| `job-queue.test.js` | 26 | Enqueue, dequeue, retries, dedup |
+| `job-processor.test.js` | 14 | Download processing, per-track quality replacement |
+| `quality-upgrader.test.js` | 24 | Upgrade detection, source finding, tick cycle |
+| `file-validator.test.js` | 12 | Size, MIME, ffprobe, ClamAV checks |
+| `download-validator.test.js` | 15 | Track duration matching, MB validation |
+| `soulseek.test.js` | 12 | slskd API integration |
+| `library.test.js` | 19 | Library API, streaming, dedup |
+| Other (27 files) | ~436 | DB, search, settings, DLNA, auth, etc. |
+
+### Pre-flight Checks (in pipeline-e2e.test.js)
+
+Before running manual e2e tests on staging, verify service connectivity:
+
+| Check | What it validates |
+|-------|-------------------|
+| slskd API key auth | Not-ify can communicate with slskd container |
+| slskd 401 detection | Wrong API key surfaces clear error |
+| RD token auth | Real-Debrid API token works |
+| RD expired token | Expired token returns 401 |
+| VPN proxy unreachable | Clear "fetch failed" error when Gluetun is down |
+
+### Pipeline E2E Checks
+
+| Check | Path | What it validates |
+|-------|------|-------------------|
+| Download → validate → library → DB → streamable | RD torrent | Files land in correct dir, pass validation, sync to DB with all metadata, filepath exists on disk |
+| Validation failure blocks library entry | RD torrent | Size/ffprobe gate prevents bad files from entering library |
+| ClamAV deferred scan | RD torrent | Async scan runs after library sync, removes infected files |
+| Upgrade MP3 → FLAC | RD torrent | DB updates format/filepath, old file replaced, new file streamable |
+| Soulseek → staging → validate → library → DB | Soulseek | Full Soulseek flow with .metadata.json written |
+| Non-audio file rejected | Soulseek | .exe and other non-audio blocked at validation |
+
+### Metadata Integrity Checks
+
+| Field | Verified | Used by UI |
+|-------|----------|------------|
+| `id` | Stable across format upgrades | Track streaming URL |
+| `artist` | Stored and retrievable | Album header, search |
+| `album` | Stored and retrievable | Album header, library |
+| `title` | Stored and retrievable | Track list |
+| `format` | Per-track (flac/mp3/etc.) | QualityBadge color |
+| `filepath` | Points to real file on disk | `/api/stream/:id` |
+| `file_size` | > 0 | Library stats |
+| `year` | Stored, survives null re-sync (COALESCE) | Album header (offline-first) |
+| `track_number` | Correct ordering | Track list order |
+| `.metadata.json` | mbid, rgid, source, importedAt | Cover art, upgrade source |
+
+---
+
+## 8. Known Issues (as of v1.7.1)
 
 | ID | Severity | Description | Status |
 |----|----------|-------------|--------|
-| NP-002 | medium | YT preview auto-advance may fail at track end | Partially fixed (playlist fallback added) |
+| BUG-001 | high | Session state (queue, album view) persists across clean reinstall | Open — needs client + server fix |
+| BUG-007 | low | Gluetun VPN crashes on fresh install with no credentials | Open — should not start until configured |
+| BUG-011 | medium | Intermittent pause delay (2-4s audio continues after clicking pause) | Open — investigating |
+| BUG-012 | low | Soulseek 401 after bootstrap — API key mismatch between containers | Open — .env / slskd.yml sync issue |
+| BUG-013 | low | RD "fetch failed" when VPN proxy (Gluetun) is down — error message unclear | Open — should say "VPN not configured" |
 | NP-004 | medium | Audio autoplay blocked in new Chrome tab until user gesture | Workaround: click play/pause in player bar |
 | KNOWN-001 | low | Multi-disc albums restart track numbering | Not fixed |
-| KNOWN-002 | low | Cover art varies by artist (Tool poor, most excellent) | By design |
 
 ---
 

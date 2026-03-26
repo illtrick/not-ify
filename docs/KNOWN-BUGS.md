@@ -1,8 +1,52 @@
 # Known Bugs
 
-Tracked issues that need fixing but aren't blockers for current work.
+> **Last updated:** 2026-03-25 (v1.7.1)
 
-## UI
+Tracked issues grouped by impact area. Fixed issues are marked with version.
+
+## Critical — First-Time Setup
+
+### BUG-001: Session state persists across clean reinstall (HIGH)
+- **Expected:** Clean install produces empty UI with no prior session data
+- **Actual:** Stale album view (Pink Floyd Animals), queue (Heilung Futha), and search history appear after deleting all config/music dirs and running bootstrap fresh
+- **Root cause:** Client's `beforeunload` handler writes React state to `PUT /api/session` before page unloads. The new server accepts it unconditionally and stores it in the fresh DB. On next load, the client fetches the stale state from the new server.
+- **Fix needed:** (1) Client: don't write session state when server returns `setup_required`. (2) Server: reject `PUT /api/session` before setup is complete. (3) Add `DELETE /api/session` endpoint.
+- **Environment:** QNAP staging, v1.6.8 → v1.7.0 clean reinstall via bootstrap.sh
+- **Workaround:** Manually `rm config/notify.db*` after bootstrap, restart container
+
+### BUG-007: Gluetun VPN crashes on fresh install (LOW)
+- **Expected:** VPN container either doesn't start until configured, or waits gracefully
+- **Actual:** Gluetun starts and immediately exits: `ERROR VPN settings: OpenVPN settings: user is empty`
+- **Root cause:** Bootstrap asks "Enable VPN?" but doesn't collect credentials. Gluetun starts with empty config.
+- **Environment:** QNAP staging, bootstrap.sh fresh install
+- **Fix options:** (a) Don't start Gluetun until VPN configured in Settings. (b) Start with health check that accepts "unconfigured" as valid state.
+
+### BUG-012: Soulseek 401 after bootstrap — API key mismatch (LOW)
+- **Expected:** Not-ify communicates with slskd seamlessly after bootstrap
+- **Actual:** `POST /api/soulseek/test` returns `{"status":"error","error":"slskd returned HTTP 401"}`
+- **Root cause:** Bootstrap generates `SLSKD_API_KEY` and passes to both containers. After `docker rm -f` + `docker compose up -d`, the `.env` key and slskd config file (`slskd/slskd.yml`) may fall out of sync.
+- **Environment:** QNAP staging, v1.7.0, after container rebuild
+- **Workaround:** Verify `SLSKD_API_KEY` in `.env` matches `api_key` in `slskd/slskd.yml`
+
+### BUG-013: RD "fetch failed" — unclear error when VPN is down (LOW)
+- **Expected:** Test connection shows "VPN not configured — Real-Debrid requires VPN proxy"
+- **Actual:** Shows generic "fetch failed"
+- **Root cause:** `getProxyFetch()` routes RD traffic through Gluetun HTTP proxy. When Gluetun is down, fetch throws with no context.
+- **Environment:** QNAP staging, v1.7.0, Gluetun unconfigured
+
+---
+
+## Playback
+
+### BUG-011: Intermittent pause delay (2-4 seconds) (MEDIUM)
+- **Expected:** Audio stops immediately on pause click
+- **Actual:** Audio continues for 2-4 seconds after clicking pause, then stops. Not every time — intermittent.
+- **Root cause:** Under investigation. Possible causes: (a) Audio buffer has pre-loaded data that continues playing. (b) `audioRef.current.pause()` races with a state update that restarts playback. (c) Network latency on stream response keeps feeding the audio element.
+- **Environment:** QNAP staging, v1.7.1, Chrome browser, library MP3 streams
+
+---
+
+## UI (Open)
 
 ### Scrobble sync UX issues (Last.fm)
 Three issues with the scrobble sync in Settings:
