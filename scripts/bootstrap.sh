@@ -204,14 +204,20 @@ trap cleanup INT TERM
 
 clear
 echo ""
-echo -e "  ${BOLD}╔═══════════════════════════════════════╗${NC}"
-echo -e "  ${BOLD}║   ${RED}Not-ify${NC}${BOLD}  ·  Own Your Sound          ║${NC}"
-echo -e "  ${BOLD}╠═══════════════════════════════════════╣${NC}"
-echo -e "  ${BOLD}║${NC}  Self-hosted music server setup        ${BOLD}║${NC}"
-echo -e "  ${BOLD}╚═══════════════════════════════════════╝${NC}"
+echo -e "${DIM} ________________________________________________________________________________${NC}"
+echo -e "${DIM} |${NC}                                                                              ${DIM}|${NC}"
+echo -e "${DIM} |${NC}   ${BOLD}▒▓█          █▄  █  ▄▀▀▄  ▀█▀      █  █▀▀  ▀▄ ▄▀          █▓▒${NC}         ${DIM}|${NC}"
+echo -e "${DIM} |${NC}   ${BOLD}▒▓█          █ ▀ █  █  █   █   ▄▄  █  █▀▀    █             █▓▒${NC}         ${DIM}|${NC}"
+echo -e "${DIM} |${NC}   ${BOLD}▒▓█          ▀   ▀   ▀▀    ▀       ▀  ▀      ▀             █▓▒${NC}         ${DIM}|${NC}"
+echo -e "${DIM} |${NC}                                                                              ${DIM}|${NC}"
+echo -e "${DIM} |${NC}                 ${RED}» » »   O W N   Y O U R   S O U N D   « « «${NC}                ${DIM}|${NC}"
+echo -e "${DIM} |________________________________________________________________________________|${NC}"
+echo -e "${DIM} |  ▄▄▄█▄▄▄▄█▄▄▄▄█▄▄▄▄█▄▄▄▄█▄▄▄▄█▄▄▄▄█▄▄▄▄█▄▄▄▄█▄▄█▄▄▄▄█▄▄▄   |${NC}"
+echo -e "${DIM} |  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀   |${NC}"
+echo -e "${DIM} |________________________________________________________________________________|${NC}"
 echo ""
-echo -e "  ${DIM}This will set up Not-ify on this machine.${NC}"
-echo -e "  ${DIM}You can press 'q' at any prompt to quit.${NC}"
+echo -e "  ${DIM}Self-hosted music server setup.${NC}"
+echo -e "  ${DIM}Press 'q' at any prompt to quit.${NC}"
 echo ""
 
 # ── Step 1: Prerequisites ────────────────────────────
@@ -340,13 +346,45 @@ echo ""
 
 ENABLE_VPN="n"
 ENABLE_CLAMAV="n"
+VPN_PROVIDER=""
+VPN_USERNAME=""
+VPN_PASSWORD=""
+VPN_REGION=""
 
 echo -e "  ${BOLD}VPN (Gluetun)${NC}"
 echo -e "  ${DIM}Routes torrent traffic through a VPN for privacy.${NC}"
 echo -e "  ${DIM}Supports PIA, Mullvad, NordVPN, and 30+ providers.${NC}"
 if confirm "Enable VPN?"; then
   ENABLE_VPN="y"
-  success "VPN will be installed"
+  echo ""
+  echo -e "  ${DIM}Select your VPN provider:${NC}"
+  echo -e "    ${BOLD}[1]${NC} Private Internet Access (PIA)"
+  echo -e "    ${BOLD}[2]${NC} Mullvad"
+  echo -e "    ${BOLD}[3]${NC} NordVPN"
+  echo -e "    ${BOLD}[4]${NC} Surfshark"
+  echo -e "    ${BOLD}[5]${NC} Other (enter manually)"
+  echo -e "    ${BOLD}[S]${NC} Skip — configure in Settings later"
+  local vpn_choice
+  vpn_choice=$(ask "Select:" "S")
+  case "$vpn_choice" in
+    1) VPN_PROVIDER="private internet access" ;;
+    2) VPN_PROVIDER="mullvad" ;;
+    3) VPN_PROVIDER="nordvpn" ;;
+    4) VPN_PROVIDER="surfshark" ;;
+    5) VPN_PROVIDER=$(ask "Provider name (as shown on gluetun wiki):" "") ;;
+    *) VPN_PROVIDER="" ;;
+  esac
+
+  if [ -n "$VPN_PROVIDER" ]; then
+    VPN_USERNAME=$(ask "VPN username:" "")
+    echo -ne "  VPN password: "
+    read -rs VPN_PASSWORD
+    echo ""
+    VPN_REGION=$(ask "VPN region:" "US East")
+    success "VPN configured: ${BOLD}${VPN_PROVIDER}${NC} (${VPN_REGION})"
+  else
+    success "VPN will be installed — configure credentials in Settings"
+  fi
 else
   info "Skipped — you can enable VPN in Settings later"
 fi
@@ -412,6 +450,10 @@ docker run --rm \
   -e NOTIFY_SLSKD_API_KEY="$SLSKD_API_KEY" \
   -e NOTIFY_ENABLE_VPN="$ENABLE_VPN" \
   -e NOTIFY_ENABLE_CLAMAV="$ENABLE_CLAMAV" \
+  -e NOTIFY_VPN_PROVIDER="$VPN_PROVIDER" \
+  -e NOTIFY_VPN_USERNAME="$VPN_USERNAME" \
+  -e NOTIFY_VPN_PASSWORD="$VPN_PASSWORD" \
+  -e NOTIFY_VPN_REGION="$VPN_REGION" \
   ghcr.io/illtrick/not-ify:latest setup \
     --install-dir="$INSTALL_DIR" \
     --music-dir="$MUSIC_DIR" \

@@ -7,6 +7,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 - **MINOR** (0.x.0): New features, meaningful improvements
 - **PATCH** (0.0.x): Bug fixes, polish, iteration on current features
 
+## [1.7.4] - 2026-03-26
+
+### Changed
+- **Player architecture refactor**: Playlist and index now stored in refs instead of React state, eliminating stale closures that caused controls to freeze, dual-highlight glitches, and 2-minute stream delays. Pattern follows Navidrome/Jellyfin: mutable queue read directly by playback functions, UI re-renders driven by version counter.
+- **Album track matching**: Removed fuzzy `startsWith` album comparison that caused cross-album track bleed. Now uses exact album name match only (following Navidrome's tag-based identity pattern).
+- **Cover art pre-warming**: Search results now trigger server-side batch fetch of cover art (6 concurrent requests) before the client renders. Eliminates the 60s grey-placeholder delay on search results.
+- **Bootstrap wizard**: VPN setup now collects provider, credentials, and region during install. Replaced verbose Docker output with compact progress counter. Health checks poll every 1s (was 2s), timeout 30s (was 60s).
+- **Bootstrap ASCII art**: New retro banner with piano keys.
+
+### Fixed
+- **BUG-001 v2**: Setup wizard now clears ALL localStorage on "Start Listening" click, preventing stale session data from previous installs from appearing after fresh setup.
+- **BUG-013 regression**: Removed incorrect VPN proxy pre-check from RD test endpoint. RD test now tries the actual API call and provides actionable error context only when the fetch fails.
+- **BUG-018/019/020**: Player controls no longer freeze when staying on an album page during downloads. AlbumView syncs its live playlist to the player via `updatePlaylist()` whenever library tracks update.
+- **BUG-022**: Tracks from different albums by the same artist no longer bleed into each other's track lists.
+
 ## [1.7.3] - 2026-03-25
 
 ### Fixed

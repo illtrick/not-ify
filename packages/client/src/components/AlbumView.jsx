@@ -42,6 +42,7 @@ export function AlbumView({
   restoreExcludedTrack,
   getTrackDlStatus,
   onUpgradeTriggered,
+  updatePlaylist,
 }) {
   const telemetry = useTelemetry();
   const renderStartRef = useRef(null);
@@ -136,7 +137,8 @@ export function AlbumView({
       library.filter(t => {
         const tAlbum = (t.album || '').toLowerCase();
         const tArtist = (t.artist || '').toLowerCase();
-        return tArtist === lArtist && (tAlbum === lAlbum || lAlbum.startsWith(tAlbum) || tAlbum.startsWith(lAlbum));
+        // Exact album match only — fuzzy startsWith caused cross-album track bleed (BUG-022)
+        return tArtist === lArtist && tAlbum === lAlbum;
       }).forEach(t => {
         byId.set(t.id, t);
         const key = (t.title || '').toLowerCase();
@@ -168,6 +170,14 @@ export function AlbumView({
     }
     return t;
   });
+
+  // Sync the live playlist to the player when library tracks update (BUG-018/019/020)
+  // This ensures playNext/playPrev always use fresh track IDs/paths
+  const plRef = React.useRef(pl);
+  React.useEffect(() => {
+    plRef.current = pl;
+    if (pl.length > 0) updatePlaylist?.(pl);
+  }, [pl, updatePlaylist]);
 
   const primarySrc = sources?.[0];
   const qualityLabel = primarySrc?.quality ? `${primarySrc.quality} · ${primarySrc.sizeFormatted}` : primarySrc?.sizeFormatted || '';

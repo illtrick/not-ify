@@ -1,10 +1,14 @@
 const express = require('express');
+const path = require('path');
+const fs = require('fs');
 const { searchMusic } = require('../services/search');
 const { searchReleases, searchArtists, browseArtistReleases, getReleaseTracks, getReleaseGroupTracks, searchReleasesFuzzy, searchArtistsFuzzy, searchRecordings, normalizeQuery, getArtistDetails } = require('../services/musicbrainz');
 const { searchYouTube, searchSoundCloud } = require('../services/youtube');
 const llm = require('../services/llm');
 const { rankResults, getHistoryInjections } = require('../services/search-ranking');
 const db = require('../services/db');
+
+const COVERS_DIR = path.join(process.env.CONFIG_DIR || './config', 'covers');
 
 const { cleanSearchQuery, foldDiacritics } = require('../services/query-utils');
 
@@ -656,6 +660,46 @@ router.get('/search', async (req, res) => {
       streamingResults,
       mbAlbums: mbOnlyAlbums,
     });
+
+    // Fire-and-forget: pre-warm cover art cache for search results
+    // Fetches up to 6 covers concurrently so they're cached before the client requests them
+    {
+      const coverUrls = [...albums, ...mbOnlyAlbums]
+        .filter(a => a.coverArt && (a.rgid || a.mbid))
+        .slice(0, 20)
+        .map(a => {
+          const id = a.rgid || a.mbid;
+          const isRg = !!a.rgid;
+          const cacheFile = path.join(COVERS_DIR, `${isRg ? 'rg-' : ''}${id}.jpg`);
+          const missFile = path.join(COVERS_DIR, `${isRg ? 'rg-' : ''}${id}.miss`);
+          if (fs.existsSync(cacheFile) || fs.existsSync(missFile)) return null; // already cached or miss
+          const url = isRg
+            ? `https://coverartarchive.org/release-group/${id}/front-250`
+            : `https://coverartarchive.org/release/${id}/front-250`;
+          return { url, cacheFile, missFile };
+        })
+        .filter(Boolean);
+      if (coverUrls.length > 0) {
+        fs.mkdirSync(COVERS_DIR, { recursive: true });
+        // Fetch up to 6 at a time to avoid overwhelming the CDN
+        const concurrency = 6;
+        let idx = 0;
+        async function fetchNext() {
+          while (idx < coverUrls.length) {
+            const { url, cacheFile, missFile } = coverUrls[idx++];
+            try {
+              const r = await fetch(url, { signal: AbortSignal.timeout(8000), headers: { 'User-Agent': 'Not-ify/1.0.0 (personal-use)' } });
+              if (r.ok) {
+                fs.writeFileSync(cacheFile, Buffer.from(await r.arrayBuffer()));
+              } else {
+                fs.writeFileSync(missFile, '');
+              }
+            } catch { fs.writeFileSync(missFile, ''); }
+          }
+        }
+        Promise.all(Array.from({ length: Math.min(concurrency, coverUrls.length) }, fetchNext)).catch(() => {});
+      }
+    }
 
     // Fire-and-forget: LLM parses regex failures in background, populates cache
     // Next search for same terms will hit cache and return better results

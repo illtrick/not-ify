@@ -155,6 +155,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
     handleSeekClick,
     playFromYouTube,
     playStreamingResult,
+    updatePlaylist,
     audioHandlers,
   } = player;
 
@@ -939,6 +940,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
                     restoreExcludedTrack={restoreExcludedTrackFromLibrary}
                     getTrackDlStatus={getTrackDlStatus}
                     onUpgradeTriggered={startJobQueuePoll}
+                    updatePlaylist={updatePlaylist}
                   />
                 )}
                 {view === 'artist' && (
@@ -1099,6 +1101,9 @@ function App() {
   if (setupRequired) {
     return (
       <SetupWizard onComplete={() => {
+        // Clear ALL localStorage before reload to prevent stale session data
+        // from a previous install from polluting the fresh setup (BUG-001)
+        try { localStorage.clear(); } catch {}
         setSetupRequired(false);
         window.location.reload();
       }} />

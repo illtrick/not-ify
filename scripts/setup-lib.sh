@@ -17,10 +17,10 @@ warn()    { echo -e "  ${YELLOW}!${NC} $*"; }
 error()   { echo -e "  ${RED}✗${NC} $*"; }
 header()  { echo -e "\n  ${BOLD}$*${NC}\n"; }
 
-# Wait for a container to become healthy
+# Wait for a container to become healthy (polls every 1s, exits early on unhealthy)
 wait_healthy() {
   local container="$1"
-  local timeout="${2:-60}"
+  local timeout="${2:-30}"
   local elapsed=0
 
   while [ $elapsed -lt $timeout ]; do
@@ -36,11 +36,13 @@ wait_healthy() {
     if [ "$running" = "true" ] && [ -z "$status" ]; then
       return 0
     fi
-    sleep 2
-    elapsed=$((elapsed + 2))
-    printf "\r  ${CYAN}▸${NC} Waiting for %s (%ds)..." "$container" "$elapsed"
+    # Container exited — don't wait further
+    if [ "$running" = "false" ]; then
+      return 1
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
   done
-  echo ""
   return 1
 }
 

@@ -127,16 +127,20 @@ cp "${SCRIPT_DIR}/docker-compose.template.yml" "${HOST_INSTALL}/docker-compose.y
 if [ "$ENABLE_VPN" = "y" ]; then
   sed -i 's/^#VPN#//' "${HOST_INSTALL}/docker-compose.yml"
   # Add VPN + gluetun env vars
-  # VPN creds are empty here — user configures in Settings UI, which writes to .env and restarts gluetun
+  # Use credentials from bootstrap wizard if provided, otherwise empty (configured in Settings UI)
+  local vpn_provider="${NOTIFY_VPN_PROVIDER:-private internet access}"
+  local vpn_username="${NOTIFY_VPN_USERNAME:-}"
+  local vpn_password="${NOTIFY_VPN_PASSWORD:-}"
+  local vpn_region="${NOTIFY_VPN_REGION:-US East}"
   cat >> "${HOST_INSTALL}/.env" << EOF
 
-# VPN (Gluetun) — configure credentials in Settings UI
+# VPN (Gluetun)
 VPN_PROXY=http://localhost:8888
 GLUETUN_CONTROL_URL=http://localhost:8000
-VPN_PROVIDER=private internet access
-VPN_USERNAME=
-VPN_PASSWORD=
-VPN_REGION=US East
+VPN_PROVIDER=${vpn_provider}
+VPN_USERNAME=${vpn_username}
+VPN_PASSWORD=${vpn_password}
+VPN_REGION=${vpn_region}
 EOF
 fi
 
@@ -152,18 +156,28 @@ fi
 
 success "Configuration written"
 
-# Start containers
+# Start containers (suppress verbose Docker output)
 info "Starting services..."
 cd "${HOST_INSTALL}"
-docker compose up -d 2>&1 | sed 's/^/  /'
+docker compose up -d > /dev/null 2>&1
 
-echo ""
+# Build list of expected containers
+CONTAINERS="not-ify slskd watchtower"
+[ "$ENABLE_VPN" = "y" ] && CONTAINERS="$CONTAINERS gluetun"
+[ "$ENABLE_CLAMAV" = "y" ] && CONTAINERS="$CONTAINERS clamav"
+TOTAL=$(echo "$CONTAINERS" | wc -w)
 
-# Write slskd API key config AFTER first boot (slskd overwrites config on first start)
-# API keys can only be configured via config file, not env vars
-info "Configuring slskd API key..."
-sleep 5
-docker exec slskd sh -c "cat > /app/slskd.yml << SLSKDEOF
+# Configure slskd API key (wait for slskd to be running, not a fixed sleep)
+printf "\r  ${CYAN}▸${NC} Configuring services... [1/${TOTAL}]"
+local slskd_ready=0
+for i in $(seq 1 15); do
+  if docker inspect --format='{{.State.Running}}' slskd 2>/dev/null | grep -q true; then
+    slskd_ready=1; break
+  fi
+  sleep 1
+done
+if [ "$slskd_ready" = "1" ]; then
+  docker exec slskd sh -c "cat > /app/slskd.yml << SLSKDEOF
 web:
   authentication:
     api_keys:
@@ -171,23 +185,22 @@ web:
         key: ${API_KEY}
         role: administrator
 SLSKDEOF" 2>/dev/null || true
-docker restart slskd 2>/dev/null || true
+  docker restart slskd > /dev/null 2>&1 || true
+fi
 
-# Health checks — build list of expected containers
-CONTAINERS="not-ify slskd watchtower"
-[ "$ENABLE_VPN" = "y" ] && CONTAINERS="$CONTAINERS gluetun"
-[ "$ENABLE_CLAMAV" = "y" ] && CONTAINERS="$CONTAINERS clamav"
-
+# Health checks with progress counter
+DONE=0
 for container in $CONTAINERS; do
-  if wait_healthy "$container" 60; then
+  DONE=$((DONE + 1))
+  printf "\r  ${CYAN}▸${NC} Starting services... [${DONE}/${TOTAL}] %-20s" "$container"
+  if wait_healthy "$container" 30; then
     version_suffix=""
     if [ "$container" = "not-ify" ]; then
       running_ver=$(get_running_version "$PORT")
       [ -n "$running_ver" ] && version_suffix=" (v${running_ver})"
     fi
-    success "${container}${version_suffix}"
+    printf "\r  ${GREEN}✓${NC} %-30s\n" "${container}${version_suffix}"
   else
-    warn "${container} — may still be starting"
-    docker logs "$container" --tail 3 2>&1 | sed 's/^/    /' || true
+    printf "\r  ${YELLOW}!${NC} %-30s\n" "${container} — may still be starting"
   fi
 done
