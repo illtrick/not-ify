@@ -28,7 +28,10 @@ export function useSession({
   }, [sessionData]);
 
   // Debounced save — server (per-user) + localStorage mirror
+  // Gated by setup status: don't persist session data during first-run setup (BUG-001)
+  const setupCompleteRef = useRef(false);
   const saveSession = useRef(debounce(() => {
+    if (!setupCompleteRef.current) return; // setup not complete — don't save stale data
     const s = {
       ...sessionDataRef.current,
       progress: audioRef.current?.currentTime || 0,
@@ -56,23 +59,42 @@ export function useSession({
     return () => window.removeEventListener('beforeunload', handler);
   }, []);
 
-  // Restore on mount: localStorage first (instant), then server (authoritative)
+  // Restore on mount: check setup status first, then localStorage, then server.
+  // If setup is required (fresh install), clear any stale session data to prevent
+  // ghost state from a previous installation (BUG-001).
   useEffect(() => {
-    // 1. Instant restore from local mirror
-    try {
-      const raw = localStorage.getItem(SESSION_KEY);
-      if (raw) _applySession(JSON.parse(raw), { onRestoreVolume, onRestoreView, onRestoreAlbum, onRestoreQueue, onRestorePlaylist, onRestorePlaylistIdx, onRestoreTrack });
-    } catch {}
-
-    // 2. Authoritative restore from server (per-user, cross-device)
-    api.getUserSession()
-      .then(({ state }) => {
-        if (state && Object.keys(state).length > 0) {
-          _applySession(state, { onRestoreVolume, onRestoreView, onRestoreAlbum, onRestoreQueue, onRestorePlaylist, onRestorePlaylistIdx, onRestoreTrack });
-          try { localStorage.setItem(SESSION_KEY, JSON.stringify(state)); } catch {}
+    api.getSetupStatus()
+      .then(status => {
+        if (status.needsSetup) {
+          // Fresh install — wipe stale session data from previous install
+          try { localStorage.removeItem(SESSION_KEY); } catch {}
+          return;
         }
+        setupCompleteRef.current = true;
+        // 1. Instant restore from local mirror
+        try {
+          const raw = localStorage.getItem(SESSION_KEY);
+          if (raw) _applySession(JSON.parse(raw), { onRestoreVolume, onRestoreView, onRestoreAlbum, onRestoreQueue, onRestorePlaylist, onRestorePlaylistIdx, onRestoreTrack });
+        } catch {}
+
+        // 2. Authoritative restore from server (per-user, cross-device)
+        api.getUserSession()
+          .then(({ state }) => {
+            if (state && Object.keys(state).length > 0) {
+              _applySession(state, { onRestoreVolume, onRestoreView, onRestoreAlbum, onRestoreQueue, onRestorePlaylist, onRestorePlaylistIdx, onRestoreTrack });
+              try { localStorage.setItem(SESSION_KEY, JSON.stringify(state)); } catch {}
+            }
+          })
+          .catch(() => {}); // graceful degradation — localStorage already applied
       })
-      .catch(() => {}); // graceful degradation — localStorage already applied
+      .catch(() => {
+        // Can't check setup status — fall back to normal restore (assume setup is complete)
+        setupCompleteRef.current = true;
+        try {
+          const raw = localStorage.getItem(SESSION_KEY);
+          if (raw) _applySession(JSON.parse(raw), { onRestoreVolume, onRestoreView, onRestoreAlbum, onRestoreQueue, onRestorePlaylist, onRestorePlaylistIdx, onRestoreTrack });
+        } catch {}
+      });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 }
 

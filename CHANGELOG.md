@@ -7,6 +7,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 - **MINOR** (0.x.0): New features, meaningful improvements
 - **PATCH** (0.0.x): Bug fixes, polish, iteration on current features
 
+## [1.7.3] - 2026-03-25
+
+### Fixed
+- **BUG-001: Session state persists across clean reinstall**: useSession now checks setup status before restoring or saving session data. On fresh installs, stale localStorage is cleared and server saves are blocked until setup completes.
+- **BUG-007: Gluetun VPN crash without credentials**: VPN status endpoint now reports `containerRunning` state and a clear message when VPN credentials aren't configured, instead of silently crashing.
+- **BUG-012: Soulseek 401 after container rebuild**: Server now checks slskd API key validity on startup. If the key is rejected (401/403), it writes the correct key to `slskd.yml` and restarts the slskd container automatically.
+- **BUG-013: RD "fetch failed" — vague VPN error**: Real-Debrid test connection now pre-checks if the VPN proxy is reachable before testing. Shows "VPN proxy is not running — configure VPN in Settings" instead of generic "fetch failed".
+
 ## [1.7.2] - 2026-03-25
 
 ### Fixed

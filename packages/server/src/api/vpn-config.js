@@ -26,11 +26,36 @@ router.get('/regions', (req, res) => {
   res.json(regions);
 });
 
-router.get('/status', (req, res) => {
+router.get('/status', async (req, res) => {
   const config = db.getGlobalSetting('vpnConfig');
-  if (!config) return res.json({ configured: false });
+  const configured = !!(config?.username && config?.password);
+
+  // Check if gluetun container is actually running (BUG-007: crashes without creds)
+  let containerRunning = false;
+  if (process.env.VPN_PROXY) {
+    try {
+      const net = require('net');
+      const { URL } = require('url');
+      const parsed = new URL(process.env.VPN_PROXY);
+      await new Promise((resolve, reject) => {
+        const sock = net.connect(parseInt(parsed.port) || 8888, parsed.hostname, () => { sock.end(); resolve(); });
+        sock.setTimeout(2000);
+        sock.on('timeout', () => { sock.destroy(); reject(); });
+        sock.on('error', reject);
+      });
+      containerRunning = true;
+    } catch { /* gluetun not reachable */ }
+  }
+
+  if (!configured) {
+    return res.json({
+      configured: false,
+      containerRunning,
+      message: containerRunning ? undefined : 'VPN credentials not configured — Gluetun container will not start until you configure VPN in Settings',
+    });
+  }
   const { username, region, provider } = config;
-  res.json({ configured: true, username, region, provider: provider || 'private internet access' });
+  res.json({ configured: true, containerRunning, username, region, provider: provider || 'private internet access' });
 });
 
 router.post('/config', async (req, res) => {

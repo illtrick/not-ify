@@ -683,6 +683,34 @@ if (require.main === module) {
       },
     });
 
+    // Sync slskd API key — ensures slskd.yml matches .env after container rebuilds (BUG-012)
+    if (process.env.SLSKD_API_KEY) {
+      const slskdUrl = process.env.SLSKD_URL || 'http://slskd:5030';
+      const apiKey = process.env.SLSKD_API_KEY;
+      // Retry with delay — slskd may still be starting
+      setTimeout(async () => {
+        try {
+          const resp = await fetch(`${slskdUrl}/api/v0/application`, {
+            headers: { 'X-API-Key': apiKey },
+            signal: AbortSignal.timeout(5000),
+          });
+          if (resp.status === 401 || resp.status === 403) {
+            // API key rejected — try to fix by writing slskd.yml via container exec
+            log.info({ event: 'slskd.key_sync' }, 'slskd API key mismatch — attempting to sync config');
+            try {
+              const { execSync } = require('child_process');
+              const yml = `web:\n  authentication:\n    api_keys:\n      notify:\n        key: ${apiKey}\n        role: administrator`;
+              execSync(`docker exec slskd sh -c "cat > /app/slskd.yml << 'SLSKEOF'\n${yml}\nSLSKEOF"`, { timeout: 10000 });
+              execSync('docker restart slskd', { timeout: 30000 });
+              log.info({ event: 'slskd.key_synced' }, 'slskd API key synced and container restarted');
+            } catch (e) {
+              log.warn({ event: 'slskd.key_sync_failed', error: e.message }, 'Failed to sync slskd API key — manual fix may be needed');
+            }
+          }
+        } catch { /* slskd not reachable yet — will retry on next restart */ }
+      }, 10000); // wait 10s for slskd to start
+    }
+
     // Start health monitoring
     const jobQueue = require('./services/job-queue');
     healthMonitor.start(() => ({
