@@ -10,13 +10,17 @@ import {
   lastfmSaveConfig as apiLastfmSaveConfig,
   lastfmGetAuthToken,
   lastfmCompleteAuth as apiLastfmCompleteAuth,
+  getLastfmStatus,
   saveRdConfig,
   testRdConnection,
+  getRdStatus,
   saveVpnConfig,
   testVpnConnection,
   getVpnRegions,
+  getVpnStatus,
   saveSlskConfig,
   testSlskConnection,
+  getSlskStatus,
 } from '@not-ify/shared';
 
 // ---------------------------------------------------------------------------
@@ -252,11 +256,22 @@ function StepLibrary({ onNext }) {
 function LastfmForm({ onDone }) {
   const [apiKey, setApiKey] = useState('');
   const [apiSecret, setApiSecret] = useState('');
-  const [authStep, setAuthStep] = useState(0);
+  const [authStep, setAuthStep] = useState(0); // 0=enter keys, 1=authorize, 2=connected
   const [authUrl, setAuthUrl] = useState('');
   const [authToken, setAuthToken] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [connectedUser, setConnectedUser] = useState(null);
+
+  // Load existing config on mount
+  useEffect(() => {
+    getLastfmStatus().then(data => {
+      if (data.configured && data.username) {
+        setConnectedUser(data.username);
+        setAuthStep(2);
+      }
+    }).catch(() => {});
+  }, []);
 
   const handleConnect = async () => {
     if (!apiKey || !apiSecret) return;
@@ -282,6 +297,8 @@ function LastfmForm({ onDone }) {
     try {
       const data = await apiLastfmCompleteAuth(authToken);
       if (data.error) throw new Error(data.error);
+      setConnectedUser(data.username || 'connected');
+      setAuthStep(2);
       onDone();
     } catch (err) {
       setError(err.body?.error || err.message || 'Authorization failed — did you approve access on Last.fm?');
@@ -289,6 +306,19 @@ function LastfmForm({ onDone }) {
       setSaving(false);
     }
   };
+
+  if (authStep === 2) {
+    return (
+      <div>
+        <div style={{ fontSize: 13, color: COLORS.success, marginBottom: 10 }}>
+          ✓ Connected as <strong>{connectedUser}</strong>
+        </div>
+        <button style={btnSmallSecondary} onClick={() => { setAuthStep(0); setConnectedUser(null); }}>
+          Reconfigure
+        </button>
+      </div>
+    );
+  }
 
   if (authStep === 1) {
     return (
@@ -345,10 +375,20 @@ function LastfmForm({ onDone }) {
 
 function RdForm({ onDone }) {
   const [token, setToken] = useState('');
+  const [savedPreview, setSavedPreview] = useState(null);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [error, setError] = useState(null);
+
+  // Load existing token preview on mount
+  useEffect(() => {
+    getRdStatus().then(data => {
+      if (data.configured && data.tokenPreview) {
+        setSavedPreview(data.tokenPreview);
+      }
+    }).catch(() => {});
+  }, []);
 
   const handleSave = async () => {
     if (!token) return;
@@ -379,12 +419,17 @@ function RdForm({ onDone }) {
 
   return (
     <div>
+      {savedPreview && !token && (
+        <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 6 }}>
+          Current token: <span style={{ fontFamily: 'monospace' }}>{savedPreview}</span> — enter a new token to update
+        </div>
+      )}
       <input
-        type="password"
+        type="text"
         placeholder="Real-Debrid API token"
         value={token}
         onChange={e => setToken(e.target.value)}
-        style={{ ...inputStyle, marginBottom: 10 }}
+        style={{ ...inputStyle, marginBottom: 10, fontFamily: 'monospace' }}
       />
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button style={{ ...btnSmall, opacity: (!token || saving) ? 0.5 : 1 }} onClick={handleSave} disabled={!token || saving}>
@@ -409,15 +454,24 @@ function RdForm({ onDone }) {
 function VpnForm({ onDone }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [region, setRegion] = useState('US East');
+  const [region, setRegion] = useState('');
   const [regions, setRegions] = useState([]);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [error, setError] = useState(null);
+  const [hasSavedPassword, setHasSavedPassword] = useState(false);
 
+  // Load saved config and regions on mount
   useEffect(() => {
     getVpnRegions().then(data => setRegions(data.regions || data || [])).catch(() => {});
+    getVpnStatus().then(data => {
+      if (data.configured) {
+        if (data.username) setUsername(data.username);
+        if (data.region) setRegion(data.region);
+        setHasSavedPassword(true); // password exists but we never return it
+      }
+    }).catch(() => {});
   }, []);
 
   const handleSave = async () => {
@@ -450,11 +504,13 @@ function VpnForm({ onDone }) {
     <div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
         <input type="text" placeholder="PIA username" value={username} onChange={e => setUsername(e.target.value)} style={inputStyle} />
-        <input type="password" placeholder="PIA password" value={password} onChange={e => setPassword(e.target.value)} style={inputStyle} />
-        <select value={region} onChange={e => setRegion(e.target.value)} style={inputStyle}>
-          <option value="">Select region…</option>
-          {regions.map(r => <option key={r} value={r}>{r}</option>)}
-        </select>
+        <input type="password" placeholder={hasSavedPassword ? '••••••••  (saved — enter new to change)' : 'PIA password'} value={password} onChange={e => setPassword(e.target.value)} style={inputStyle} />
+        {regions.length > 0 && (
+          <select value={region} onChange={e => setRegion(e.target.value)} style={inputStyle}>
+            <option value="">Select region…</option>
+            {regions.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+        )}
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button style={{ ...btnSmall, opacity: saving ? 0.5 : 1 }} onClick={handleSave} disabled={saving}>
@@ -466,8 +522,11 @@ function VpnForm({ onDone }) {
       </div>
       {error && <div style={{ color: COLORS.error, fontSize: 12, marginTop: 8 }}>{error}</div>}
       {testResult && (
-        <div style={{ fontSize: 12, marginTop: 8, color: testResult.status === 'ok' ? COLORS.success : COLORS.error }}>
-          {testResult.status === 'ok' ? 'VPN connected' : testResult.error}
+        <div style={{ fontSize: 12, marginTop: 8, color: testResult.status === 'ok' || testResult.status === 'degraded' ? COLORS.success : COLORS.error }}>
+          {testResult.status === 'ok' ? `VPN connected — IP: ${testResult.ip} (${testResult.region})`
+            : testResult.status === 'degraded' ? `VPN partially connected — ${testResult.message}`
+            : testResult.status === 'proxy_unavailable' ? 'VPN container is not running — save credentials and it will start automatically'
+            : testResult.error || 'Connection failed'}
         </div>
       )}
     </div>
@@ -481,6 +540,20 @@ function SlskForm({ onDone }) {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [error, setError] = useState(null);
+  const [autoConfigured, setAutoConfigured] = useState(false);
+
+  // Load existing config on mount — bootstrap may have auto-configured
+  useEffect(() => {
+    getSlskStatus().then(data => {
+      if (data.connected && !data.configured) {
+        // Connected via CLI setup but no DB config — auto-configured
+        setAutoConfigured(true);
+        if (data.username) setUsername(data.username);
+      } else if (data.configured) {
+        if (data.username) setUsername(data.username);
+      }
+    }).catch(() => {});
+  }, []);
 
   const handleSave = async () => {
     setSaving(true);
@@ -510,6 +583,11 @@ function SlskForm({ onDone }) {
 
   return (
     <div>
+      {autoConfigured && (
+        <div style={{ fontSize: 12, color: COLORS.success, marginBottom: 8 }}>
+          ✓ A random Soulseek account was created during setup. You only need to change this if you want to use your own account.
+        </div>
+      )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
         <input type="text" placeholder="Soulseek username" value={username} onChange={e => setUsername(e.target.value)} style={inputStyle} />
         <input type="password" placeholder="Soulseek password" value={password} onChange={e => setPassword(e.target.value)} style={inputStyle} />
@@ -660,6 +738,16 @@ function StepDashboard({ onComplete }) {
     setCompleting(true);
     setError(null);
     try {
+      // Clear any stale session data from previous installs (BUG-001)
+      // This prevents ghost albums/queues from appearing after a clean reinstall
+      try {
+        localStorage.removeItem('notify-session');
+        localStorage.removeItem('notify-queue');
+        localStorage.removeItem('notify-player');
+        localStorage.removeItem('notify-view');
+        // Clear ALL notify-prefixed keys to be thorough
+        Object.keys(localStorage).filter(k => k.startsWith('notify-')).forEach(k => localStorage.removeItem(k));
+      } catch { /* localStorage may not be available */ }
       await completeSetup();
       onComplete();
     } catch (err) {
