@@ -169,7 +169,7 @@ TOTAL=$(echo "$CONTAINERS" | wc -w)
 
 # Configure slskd API key (wait for slskd to be running, not a fixed sleep)
 printf "\r  ${CYAN}▸${NC} Configuring services... [1/${TOTAL}]"
-local slskd_ready=0
+slskd_ready=0
 for i in $(seq 1 15); do
   if docker inspect --format='{{.State.Running}}' slskd 2>/dev/null | grep -q true; then
     slskd_ready=1; break
