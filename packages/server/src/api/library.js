@@ -166,6 +166,7 @@ function getTrackMap() {
     artist: r.artist,
     album: r.album,
     year: r.year || null,
+    track_number: r.track_number || null,
     coverArt: null,
     mbid: null,
     path: `/api/stream/${r.id}`,
@@ -245,20 +246,42 @@ function syncAlbum(artist, album) {
 
   const relBase = path.join(downloader.sanitizePath(artist), downloader.sanitizePath(album));
   const scanned = scanMusicDir(albumDir, relBase);
-  // Override artist/album from folder names (scanMusicDir derives from path)
   assignStableIds(scanned);
 
-  db.syncAlbumTracks(scanned[0]?.artist || artist, scanned[0]?.album || album,
+  // Enrich scanned tracks with MusicBrainz metadata from .metadata.json.
+  // MB data is the source of truth for track titles, positions, and album year.
+  // Filename-derived titles are only used as fallback when no MB match exists.
+  const meta = readDirMeta(albumDir);
+  if (meta?.mbTracks && Array.isArray(meta.mbTracks)) {
+    const { normalize } = require('../services/track-id');
+    const mbByNormTitle = new Map();
+    for (const mbt of meta.mbTracks) {
+      mbByNormTitle.set(normalize(mbt.title), mbt);
+    }
+    for (const t of scanned) {
+      const mbMatch = mbByNormTitle.get(normalize(t.title));
+      if (mbMatch) {
+        // Use MB title (correct capitalization, punctuation) over filename-derived
+        t.title = mbMatch.title;
+        if (t.trackNumber == null) t.trackNumber = mbMatch.position;
+      }
+    }
+  }
+  // Use MB artist/album name if available (correct capitalization)
+  const mbArtist = meta?.artist || scanned[0]?.artist || artist;
+  const mbAlbum = meta?.album || scanned[0]?.album || album;
+
+  db.syncAlbumTracks(mbArtist, mbAlbum,
     scanned.map(t => ({
       id: t.id,
-      artist: t.artist,
-      album: t.album,
+      artist: mbArtist,
+      album: mbAlbum,
       title: t.title,
       trackNumber: t.trackNumber,
       format: t.format,
       filepath: t.filepath,
       fileSize: t.fileSize,
-      year: t.year || null,
+      year: t.year || meta?.year || null,
     }))
   );
   invalidateCache();

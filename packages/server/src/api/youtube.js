@@ -443,6 +443,12 @@ async function ytQueueAlbum({ artist, album, tracks, mbid, rgid, coverArt, year 
       source: 'yt-album-download',
       trackCount: tracks.length,
       downloadedAt: new Date().toISOString(),
+      // Store MB tracklist so syncAlbum can assign track numbers to downloaded files
+      mbTracks: tracks.map((t, i) => ({
+        position: t.position || i + 1,
+        title: t.title || t.name,
+        lengthMs: t.lengthMs || null,
+      })),
     };
     try {
       fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2));
