@@ -49,20 +49,51 @@ describe('Real-Debrid config API', () => {
       });
   });
 
-  test('POST /test calls getUserInfo and returns user info', async () => {
-    rd.getUserInfo.mockResolvedValue({
-      username: 'testuser', email: 'test@test.com',
-      type: 'premium', premium: 1, expiration: '2026-08-15T00:00:00.000Z',
+  test('POST /test calls RD API directly and returns user info', async () => {
+    // Mock global fetch — test endpoint uses direct fetch, not proxy
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        username: 'testuser', email: 'test@test.com',
+        type: 'premium', premium: 1, expiration: '2026-08-15T00:00:00.000Z',
+      }),
     });
-    const res = await request(app).post('/api/realdebrid/test').expect(200);
-    expect(res.body.status).toBe('ok');
-    expect(res.body.user.username).toBe('testuser');
+    try {
+      const res = await request(app).post('/api/realdebrid/test').expect(200);
+      expect(res.body.status).toBe('ok');
+      expect(res.body.user.username).toBe('testuser');
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('api.real-debrid.com'),
+        expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer test-token-123' }) }),
+      );
+    } finally {
+      global.fetch = originalFetch;
+    }
   });
 
-  test('POST /test returns error on failure', async () => {
-    rd.getUserInfo.mockRejectedValue(new Error('Invalid token'));
+  test('POST /test returns error on API failure', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      text: () => Promise.resolve('Invalid token'),
+    });
+    try {
+      const res = await request(app).post('/api/realdebrid/test').expect(200);
+      expect(res.body.status).toBe('error');
+      expect(res.body.error).toContain('401');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  test('POST /test returns error when no token configured', async () => {
+    db.setGlobalSetting('realDebridToken', null);
     const res = await request(app).post('/api/realdebrid/test').expect(200);
     expect(res.body.status).toBe('error');
-    expect(res.body.error).toContain('Invalid token');
+    expect(res.body.error).toContain('No API token');
+    // Restore token for other tests
+    db.setGlobalSetting('realDebridToken', 'test-token-123');
   });
 });

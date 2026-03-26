@@ -22,9 +22,20 @@ router.post('/config', (req, res) => {
 });
 
 // POST /api/realdebrid/test — verify token works
+// Uses direct fetch (not VPN proxy) since RD API doesn't need VPN
 router.post('/test', async (req, res) => {
   try {
-    const user = await rd.getUserInfo();
+    const token = db.getGlobalSetting('realDebridToken');
+    if (!token) return res.json({ status: 'error', error: 'No API token configured' });
+    const r = await fetch('https://api.real-debrid.com/rest/1.0/user', {
+      headers: { 'Authorization': `Bearer ${token}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok) {
+      const body = await r.text();
+      return res.json({ status: 'error', error: `API returned ${r.status}: ${body}` });
+    }
+    const user = await r.json();
     res.json({
       status: 'ok',
       user: {
@@ -33,14 +44,6 @@ router.post('/test', async (req, res) => {
       },
     });
   } catch (err) {
-    // Improve vague "fetch failed" errors with actionable context
-    const msg = (err.message || '').toLowerCase();
-    if (msg.includes('fetch failed') || msg.includes('econnrefused') || msg.includes('etimedout')) {
-      const proxyUrl = process.env.VPN_PROXY || '';
-      if (proxyUrl) {
-        return res.json({ status: 'error', error: `Connection failed — VPN proxy (${proxyUrl}) may be down. Check VPN settings.` });
-      }
-    }
     res.json({ status: 'error', error: err.message });
   }
 });

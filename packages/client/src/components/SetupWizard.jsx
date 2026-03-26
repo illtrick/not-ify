@@ -575,7 +575,7 @@ function StepServices({ onNext }) {
 
   const handleConfigured = (id) => {
     setConfigured(prev => ({ ...prev, [id]: true }));
-    setExpanded(null);
+    // Don't auto-collapse — let the user test the connection before moving on
   };
 
   return (

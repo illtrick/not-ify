@@ -124,7 +124,7 @@ router.put('/library', (req, res) => {
 });
 
 // GET /api/setup/services
-router.get('/services', (req, res) => {
+router.get('/services', async (req, res) => {
   const services = [];
 
   // Last.fm: check lastfm_config table for any row with session_key
@@ -143,15 +143,33 @@ router.get('/services', (req, res) => {
   const rdConfigured = !!(rdToken && typeof rdToken === 'string' && rdToken.trim());
   services.push({ name: 'realdebrid', label: 'Real-Debrid', configured: rdConfigured, connected: rdConfigured });
 
-  // VPN
+  // VPN — check DB config or env vars (bootstrap may have configured via env)
   const vpnConfig = db.getGlobalSetting('vpnConfig');
-  const vpnConfigured = !!(vpnConfig && vpnConfig.username);
+  const vpnFromEnv = !!(process.env.VPN_SERVICE_PROVIDER && process.env.OPENVPN_USER);
+  const vpnConfigured = !!(vpnConfig && vpnConfig.username) || vpnFromEnv;
   services.push({ name: 'vpn', label: 'VPN', configured: vpnConfigured, connected: vpnConfigured });
 
-  // Soulseek
+  // Soulseek — check DB config OR live slskd connection (bootstrap configures via CLI, not DB)
   const soulseekConfig = db.getGlobalSetting('soulseekConfig');
-  const soulseekConfigured = !!(soulseekConfig && soulseekConfig.username);
-  services.push({ name: 'soulseek', label: 'Soulseek', configured: soulseekConfigured, connected: soulseekConfigured });
+  const soulseekDbConfigured = !!(soulseekConfig && soulseekConfig.username);
+  let soulseekConnected = false;
+  if (!soulseekDbConfigured) {
+    // DB has no config — check if slskd is live (bootstrap configured it via slskd.yml)
+    try {
+      const slskdUrl = process.env.SLSKD_URL || 'http://slskd:5030';
+      const slskdKey = process.env.SLSKD_API_KEY || '';
+      const r = await fetch(`${slskdUrl}/api/v0/application`, {
+        headers: { 'X-API-Key': slskdKey },
+        signal: AbortSignal.timeout(3000),
+      });
+      if (r.ok) {
+        const data = await r.json();
+        soulseekConnected = data.server?.isConnected || false;
+      }
+    } catch { /* slskd unavailable */ }
+  }
+  const soulseekConfigured = soulseekDbConfigured || soulseekConnected;
+  services.push({ name: 'soulseek', label: 'Soulseek', configured: soulseekConfigured, connected: soulseekConnected || soulseekDbConfigured });
 
   res.json(services);
 });
