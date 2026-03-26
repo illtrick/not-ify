@@ -3,10 +3,13 @@
 const crypto = require('crypto');
 
 /**
- * Normalize a string for ID generation: lowercase, strip non-alphanumeric.
+ * Normalize a string for ID generation and matching.
+ * Handles Unicode edge cases (German ß → ss, Turkish ı → i) by
+ * uppercasing first (expands ß→SS, ı→I), then lowercasing,
+ * then stripping non-alphanumeric.
  */
 function normalize(s) {
-  return (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return (s || '').toUpperCase().toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
 /**
