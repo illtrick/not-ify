@@ -204,17 +204,15 @@ trap cleanup INT TERM
 
 clear
 echo ""
-echo -e "${DIM} ________________________________________________________________________________${NC}"
-echo -e "${DIM} |${NC}                                                                              ${DIM}|${NC}"
-echo -e "${DIM} |${NC}   ${BOLD}▒▓█          █▄  █  ▄▀▀▄  ▀█▀      █  █▀▀  ▀▄ ▄▀          █▓▒${NC}         ${DIM}|${NC}"
-echo -e "${DIM} |${NC}   ${BOLD}▒▓█          █ ▀ █  █  █   █   ▄▄  █  █▀▀    █             █▓▒${NC}         ${DIM}|${NC}"
-echo -e "${DIM} |${NC}   ${BOLD}▒▓█          ▀   ▀   ▀▀    ▀       ▀  ▀      ▀             █▓▒${NC}         ${DIM}|${NC}"
-echo -e "${DIM} |${NC}                                                                              ${DIM}|${NC}"
-echo -e "${DIM} |${NC}                 ${RED}» » »   O W N   Y O U R   S O U N D   « « «${NC}                ${DIM}|${NC}"
-echo -e "${DIM} |________________________________________________________________________________|${NC}"
-echo -e "${DIM} |  ▄▄▄█▄▄▄▄█▄▄▄▄█▄▄▄▄█▄▄▄▄█▄▄▄▄█▄▄▄▄█▄▄▄▄█▄▄▄▄█▄▄█▄▄▄▄█▄▄▄   |${NC}"
-echo -e "${DIM} |  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀   |${NC}"
-echo -e "${DIM} |________________________________________________________________________________|${NC}"
+echo -e "${DIM}  ┌──────────────────────────────────────────────────────────────────┐${NC}"
+echo -e "${DIM}  │${NC}                                                                  ${DIM}│${NC}"
+echo -e "${DIM}  │${NC}       ${BOLD}█▄  █  ▄▀▀▄  ▀█▀       █  █▀▀  ▀▄ ▄▀${NC}                    ${DIM}│${NC}"
+echo -e "${DIM}  │${NC}       ${BOLD}█ ▀ █  █  █   █    ▄▄   █  █▀▀    █${NC}                     ${DIM}│${NC}"
+echo -e "${DIM}  │${NC}       ${BOLD}▀   ▀   ▀▀    ▀         ▀  ▀      ▀${NC}                     ${DIM}│${NC}"
+echo -e "${DIM}  │${NC}                                                                  ${DIM}│${NC}"
+echo -e "${DIM}  │${NC}           ${RED}» » »   O W N   Y O U R   S O U N D   « « «${NC}           ${DIM}│${NC}"
+echo -e "${DIM}  │${NC}                                                                  ${DIM}│${NC}"
+echo -e "${DIM}  └──────────────────────────────────────────────────────────────────┘${NC}"
 echo ""
 echo -e "  ${DIM}Self-hosted music server setup.${NC}"
 echo -e "  ${DIM}Press 'q' at any prompt to quit.${NC}"
@@ -287,23 +285,33 @@ echo -e "    ${BOLD}[1]${NC} Use default: ${BOLD}${DEFAULT_INSTALL}${NC}"
 echo -e "    ${BOLD}[2]${NC} Browse and select folder"
 echo -e "    ${BOLD}[3]${NC} Enter path manually"
 echo ""
-CONFIG_CHOICE=$(ask "Select:" "1")
-
-case "$CONFIG_CHOICE" in
-  1) INSTALL_DIR="$DEFAULT_INSTALL" ;;
-  2)
-    CONFIG_BASE=$(pick_volume)
-    INSTALL_DIR=$(browse_folder "$CONFIG_BASE" "Navigate to where you want Not-ify's config folder.")
-    # Ensure it ends in a not-ify subfolder
-    case "$INSTALL_DIR" in
-      *not-ify*|*notify*) ;; # already has it
-      *) INSTALL_DIR="${INSTALL_DIR}/not-ify" ;;
-    esac
-    ;;
-  *)
-    INSTALL_DIR=$(ask "Config directory path:" "$DEFAULT_INSTALL")
-    ;;
-esac
+while true; do
+  CONFIG_CHOICE=$(ask "Select:" "1")
+  case "$CONFIG_CHOICE" in
+    1) INSTALL_DIR="$DEFAULT_INSTALL"; break ;;
+    2)
+      CONFIG_BASE=$(pick_volume)
+      INSTALL_DIR=$(browse_folder "$CONFIG_BASE" "Navigate to where you want Not-ify's config folder.")
+      # Ensure it ends in a not-ify subfolder
+      case "$INSTALL_DIR" in
+        *not-ify*|*notify*) ;; # already has it
+        *) INSTALL_DIR="${INSTALL_DIR}/not-ify" ;;
+      esac
+      break ;;
+    3)
+      INSTALL_DIR=$(ask "Config directory path:" "$DEFAULT_INSTALL")
+      # Validate the parent directory exists
+      PARENT_DIR=$(dirname "$INSTALL_DIR")
+      if [ ! -d "$PARENT_DIR" ]; then
+        echo -e "  ${RED}✗ Invalid path — parent directory does not exist: ${PARENT_DIR}${NC}"
+        continue
+      fi
+      break ;;
+    *)
+      echo -e "  ${RED}✗ Invalid choice. Please enter 1, 2, or 3.${NC}"
+      ;;
+  esac
+done
 
 mkdir -p "$INSTALL_DIR" 2>/dev/null || true
 if [ ! -d "$INSTALL_DIR" ]; then
@@ -364,7 +372,6 @@ if confirm "Enable VPN?"; then
   echo -e "    ${BOLD}[4]${NC} Surfshark"
   echo -e "    ${BOLD}[5]${NC} Other (enter manually)"
   echo -e "    ${BOLD}[S]${NC} Skip — configure in Settings later"
-  local vpn_choice
   vpn_choice=$(ask "Select:" "S")
   case "$vpn_choice" in
     1) VPN_PROVIDER="private internet access" ;;
