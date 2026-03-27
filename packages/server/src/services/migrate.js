@@ -27,14 +27,7 @@ function migrate() {
           sessionKey: config.lastfm.sessionKey,
           username: config.lastfm.username,
         });
-        // Copy to nathan (existing primary user)
-        db.saveLastfmConfig('nathan', {
-          apiKey: config.lastfm.apiKey,
-          apiSecret: config.lastfm.apiSecret,
-          sessionKey: config.lastfm.sessionKey,
-          username: config.lastfm.username,
-        });
-        console.log('[migrate] Last.fm config migrated to default + nathan users');
+        console.log('[migrate] Last.fm config migrated to default user');
       }
 
       // Real Debrid token → global settings
@@ -58,9 +51,7 @@ function migrate() {
       const list = JSON.parse(fs.readFileSync(rpPath, 'utf8'));
       if (Array.isArray(list) && list.length > 0) {
         db.bulkSetRecentlyPlayed('default', list);
-        // Also set for nathan
-        db.bulkSetRecentlyPlayed('nathan', list);
-        console.log(`[migrate] ${list.length} recently played items migrated to default + nathan users`);
+        console.log(`[migrate] ${list.length} recently played items migrated to default user`);
       }
       fs.renameSync(rpPath, rpMigrated);
       migrated++;

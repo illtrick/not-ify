@@ -75,9 +75,9 @@ const fs = require('fs');
 const importRouter = require('../../src/api/import');
 const processImportBatch = importRouter._processImportBatch;
 
-// Auth header to identify as 'nathan' (seeded user)
-function nathanHeader() {
-  return { 'X-User-Id': 'nathan' };
+// Auth header to identify as 'test-user' (seeded user)
+function testUserHeader() {
+  return { 'X-User-Id': 'test-user' };
 }
 
 afterAll(() => {
@@ -90,7 +90,7 @@ afterAll(() => {
 beforeAll(() => {
   // Create test users since they're no longer seeded
   const rawDb = db.getDb();
-  rawDb.prepare("INSERT OR IGNORE INTO users (id, display_name, role) VALUES (?, ?, ?)").run('nathan', 'Nathan', 'admin');
+  rawDb.prepare("INSERT OR IGNORE INTO users (id, display_name, role) VALUES (?, ?, ?)").run('test-user', 'Test User', 'admin');
   rawDb.prepare("INSERT OR IGNORE INTO users (id, display_name) VALUES (?, ?)").run('default', 'Default');
 });
 
@@ -107,7 +107,7 @@ describe('POST /api/import/lastfm (non-blocking)', () => {
   test('returns 400 when scrobble sync not complete', async () => {
     const res = await request(app)
       .post('/api/import/lastfm')
-      .set(nathanHeader())
+      .set(testUserHeader())
       .send({ days: 60 });
 
     expect(res.status).toBe(400);
@@ -115,11 +115,11 @@ describe('POST /api/import/lastfm (non-blocking)', () => {
   });
 
   test('returns summary with found=0 and toProcess=0 when scrobbles empty', async () => {
-    db.setUserSetting('nathan', 'scrobbleSync', { state: 'complete', lastSyncedAt: Math.floor(Date.now() / 1000) });
+    db.setUserSetting('test-user', 'scrobbleSync', { state: 'complete', lastSyncedAt: Math.floor(Date.now() / 1000) });
 
     const res = await request(app)
       .post('/api/import/lastfm')
-      .set(nathanHeader())
+      .set(testUserHeader())
       .send({ days: 60 });
 
     expect(res.status).toBe(200);
@@ -130,17 +130,17 @@ describe('POST /api/import/lastfm (non-blocking)', () => {
   });
 
   test('returns toProcess count for albums not in library (non-blocking)', async () => {
-    db.setUserSetting('nathan', 'scrobbleSync', { state: 'complete', lastSyncedAt: Math.floor(Date.now() / 1000) });
+    db.setUserSetting('test-user', 'scrobbleSync', { state: 'complete', lastSyncedAt: Math.floor(Date.now() / 1000) });
 
     const now = Math.floor(Date.now() / 1000);
-    db.insertScrobbles('nathan', [
+    db.insertScrobbles('test-user', [
       { artist: 'NewArtist', album: 'NewAlbum', track: 'Track1', played_at: now - 100 },
       { artist: 'NewArtist', album: 'NewAlbum', track: 'Track2', played_at: now - 200 },
     ]);
 
     const res = await request(app)
       .post('/api/import/lastfm')
-      .set(nathanHeader())
+      .set(testUserHeader())
       .send({ days: 60 });
 
     expect(res.status).toBe(200);
@@ -150,10 +150,10 @@ describe('POST /api/import/lastfm (non-blocking)', () => {
   });
 
   test('counts alreadyInLibrary when album dir with audio exists', async () => {
-    db.setUserSetting('nathan', 'scrobbleSync', { state: 'complete', lastSyncedAt: Math.floor(Date.now() / 1000) });
+    db.setUserSetting('test-user', 'scrobbleSync', { state: 'complete', lastSyncedAt: Math.floor(Date.now() / 1000) });
 
     const now = Math.floor(Date.now() / 1000);
-    db.insertScrobbles('nathan', [
+    db.insertScrobbles('test-user', [
       { artist: 'TestArtist', album: 'TestAlbum', track: 'T1', played_at: now - 10 },
     ]);
 
@@ -163,7 +163,7 @@ describe('POST /api/import/lastfm (non-blocking)', () => {
 
     const res = await request(app)
       .post('/api/import/lastfm')
-      .set(nathanHeader())
+      .set(testUserHeader())
       .send({ days: 60 });
 
     expect(res.status).toBe(200);
@@ -174,10 +174,10 @@ describe('POST /api/import/lastfm (non-blocking)', () => {
   });
 
   test('counts alreadyQueued for duplicate pending jobs', async () => {
-    db.setUserSetting('nathan', 'scrobbleSync', { state: 'complete', lastSyncedAt: Math.floor(Date.now() / 1000) });
+    db.setUserSetting('test-user', 'scrobbleSync', { state: 'complete', lastSyncedAt: Math.floor(Date.now() / 1000) });
 
     const now = Math.floor(Date.now() / 1000);
-    db.insertScrobbles('nathan', [
+    db.insertScrobbles('test-user', [
       { artist: 'SomeArtist', album: 'SomeAlbum', track: 'T1', played_at: now - 10 },
     ]);
 
@@ -188,7 +188,7 @@ describe('POST /api/import/lastfm (non-blocking)', () => {
 
     const res = await request(app)
       .post('/api/import/lastfm')
-      .set(nathanHeader())
+      .set(testUserHeader())
       .send({ days: 60 });
 
     expect(res.status).toBe(200);
@@ -197,16 +197,16 @@ describe('POST /api/import/lastfm (non-blocking)', () => {
   });
 
   test('respects the days parameter (excludes old scrobbles)', async () => {
-    db.setUserSetting('nathan', 'scrobbleSync', { state: 'complete', lastSyncedAt: Math.floor(Date.now() / 1000) });
+    db.setUserSetting('test-user', 'scrobbleSync', { state: 'complete', lastSyncedAt: Math.floor(Date.now() / 1000) });
 
     const now = Math.floor(Date.now() / 1000);
-    db.insertScrobbles('nathan', [
+    db.insertScrobbles('test-user', [
       { artist: 'OldArtist', album: 'OldAlbum', track: 'T1', played_at: now - (120 * 86400) },
     ]);
 
     const res = await request(app)
       .post('/api/import/lastfm')
-      .set(nathanHeader())
+      .set(testUserHeader())
       .send({ days: 60 });
 
     expect(res.status).toBe(200);
@@ -214,17 +214,17 @@ describe('POST /api/import/lastfm (non-blocking)', () => {
   });
 
   test('returns artists count', async () => {
-    db.setUserSetting('nathan', 'scrobbleSync', { state: 'complete', lastSyncedAt: Math.floor(Date.now() / 1000) });
+    db.setUserSetting('test-user', 'scrobbleSync', { state: 'complete', lastSyncedAt: Math.floor(Date.now() / 1000) });
 
     const now = Math.floor(Date.now() / 1000);
-    db.insertScrobbles('nathan', [
+    db.insertScrobbles('test-user', [
       { artist: 'Artist1', album: 'Album1', track: 'T1', played_at: now - 10 },
       { artist: 'Artist2', album: 'Album2', track: 'T2', played_at: now - 20 },
     ]);
 
     const res = await request(app)
       .post('/api/import/lastfm')
-      .set(nathanHeader())
+      .set(testUserHeader())
       .send({ days: 60 });
 
     expect(res.status).toBe(200);

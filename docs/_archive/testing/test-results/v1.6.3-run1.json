@@ -3,7 +3,7 @@
   "testPlanVersion": "1.0",
   "timestamp": "2026-03-25T01:45:00Z",
   "environment": "staging",
-  "url": "http://192.168.0.34:3000",
+  "url": "http://your-server-ip:3000",
   "diversity": {
     "libraryAlbums": ["Animals (Pink Floyd)", "Sehnsucht (Rammstein)"],
     "freshSearchAlbum": "Drawing Restraint 9 (Björk)",

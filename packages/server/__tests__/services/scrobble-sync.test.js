@@ -22,8 +22,8 @@ beforeEach(() => {
   require('../../src/services/lastfm').getRecentTracksPage = jest.fn();
   // Create test users since they're no longer seeded
   const d = db.getDb();
-  d.prepare("INSERT OR IGNORE INTO users (id, display_name, role) VALUES (?, ?, ?)").run('nathan', 'Nathan', 'admin');
-  d.prepare("INSERT OR IGNORE INTO users (id, display_name, role) VALUES (?, ?, ?)").run('sarah', 'Sarah', 'user');
+  d.prepare("INSERT OR IGNORE INTO users (id, display_name, role) VALUES (?, ?, ?)").run('test-user', 'Test User', 'admin');
+  d.prepare("INSERT OR IGNORE INTO users (id, display_name, role) VALUES (?, ?, ?)").run('test-user-2', 'Test User 2', 'user');
 });
 
 afterEach(() => sync.stopAll());
@@ -36,10 +36,10 @@ describe('scrobble-sync', () => {
       .mockResolvedValueOnce({ tracks: [mockTrack('A', 'B', 'T', 1000)], totalPages: 2, total: 2 })
       .mockResolvedValueOnce({ tracks: [mockTrack('C', 'D', 'T', 2000)], totalPages: 2, total: 2 });
 
-    // 'nathan' is seeded in db.js
-    const result = await sync.fullSync('nathan', 'lastfmuser');
+    // 'test-user' is seeded in db.js
+    const result = await sync.fullSync('test-user', 'lastfmuser');
     expect(result.fetched).toBe(2);
-    expect(db.getScrobbleCount('nathan')).toBe(2);
+    expect(db.getScrobbleCount('test-user')).toBe(2);
   });
 
   test('fullSync filters out now-playing tracks (no date)', async () => {
@@ -48,10 +48,10 @@ describe('scrobble-sync', () => {
     lastfm.getRecentTracksPage
       .mockResolvedValueOnce({ tracks: [nowPlaying, mockTrack('A', 'B', 'T', 1000)], totalPages: 1, total: 1 });
 
-    // 'sarah' is seeded in db.js
-    const result = await sync.fullSync('sarah', 'lfmuser2');
+    // 'test-user-2' is seeded in db.js
+    const result = await sync.fullSync('test-user-2', 'lfmuser2');
     expect(result.fetched).toBe(1);
-    expect(db.getScrobbleCount('sarah')).toBe(1);
+    expect(db.getScrobbleCount('test-user-2')).toBe(1);
   });
 
   test('fullSync sets sync state to complete after finish', async () => {
@@ -59,10 +59,10 @@ describe('scrobble-sync', () => {
     lastfm.getRecentTracksPage
       .mockResolvedValueOnce({ tracks: [mockTrack('A', 'B', 'T', 1000)], totalPages: 1, total: 1 });
 
-    // 'nathan' is seeded in db.js
-    await sync.fullSync('nathan', 'lfmuser3');
+    // 'test-user' is seeded in db.js
+    await sync.fullSync('test-user', 'lfmuser3');
     // db.getUserSetting already returns a parsed value (not a string)
-    const state = db.getUserSetting('nathan', 'scrobbleSync');
+    const state = db.getUserSetting('test-user', 'scrobbleSync');
     expect(state.state).toBe('complete');
     expect(state.lastSyncedAt).toBeGreaterThan(0);
   });
@@ -71,11 +71,11 @@ describe('scrobble-sync', () => {
     const lastfm = require('../../src/services/lastfm');
     // Prior fullSync tests inserted scrobbles with played_at up to 2000
     // deltaSync should use the DB's latest timestamp, not the sync state
-    db.setUserSetting('nathan', 'scrobbleSync', { state: 'complete', lastSyncedAt: 999999 });
+    db.setUserSetting('test-user', 'scrobbleSync', { state: 'complete', lastSyncedAt: 999999 });
     lastfm.getRecentTracksPage
       .mockResolvedValueOnce({ tracks: [], totalPages: 1, total: 0 });
 
-    await sync.deltaSync('nathan', 'lfmuser');
+    await sync.deltaSync('test-user', 'lfmuser');
     // Uses MAX(played_at) from DB (2000 from prior test inserts), not lastSyncedAt (999999)
     const calledFrom = lastfm.getRecentTracksPage.mock.calls[0][3];
     expect(calledFrom).toBeGreaterThan(0);
@@ -90,8 +90,8 @@ describe('scrobble-sync', () => {
       .mockRejectedValueOnce(new Error('Last.fm API 429'))
       .mockResolvedValueOnce({ tracks: [mockTrack('A', 'B', 'T', 1000)], totalPages: 1, total: 1 });
 
-    // 'nathan' is seeded in db.js
-    const result = await sync.fullSync('nathan', 'lfmuser-retry');
+    // 'test-user' is seeded in db.js
+    const result = await sync.fullSync('test-user', 'lfmuser-retry');
     expect(result.fetched).toBe(1);
 
     jest.restoreAllMocks();
@@ -102,9 +102,9 @@ describe('scrobble-sync', () => {
     lastfm.getRecentTracksPage
       .mockResolvedValueOnce({ tracks: [mockTrack('A', 'B', 'T', 1000)], totalPages: 1, total: 1 });
 
-    // 'sarah' is seeded in db.js; ensure no prior sync state so deltaSync falls back to fullSync
-    db.setUserSetting('sarah', 'scrobbleSync', null);
-    const result = await sync.deltaSync('sarah', 'lfmuser-fallback');
+    // 'test-user-2' is seeded in db.js; ensure no prior sync state so deltaSync falls back to fullSync
+    db.setUserSetting('test-user-2', 'scrobbleSync', null);
+    const result = await sync.deltaSync('test-user-2', 'lfmuser-fallback');
     expect(result.fetched).toBe(1);
   });
 });

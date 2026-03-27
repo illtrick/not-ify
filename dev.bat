@@ -54,7 +54,7 @@ if %errorlevel%==0 (
 )
 
 REM Check slskd
-curl -s http://localhost:5030/api/v0/application -H "X-API-Key: notifyslskdapikey2026" >nul 2>&1
+curl -s http://localhost:5030/api/v0/application -H "X-API-Key: %SLSKD_API_KEY%" >nul 2>&1
 if %errorlevel%==0 (
     echo   [32m■[0m  slskd         :5030  OK
 ) else (

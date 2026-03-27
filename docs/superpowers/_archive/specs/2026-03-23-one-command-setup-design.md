@@ -167,7 +167,7 @@ Prints:
   ✅ Not-ify is ready!
 
   Open in your browser:
-  http://192.168.0.34:3000
+  http://your-server-ip:3000
 
   You'll create your account and connect
   your music services from there.

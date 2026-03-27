@@ -35,8 +35,15 @@ SYSTEM_DIAGRAM_VIEW.html
 # Streaming history (personal data)
 Spotify Extended Streaming History/
 
+# Environment files (real credentials/paths)
+.env
+.env.dev
+.env.local
+.env.production
+
 # Claude local settings
 .claude/settings.local.json
+.claude/.claude/
 .claude/plan.md
 
 # Superpowers brainstorm artifacts

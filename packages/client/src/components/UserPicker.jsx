@@ -3,6 +3,11 @@ import * as api from '@not-ify/shared';
 import { COLORS } from '../constants';
 
 const USER_KEY = 'notify-user';
+const USER_COLORS = ['#1DB954', '#E91E63', '#00BCD4', '#FF9800', '#9C27B0', '#607D8B'];
+function getUserColor(id) {
+  const hash = String(id).split('').reduce((h, c) => h + c.charCodeAt(0), 0);
+  return USER_COLORS[hash % USER_COLORS.length];
+}
 
 export function UserPicker({ onUserSelected }) {
   const [users, setUsers] = useState([]);
@@ -11,10 +16,7 @@ export function UserPicker({ onUserSelected }) {
   useEffect(() => {
     api.getAvailableUsers()
       .then(setUsers)
-      .catch(() => setUsers([
-        { id: 'nathan', displayName: 'Nathan' },
-        { id: 'sarah', displayName: 'Sarah' },
-      ]))
+      .catch(() => setUsers([]))
       .finally(() => setLoading(false));
   }, []);
 
@@ -61,7 +63,7 @@ export function UserPicker({ onUserSelected }) {
           >
             <div style={{
               width: 80, height: 80, borderRadius: '50%',
-              background: user.id === 'nathan' ? '#1DB954' : '#E91E63',
+              background: getUserColor(user.id),
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 32, fontWeight: 700, color: '#fff',
             }}>

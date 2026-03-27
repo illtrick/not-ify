@@ -60,7 +60,7 @@
 1. Download an album via YT (play all from search)
 2. After download completes, navigate away and back to the album
 3. **Expected:** Tracks appear in correct MB order (track 1, 2, 3...) not alphabetical
-4. **Verify:** `curl -s http://192.168.0.34:3000/api/library | jq '.[] | select(.album=="ALBUM") | {title, track_number}'`
+4. **Verify:** `curl -s http://your-server-ip:3000/api/library | jq '.[] | select(.album=="ALBUM") | {title, track_number}'`
 
 ### T3.3: MB titles used over filename-derived titles
 1. After YT download, check track titles in the library view

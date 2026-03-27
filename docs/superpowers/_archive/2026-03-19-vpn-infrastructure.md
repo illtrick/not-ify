@@ -645,7 +645,7 @@ curl -s http://localhost:8888 | head -5
 
 - [ ] **Step 5: Test VPN via Settings UI**
 
-Open `http://192.168.0.34:3001` → Settings → VPN section → click "Test Connection".
+Open `http://your-server-ip:3001` → Settings → VPN section → click "Test Connection".
 Expected: all three services show green dots with latency.
 
 - [ ] **Step 6: Test region switch**

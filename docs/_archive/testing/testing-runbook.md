@@ -12,10 +12,10 @@
 
 | Item | Value |
 |------|-------|
-| **QNAP IP** | 192.168.0.34 |
-| **Not-ify URL** | http://192.168.0.34:3000 |
-| **slskd URL** | http://192.168.0.34:5030 |
-| **Gluetun control** | http://192.168.0.34:8000 (host-only) |
+| **QNAP IP** | your-server-ip |
+| **Not-ify URL** | http://your-server-ip:3000 |
+| **slskd URL** | http://your-server-ip:5030 |
+| **Gluetun control** | http://your-server-ip:8000 (host-only) |
 | **Install dir** | /share/CACHEDEV3_DATA/Media/container-station-data/not-ify |
 | **Music dir** | /share/CACHEDEV3_DATA/Media/container-station-data/Music |
 | **Config dir** | (install dir)/config |
@@ -24,22 +24,22 @@
 
 ```bash
 # Verify staging is up and get version
-curl -s http://192.168.0.34:3000/api/health
+curl -s http://your-server-ip:3000/api/health
 
 # Check activity log
-curl -s http://192.168.0.34:3000/api/activity | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{const j=JSON.parse(d);console.log(j.length+" entries");j.slice(-5).forEach(e=>console.log(new Date(e.ts).toLocaleTimeString(),e.category,e.level,(e.message||"").slice(0,100)))})'
+curl -s http://your-server-ip:3000/api/activity | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{const j=JSON.parse(d);console.log(j.length+" entries");j.slice(-5).forEach(e=>console.log(new Date(e.ts).toLocaleTimeString(),e.category,e.level,(e.message||"").slice(0,100)))})'
 
 # Check library
-curl -s http://192.168.0.34:3000/api/library | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{const j=JSON.parse(d);const a=new Set(j.map(t=>t.artist+"|"+t.album));console.log(j.length+" tracks, "+a.size+" albums")})'
+curl -s http://your-server-ip:3000/api/library | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{const j=JSON.parse(d);const a=new Set(j.map(t=>t.artist+"|"+t.album));console.log(j.length+" tracks, "+a.size+" albums")})'
 
 # Check telemetry
-curl -s http://192.168.0.34:3000/api/telemetry | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{const j=JSON.parse(d);console.log("Events:",j.length);j.slice(-10).forEach(e=>console.log(new Date(e.ts).toLocaleTimeString(),e.event.padEnd(22),(e.trackId||"").slice(0,16),JSON.stringify(e.detail||{}).slice(0,80)))})'
+curl -s http://your-server-ip:3000/api/telemetry | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{const j=JSON.parse(d);console.log("Events:",j.length);j.slice(-10).forEach(e=>console.log(new Date(e.ts).toLocaleTimeString(),e.event.padEnd(22),(e.trackId||"").slice(0,16),JSON.stringify(e.detail||{}).slice(0,80)))})'
 
 # Check container status
-curl -s http://192.168.0.34:3000/api/containers/status
+curl -s http://your-server-ip:3000/api/containers/status
 
 # Check all services
-curl -s http://192.168.0.34:3000/api/setup/services
+curl -s http://your-server-ip:3000/api/setup/services
 ```
 
 ### 1.3 SSH Access (if needed)
@@ -76,7 +76,7 @@ ls /share/CACHEDEV3_DATA/Media/container-station-data/Music/
 
 ```
 1. Call mcp__Claude_in_Chrome__tabs_context_mcp with createIfEmpty: true
-2. Navigate to http://192.168.0.34:3000
+2. Navigate to http://your-server-ip:3000
 3. Wait 5s for page load
 4. Take screenshot to verify
 5. If user picker shows, click "Nathan"
@@ -95,7 +95,7 @@ Start this at the beginning of any test session to capture all server-side event
 LAST=0
 for i in $(seq 1 180); do
   sleep 5
-  DATA=$(curl -s http://192.168.0.34:3000/api/activity 2>/dev/null)
+  DATA=$(curl -s http://your-server-ip:3000/api/activity 2>/dev/null)
   COUNT=$(echo "$DATA" | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{try{console.log(JSON.parse(d).length)}catch{console.log(0)}})')
   if [ "$COUNT" != "$LAST" ]; then
     echo "$DATA" | node -e "
@@ -288,7 +288,7 @@ Run 1: Radiohead, Björk | Run 2: Tool, Nina Simone | Run 3: Aphex Twin, Massive
 ### From Telemetry API
 
 ```bash
-curl -s http://192.168.0.34:3000/api/telemetry | node -e '
+curl -s http://your-server-ip:3000/api/telemetry | node -e '
 let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{
   const j=JSON.parse(d);
 
@@ -465,7 +465,7 @@ Before running manual e2e tests on staging, verify service connectivity:
 
 ```bash
 # Health check all services
-echo "not-ify:" && curl -s http://192.168.0.34:3000/api/health && echo "" && echo "services:" && curl -s http://192.168.0.34:3000/api/setup/services && echo "" && echo "containers:" && curl -s http://192.168.0.34:3000/api/containers/status
+echo "not-ify:" && curl -s http://your-server-ip:3000/api/health && echo "" && echo "services:" && curl -s http://your-server-ip:3000/api/setup/services && echo "" && echo "containers:" && curl -s http://your-server-ip:3000/api/containers/status
 
 # Cover art spot check (30 albums)
 # See docs/testing/cover-art-test.sh

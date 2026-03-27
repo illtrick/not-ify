@@ -5,7 +5,7 @@
 import { Page, BrowserContext } from '@playwright/test';
 
 const USER_KEY = 'notify-user';
-const DEFAULT_USER = 'nathan';
+const DEFAULT_USER = 'test-user';
 
 /**
  * Call this before page.goto() to pre-seed localStorage with a user.

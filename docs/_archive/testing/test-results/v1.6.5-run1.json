@@ -4,7 +4,7 @@
   "run": 1,
   "timestamp": "2026-03-25T04:20:00Z",
   "environment": "staging",
-  "url": "http://192.168.0.34:3000",
+  "url": "http://your-server-ip:3000",
   "summary": {
     "total": 36,
     "tested": 32,

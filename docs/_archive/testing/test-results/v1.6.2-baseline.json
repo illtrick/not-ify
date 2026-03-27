@@ -3,7 +3,7 @@
   "testPlanVersion": "1.0",
   "timestamp": "2026-03-24T23:40:00Z",
   "environment": "staging",
-  "url": "http://192.168.0.34:3000",
+  "url": "http://your-server-ip:3000",
   "summary": {
     "total": 28,
     "tested": 7,
