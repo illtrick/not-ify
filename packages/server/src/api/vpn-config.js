@@ -48,6 +48,18 @@ router.get('/status', async (req, res) => {
   }
 
   if (!configured) {
+    // Fall back to env vars (CLI-configured but not yet seeded to DB)
+    const envUsername = process.env.VPN_USERNAME;
+    if (envUsername) {
+      return res.json({
+        configured: true,
+        cliConfigured: true,
+        containerRunning,
+        username: envUsername,
+        region: process.env.VPN_REGION || 'US East',
+        provider: process.env.VPN_PROVIDER || 'private internet access',
+      });
+    }
     return res.json({
       configured: false,
       containerRunning,

@@ -606,9 +606,55 @@ process.on('uncaughtException', (err) => {
 });
 
 // Only bind to a port when run directly (not when required by tests)
+// Seed DB config from environment variables (populated by CLI bootstrap)
+// This bridges the gap between CLI-written .env and the web UI which reads from DB
+async function seedConfigFromEnv() {
+  try {
+    // VPN config: CLI writes to .env, UI reads from DB
+    const vpnConfig = db.getGlobalSetting('vpnConfig');
+    if (!vpnConfig?.username && process.env.VPN_USERNAME) {
+      db.setGlobalSetting('vpnConfig', {
+        provider: process.env.VPN_PROVIDER || 'private internet access',
+        username: process.env.VPN_USERNAME,
+        password: process.env.VPN_PASSWORD || '',
+        region: process.env.VPN_REGION || 'US East',
+      });
+      log.info({ event: 'startup.seed.vpn' }, 'Seeded VPN config from environment');
+    }
+
+    // Soulseek config: CLI auto-generates creds, slskd may already be connected
+    const slskConfig = db.getGlobalSetting('soulseekConfig');
+    if (!slskConfig?.username) {
+      const slskdUrl = process.env.SLSKD_URL || 'http://slskd:5030';
+      const slskdKey = process.env.SLSKD_API_KEY || '';
+      if (slskdKey) {
+        try {
+          const r = await fetch(`${slskdUrl}/api/v0/application`, {
+            headers: { 'X-API-Key': slskdKey },
+            signal: AbortSignal.timeout(5000),
+          });
+          if (r.ok) {
+            const data = await r.json();
+            const username = data.user?.username;
+            if (username) {
+              db.setGlobalSetting('soulseekConfig', { ...slskConfig, username, password: '***', slskdUrl, slskdApiKey: slskdKey });
+              log.info({ event: 'startup.seed.soulseek', username }, `Seeded Soulseek config from slskd: ${username}`);
+            }
+          }
+        } catch { /* slskd not ready yet — will try on next restart */ }
+      }
+    }
+  } catch (err) {
+    log.warn({ event: 'startup.seed.error', error: err.message }, `Failed to seed config from env: ${err.message}`);
+  }
+}
+
 if (require.main === module) {
   // Run migration before starting server
   migrate();
+
+  // Seed DB from env vars (non-blocking — don't delay startup)
+  seedConfigFromEnv().catch(err => log.warn({ event: 'startup.seed.error', error: err.message }, `Config seed failed: ${err.message}`));
 
   // Clean up orphaned staging directories (from crashed jobs)
   try {

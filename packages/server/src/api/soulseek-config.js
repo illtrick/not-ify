@@ -32,6 +32,17 @@ router.get('/status', async (req, res) => {
     }
   } catch { /* slskd unavailable */ }
 
+  // If slskd is configured but not reachable, show "starting" state
+  if (!connected && !state && process.env.SLSKD_API_KEY) {
+    return res.json({
+      configured: !!username || true,
+      username,
+      connected: false,
+      state: 'starting',
+      message: 'Soulseek is configured but still initializing',
+    });
+  }
+
   res.json({
     configured: !!username,
     username,
@@ -99,7 +110,14 @@ router.post('/test', async (req, res) => {
       version: data.version?.current ?? null,
     });
   } catch (err) {
-    res.json({ status: 'error', error: err.message });
+    const msg = err.message || '';
+    let userMessage = msg;
+    if (msg.includes('ECONNREFUSED') || msg.includes('fetch failed')) {
+      userMessage = 'Soulseek service is still starting — try again in 30 seconds';
+    } else if (msg.includes('timeout') || msg.includes('AbortError')) {
+      userMessage = 'Soulseek service is not responding — it may still be initializing';
+    }
+    res.json({ status: 'error', error: userMessage });
   }
 });
 
