@@ -16,6 +16,7 @@ const services = {
   castSession: () => require('./cast-session').getStatus(),
   realdebrid: () => require('./realdebrid').getStatus(),
   downloader: () => require('./downloader').getStatus(),
+  soulseek: () => require('./soulseek').getStatus(),
 };
 
 let _upgraderGetter = null;
@@ -49,6 +50,22 @@ async function collect() {
     } catch (err) {
       result.services.upgrader = { error: err.message };
     }
+  }
+
+  // VPN status from gluetun control API
+  try {
+    const controlUrl = process.env.GLUETUN_CONTROL_URL;
+    if (controlUrl) {
+      const r = await fetch(`${controlUrl}/v1/publicip/ip`, { signal: AbortSignal.timeout(2000) });
+      if (r.ok) {
+        const data = await r.json();
+        result.services.vpn = { connected: true, ip: data.public_ip, provider: process.env.VPN_PROVIDER || 'unknown' };
+      } else {
+        result.services.vpn = { connected: false, provider: process.env.VPN_PROVIDER || 'unknown' };
+      }
+    }
+  } catch {
+    result.services.vpn = { connected: false, error: 'gluetun unreachable' };
   }
 
   try {

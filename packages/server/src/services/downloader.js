@@ -219,8 +219,20 @@ function formatBytes(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
+let _completedCount = 0;
+
+/**
+ * Track a download completion from external sources (e.g. yt-dlp).
+ * downloadFile() updates _lastCompletedAt internally, but YT downloads
+ * use yt-dlp directly and bypass downloadFile().
+ */
+function trackCompletion() {
+  _lastCompletedAt = Date.now();
+  _completedCount++;
+}
+
 function getStatus() {
-  return { activeDownloads: _activeDownloads, lastCompletedAt: _lastCompletedAt, lastFailedAt: _lastFailedAt, lastError: _lastDownloadError };
+  return { activeDownloads: _activeDownloads, lastCompletedAt: _lastCompletedAt, lastFailedAt: _lastFailedAt, lastError: _lastDownloadError, completedCount: _completedCount };
 }
 
 /**
@@ -305,5 +317,6 @@ module.exports = {
   parseArtistAlbum,
   sanitizePath,
   getStatus,
+  trackCompletion,
   selectAlbumFiles,
 };

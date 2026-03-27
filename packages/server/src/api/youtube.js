@@ -8,6 +8,7 @@ const yt = require('../services/youtube');
 const streamAuth = require('../services/stream-auth');
 const { validateFile } = require('../services/file-validator');
 const activity = require('../services/activity-log');
+const downloader = require('../services/downloader');
 
 // Read music dir from DB (set via Settings UI), fall back to env var
 function getMusicDir() {
@@ -364,15 +365,41 @@ async function ytDownloadOne(entry, abort) {
   } catch {}
 
   activity.log('youtube', 'success', `Saved: ${dlTitle}`, { artist: dlArtist, album: dlAlbum, title: dlTitle, path: downloadedFile });
+  downloader.trackCompletion();
 
-  // Clean up intermediate files left by yt-dlp (webm, opus, m4a before conversion to mp3)
+  // Clean up unnumbered duplicates when a numbered file is downloaded
+  // e.g. "Comfortably Numb.mp3" becomes redundant when "08-Comfortably Numb.mp3" exists
   try {
-    const baseName = path.basename(downloadedFile, path.extname(downloadedFile));
-    const intermediateExts = ['.webm', '.opus', '.m4a', '.part', '.temp'];
-    for (const ext of intermediateExts) {
-      const intermediate = path.join(destDir, baseName + ext);
-      if (fs.existsSync(intermediate) && intermediate !== downloadedFile) {
-        fs.unlinkSync(intermediate);
+    const downloadedBasename = path.basename(downloadedFile);
+    const hasTrackNum = /^\d+[-_\s]/.test(downloadedBasename);
+    if (hasTrackNum) {
+      const { normalize } = require('../services/track-id');
+      const titleOnly = normalize(downloadedBasename.replace(/^\d+[-_\s]*/, '').replace(/\.[^.]+$/, ''));
+      if (titleOnly) {
+        const existing = fs.readdirSync(destDir);
+        for (const f of existing) {
+          if (f === downloadedBasename) continue;
+          if (!/\.(mp3|flac|ogg|m4a|opus|wav)$/i.test(f)) continue;
+          if (/^\d+[-_\s]/.test(f)) continue; // skip other numbered files
+          const fTitle = normalize(f.replace(/\.[^.]+$/, ''));
+          if (fTitle === titleOnly) {
+            try { fs.unlinkSync(path.join(destDir, f)); } catch {}
+            activity.log('youtube', 'info', `Removed unnumbered duplicate: ${f}`, { artist: dlArtist, album: dlAlbum });
+          }
+        }
+      }
+    }
+  } catch {}
+
+  // Clean up ALL intermediate files in album directory (not just matching baseName)
+  // yt-dlp may rename outputs, leaving orphaned .webm/.part/.temp files behind
+  try {
+    const intermediateExts = ['.webm', '.part', '.temp'];
+    const allFiles = fs.readdirSync(destDir);
+    for (const f of allFiles) {
+      const ext = path.extname(f).toLowerCase();
+      if (intermediateExts.includes(ext)) {
+        try { fs.unlinkSync(path.join(destDir, f)); } catch {}
       }
     }
   } catch (cleanupErr) {

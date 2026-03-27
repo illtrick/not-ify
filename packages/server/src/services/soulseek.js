@@ -41,9 +41,14 @@ function slskHeaders(extra = {}) {
  * @param {number} [opts.minResults] - stop early if we hit this many responses (default 10)
  * @returns {Promise<{ responseCount, fileCount, responses[] }>}
  */
+let _lastSearchAt = null;
+let _searchCount = 0;
+
 async function searchSoulseek(query, opts = {}) {
   const timeout = opts.timeout || SEARCH_TIMEOUT;
   const minResults = opts.minResults || 10;
+  _lastSearchAt = Date.now();
+  _searchCount++;
 
   try {
     // Start search
@@ -273,4 +278,13 @@ async function getDownloadedFiles() {
   }
 }
 
-module.exports = { searchSoulseek, searchSoulseekCascade, buildCascadeQueries, checkHealth, enqueueDownload, pollDownloads, getDownloadedFiles };
+function getStatus() {
+  return {
+    lastSearchAt: _lastSearchAt,
+    searchCount: _searchCount,
+    slskdUrl: process.env.SLSKD_URL || 'http://slskd:5030',
+    apiKeyConfigured: !!process.env.SLSKD_API_KEY,
+  };
+}
+
+module.exports = { searchSoulseek, searchSoulseekCascade, buildCascadeQueries, checkHealth, enqueueDownload, pollDownloads, getDownloadedFiles, getStatus };

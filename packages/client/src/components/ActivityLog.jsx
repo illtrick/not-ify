@@ -67,7 +67,9 @@ function getServiceRows(services) {
   }
   if (services.llm) {
     const l = services.llm;
-    rows.push({ name: 'llm', color: l.healthy ? green : l.healthy === false ? red : yellow, detail: `${l.healthy ? 'healthy' : 'unhealthy'} | model: ${l.modelReady ? 'ready' : 'not ready'} | cache: ${l.cacheSize}` });
+    const llmLabel = l.healthy === true ? 'healthy' : l.healthy === false ? (l.ollamaUrl ? 'unavailable' : 'disabled') : 'checking...';
+    const llmColor = l.healthy === true ? green : l.healthy === false ? (l.ollamaUrl ? gray : gray) : yellow;
+    rows.push({ name: 'llm', color: llmColor, detail: `${llmLabel} | model: ${l.modelReady ? l.model : 'not loaded'} | cache: ${l.cacheSize}` });
   }
   if (services.youtube) {
     const y = services.youtube;
@@ -90,7 +92,7 @@ function getServiceRows(services) {
   }
   if (services.downloader) {
     const d = services.downloader;
-    rows.push({ name: 'downloader', color: d.activeDownloads > 0 ? green : gray, detail: `${d.activeDownloads > 0 ? `${d.activeDownloads} active` : 'idle'} | last: ${d.lastCompletedAt ? formatDurationShort(Date.now() - d.lastCompletedAt) + ' ago' : 'never'}` });
+    rows.push({ name: 'downloader', color: d.activeDownloads > 0 ? green : gray, detail: `${d.activeDownloads > 0 ? `${d.activeDownloads} active` : 'idle'} | completed: ${d.completedCount || 0} | last: ${d.lastCompletedAt ? formatDurationShort(Date.now() - d.lastCompletedAt) + ' ago' : 'never'}` });
   }
   if (services.scrobbleSync) {
     const entries = Object.entries(services.scrobbleSync);
@@ -100,6 +102,11 @@ function getServiceRows(services) {
         rows.push({ name: `sync:${name}`, color: v.state === 'syncing' ? green : v.error ? red : gray, detail: `${v.state} | synced: ${when} | ${v.fetched}/${v.total}` });
       }
     }
+  }
+  if (services.soulseek) {
+    const sk = services.soulseek;
+    const lastSearch = sk.lastSearchAt ? `${formatDurationShort(Date.now() - sk.lastSearchAt)} ago` : 'never';
+    rows.push({ name: 'soulseek', color: sk.apiKeyConfigured ? green : gray, detail: `${sk.apiKeyConfigured ? 'configured' : 'no API key'} | searches: ${sk.searchCount} | last: ${lastSearch}` });
   }
   if (services.castSession) {
     const c = services.castSession;
@@ -115,6 +122,10 @@ function getServiceRows(services) {
   if (services.upgrader) {
     const u = services.upgrader;
     rows.push({ name: 'upgrader', color: u.idle === true ? gray : u.idle === false ? green : yellow, detail: u.idle === true ? 'idle' : u.idle === false ? 'busy' : 'unknown' });
+  }
+  if (services.vpn) {
+    const v = services.vpn;
+    rows.push({ name: 'vpn', color: v.connected ? green : red, detail: v.connected ? `${v.provider} | IP: ${v.ip}` : `${v.provider || 'unknown'}${v.error ? ` | ${v.error}` : ' | disconnected'}` });
   }
 
   return rows;

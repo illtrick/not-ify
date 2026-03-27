@@ -162,7 +162,8 @@ function getStatus() {
     const state = getSyncState(u.id);
     syncs[u.display_name || u.id] = {
       state: state.state || 'idle',
-      lastSyncedAt: state.lastSyncedAt || null,
+      // lastSyncedAt is stored as Unix seconds — convert to ISO for consistent client parsing
+      lastSyncedAt: state.lastSyncedAt ? new Date(state.lastSyncedAt * 1000).toISOString() : null,
       total: state.total || 0,
       fetched: state.fetched || 0,
       error: state.error || null,
