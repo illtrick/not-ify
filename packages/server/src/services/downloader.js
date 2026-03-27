@@ -94,7 +94,7 @@ function isAudioFile(filename) {
 }
 
 function sanitizePath(str) {
-  return str.replace(/[<>:"/\\|?*]/g, '_').replace(/\s+/g, ' ').trim();
+  return str.replace(/[:]/g, '-').replace(/[<>"/\\|?*]/g, '_').replace(/\s+/g, ' ').trim();
 }
 
 function parseArtistAlbum(torrentName) {

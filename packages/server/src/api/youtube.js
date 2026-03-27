@@ -21,7 +21,7 @@ function getMusicDir() {
 const MUSIC_DIR = null; // DEPRECATED — use getMusicDir() instead
 
 function sanitizePath(s) {
-  return (s || 'Unknown').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim() || 'Unknown';
+  return (s || 'Unknown').replace(/[:]/g, '-').replace(/[<>"/\\|?*\x00-\x1f]/g, '_').trim() || 'Unknown';
 }
 
 function fileId(filepath) {
@@ -247,7 +247,9 @@ async function ytDownloadOne(entry, abort) {
   entry.progress = 100;
 
   // Validate the downloaded file before accepting it into the library
-  const validation = await validateFile(downloadedFile);
+  // Skip ClamAV for YT downloads — YouTube CDN is a trusted source
+  // ClamAV scanning is reserved for untrusted sources (torrents, Soulseek)
+  const validation = await validateFile(downloadedFile, { deferClam: true });
   if (!validation.passed) {
     console.warn('[yt-queue] File failed validation, deleting:', downloadedFile, validation.checks);
     try { fs.unlinkSync(downloadedFile); } catch (e) { /* ignore */ }

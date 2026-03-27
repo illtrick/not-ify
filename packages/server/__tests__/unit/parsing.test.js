@@ -231,7 +231,7 @@ describe('sanitizePath', () => {
   });
 
   test('replaces colon', () => {
-    expect(sanitizePath('Artist: Title')).toBe('Artist_ Title');
+    expect(sanitizePath('Artist: Title')).toBe('Artist- Title');
   });
 
   test('replaces backslash', () => {
