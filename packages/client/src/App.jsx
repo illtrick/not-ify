@@ -115,6 +115,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
 
   const {
     library,
+    libraryAlbumsData,
     librarySortBy, setLibrarySortBy,
     libraryFilter, setLibraryFilter,
     showLibraryFilter, setShowLibraryFilter,
@@ -455,10 +456,11 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
       const tArtist = t.artist?.toLowerCase();
       return tArtist === artistLower || (trackArtistLower && tArtist === trackArtistLower);
     });
-    if (inLib) return 'library';
+    if (inLib) return 'available';
     const norm = (artist + '::' + trackTitle).toLowerCase();
     const dlStatus = dlTrackStatus.get(norm);
-    if (dlStatus) return dlStatus;
+    if (dlStatus === 'active') return 'processing';
+    if (dlStatus === 'queued') return 'processing';
     return null;
   }
 

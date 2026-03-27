@@ -6,6 +6,7 @@ import { useTelemetry } from './useTelemetry';
 export function useLibrary({ recentlyPlayed = [] } = {}) {
   const telemetry = useTelemetry();
   const [library, setLibrary] = useState([]);
+  const [libraryAlbumsData, setLibraryAlbumsData] = useState([]);
   const [librarySortBy, setLibrarySortBy] = useState('recents');
   const [libraryFilter, setLibraryFilter] = useState('');
   const [showLibraryFilter, setShowLibraryFilter] = useState(false);
@@ -16,25 +17,24 @@ export function useLibrary({ recentlyPlayed = [] } = {}) {
       const fetchStart = performance.now();
       const data = await api.getLibrary();
       const latencyMs = Math.round(performance.now() - fetchStart);
-      setLibrary(Array.isArray(data) ? data : []);
-      try { telemetry.emit('library_fetch_complete', { trackCount: Array.isArray(data) ? data.length : 0, latencyMs }); } catch {}
+      if (Array.isArray(data)) {
+        // Old format — backward compat
+        setLibrary(data);
+        setLibraryAlbumsData([]);
+      } else {
+        // New format: { albums, tracks }
+        setLibrary(Array.isArray(data.tracks) ? data.tracks : []);
+        setLibraryAlbumsData(Array.isArray(data.albums) ? data.albums : []);
+      }
+      const trackCount = Array.isArray(data) ? data.length : (Array.isArray(data.tracks) ? data.tracks.length : 0);
+      try { telemetry.emit('library_fetch_complete', { trackCount, latencyMs }); } catch {}
     } catch (err) {
       console.error('Library load failed:', err);
     }
   }
 
-  function groupLibrary(tracks) {
-    return tracks.reduce((acc, t) => {
-      const artist = t.artist || 'Unknown Artist';
-      const album = t.album || 'Unknown Album';
-      if (!acc[artist]) acc[artist] = {};
-      if (!acc[artist][album]) acc[artist][album] = { tracks: [], coverArt: t.coverArt || null, mbid: t.mbid || null };
-      acc[artist][album].tracks.push(t);
-      return acc;
-    }, {});
-  }
-
-  function libraryAlbums() {
+  // Old client-side grouping — kept as fallback when server doesn't provide album data
+  function oldGroupLibrary() {
     const grouped = groupLibrary(library);
     const byAlbumName = {};
     for (const [artist, albumMap] of Object.entries(grouped)) {
@@ -65,11 +65,40 @@ export function useLibrary({ recentlyPlayed = [] } = {}) {
     return albums;
   }
 
+  function groupLibrary(tracks) {
+    return tracks.reduce((acc, t) => {
+      const artist = t.artist || 'Unknown Artist';
+      const album = t.album || 'Unknown Album';
+      if (!acc[artist]) acc[artist] = {};
+      if (!acc[artist][album]) acc[artist][album] = { tracks: [], coverArt: t.coverArt || null, mbid: t.mbid || null };
+      acc[artist][album].tracks.push(t);
+      return acc;
+    }, {});
+  }
+
+  function libraryAlbums() {
+    if (libraryAlbumsData.length > 0) {
+      // Use server-provided album grouping (correct album_artist)
+      return libraryAlbumsData.map(a => ({
+        albumId: a.albumId,
+        artist: a.artist,
+        album: a.album,
+        tracks: a.tracks || [],
+        coverArt: a.coverArt,
+        mbid: a.mbid,
+        trackCount: a.trackCount,
+        year: a.year,
+      }));
+    }
+    // Fallback to old client-side grouping
+    return oldGroupLibrary();
+  }
+
   const libraryKeys = useMemo(() => {
     const s = new Set();
     libraryAlbums().forEach(a => s.add((a.artist + '::' + a.album).toLowerCase()));
     return s;
-  }, [library]);
+  }, [library, libraryAlbumsData]);
 
   function isInLibrary(artist, album) {
     return libraryKeys.has((artist + '::' + album).toLowerCase());
@@ -116,6 +145,7 @@ export function useLibrary({ recentlyPlayed = [] } = {}) {
 
   return {
     library, setLibrary,
+    libraryAlbumsData,
     librarySortBy, setLibrarySortBy,
     libraryFilter, setLibraryFilter,
     showLibraryFilter, setShowLibraryFilter,

@@ -162,6 +162,7 @@ export function usePlayer({
         }
       }
       audioRef.current.src = src;
+      pendingIdxRef.current = null;
 
       try {
         traceRef.current?.emit('audio_src_set', { streamUrl: src, isYtPreview: !!track.isYtPreview });
@@ -243,7 +244,6 @@ export function usePlayer({
     const baseIdx = pendingIdxRef.current != null ? pendingIdxRef.current : playlistIdxRef.current;
     const next = (baseIdx + 1) % pl.length;
     pendingIdxRef.current = next;
-    setTimeout(() => { pendingIdxRef.current = null; }, 0);
 
     try { telemetry.emit('track_advance', { fromTrackId, toTrackId: pl[next]?.id, reason }); } catch {}
 

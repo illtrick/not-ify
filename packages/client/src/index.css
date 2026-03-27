@@ -159,6 +159,23 @@ input[type="range"]::-moz-range-thumb {
 .eq-bars .eq-bar-2 { animation: eq-bar-2 0.6s ease-in-out infinite 0.1s; }
 .eq-bars .eq-bar-3 { animation: eq-bar-3 0.7s ease-in-out infinite 0.2s; }
 
+/* Badge animations — smooth, subtle, non-distracting */
+@keyframes badge-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+.badge-processing {
+  animation: badge-pulse 2.5s ease-in-out infinite;
+}
+
+@keyframes badge-arrow-float {
+  0%, 100% { transform: translateY(0); opacity: 0.7; }
+  50% { transform: translateY(-2px); opacity: 1; }
+}
+.badge-upgrade-arrow {
+  animation: badge-arrow-float 2s ease-in-out infinite;
+}
+
 .track-excluded {
   opacity: 0.4;
 }

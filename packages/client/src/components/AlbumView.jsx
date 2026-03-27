@@ -428,11 +428,11 @@ export function AlbumView({
                   </div>
                 </div>
                 {!isMobile && <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-                  <QualityBadge format={track.format} />
+                  <QualityBadge format={track.format} fileStatus={track.fileStatus || (track.format ? 'available' : null)} />
                 </span>}
                 {!isMobile && (
                   <span style={{ width: 50, textAlign: 'right', fontSize: 12, color: COLORS.textSecondary, flexShrink: 0, marginLeft: 12 }}>
-                    {trackDurations[track.id] ? formatTime(trackDurations[track.id]) : ''}
+                    {track.duration ? formatTime(track.duration) : trackDurations[track.id] ? formatTime(trackDurations[track.id]) : ''}
                   </span>
                 )}
                 {isMobile && (
@@ -563,7 +563,7 @@ export function AlbumView({
                 <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center', marginLeft: 4 }}>
                   <QualityBadge
                     format={libTrack?.format}
-                    status={!libTrack ? getTrackDlStatus(artist, t.title, t.artist) : null}
+                    fileStatus={libTrack ? 'available' : getTrackDlStatus(artist, t.title, t.artist)}
                   />
                 </span>
                 {!isMobile && t.lengthMs && (
