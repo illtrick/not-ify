@@ -478,10 +478,13 @@ async function ytQueueAlbum({ artist, album, tracks, mbid, rgid, coverArt, year 
 
     // Skip non-music tracks (silence, data tracks, hidden tracks with no real title)
     const titleLower = trackTitle.toLowerCase().trim();
-    if (titleLower === '[silence]' || titleLower === 'silence'
-      || titleLower === '[data track]' || titleLower === 'data track'
-      || titleLower === '[untitled]' || titleLower === ''
-      || (track.lengthMs && track.lengthMs < 2000)) { // <2 seconds
+    let skipReason = null;
+    if (titleLower === '[silence]' || titleLower === 'silence') skipReason = 'silence';
+    else if (titleLower === '[data track]' || titleLower === 'data track') skipReason = 'data track';
+    else if (titleLower === '[untitled]' || titleLower === '') skipReason = 'no title';
+    else if (track.lengthMs && track.lengthMs < 500) skipReason = `too short (${track.lengthMs}ms)`; // <0.5 seconds (data tracks, silence)
+    if (skipReason) {
+      activity.log('youtube', 'info', `Skipped: "${trackTitle}" (${skipReason})`, { artist, album, title: trackTitle });
       continue;
     }
 
@@ -541,6 +544,60 @@ async function ytQueueAlbum({ artist, album, tracks, mbid, rgid, coverArt, year 
       queued.push({ id: entry.id, track: trackTitle, position, ytTitle: best.title });
     } catch (err) {
       errors.push({ track: trackTitle, error: err.message });
+    }
+  }
+
+  // Retry failed tracks with simplified search (just title, no artist prefix)
+  if (errors.length > 0 && errors.length <= 3) {
+    for (let i = errors.length - 1; i >= 0; i--) {
+      const err = errors[i];
+      try {
+        const retryResults = await yt.searchYouTube(err.track, 5).catch(() => []);
+        if (retryResults.length === 0) continue;
+
+        const trackLengthSec = tracks.find(t => (t.title || t.name) === err.track)?.lengthMs
+          ? tracks.find(t => (t.title || t.name) === err.track).lengthMs / 1000 : null;
+        const artistLow = artist.toLowerCase();
+        const titleLow = err.track.toLowerCase();
+
+        function retryScore(r) {
+          let score = 0;
+          const rTitle = (r.title || '').toLowerCase();
+          const rChannel = (r.channel || '').toLowerCase();
+          if (rTitle.includes(artistLow) || rChannel.includes(artistLow)) score += 50;
+          if (rTitle.includes(titleLow)) score += 30;
+          if (r.duration && r.duration > 600) score -= 20;
+          if (r.duration && r.duration > 1200) score -= 30;
+          if (trackLengthSec && r.duration) {
+            const diff = Math.abs(r.duration - trackLengthSec);
+            if (diff < 5) score += 25;
+            else if (diff < 15) score += 15;
+            else if (diff < 30) score += 5;
+            else if (diff > 60) score -= 10;
+          }
+          return score;
+        }
+
+        const scored = retryResults.map(r => ({ ...r, _score: retryScore(r) }));
+        scored.sort((a, b) => b._score - a._score);
+        const best = scored[0];
+
+        const origTrack = tracks.find(t => (t.title || t.name) === err.track);
+        const position = origTrack?.position || (queued.length + 1);
+        const paddedPos = String(position).padStart(2, '0');
+
+        activity.log('youtube', 'info', `Retry matched: "${err.track}" → "${best.title}" (score: ${best._score})`, { artist, title: err.track, ytTitle: best.title, score: best._score });
+
+        const entry = ytQueueAdd({
+          url: best.url || `https://www.youtube.com/watch?v=${best.id}`,
+          title: `${paddedPos}-${sanitizePath(err.track)}`,
+          artist: safeArtist,
+          album: safeAlbum,
+          coverArt: coverArt || null,
+        });
+        queued.push({ id: entry.id, track: err.track, position, ytTitle: best.title, retry: true });
+        errors.splice(i, 1);
+      } catch {}
     }
   }
 

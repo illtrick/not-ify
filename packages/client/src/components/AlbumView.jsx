@@ -123,7 +123,9 @@ export function AlbumView({
   }, [selectedAlbum]);
 
   if (!selectedAlbum) return null;
-  const { artist, album, year, coverArt, tracks, sources, fromSearch, trackCount, rgid } = selectedAlbum;
+  const { artist, album, year, coverArt: rawCoverArt, tracks, sources, fromSearch, trackCount, rgid } = selectedAlbum;
+  // Fallback: if no cover art URL but we have an rgid, use the cover art API endpoint
+  const coverArt = rawCoverArt || (rgid ? `/api/cover/rg/${rgid}` : null);
 
   // Build a map of library tracks for this album — keyed by both ID and lowercase title.
   // When tracks download while the user stays on the page, this map lets us replace stale
@@ -399,15 +401,32 @@ export function AlbumView({
               {Icon.clock(16, COLORS.textSecondary)}
             </span>}
           </div>
-          {pl.map((track, idx) => {
+          {(() => {
+            const hasMultipleDiscs = pl.some(t => (t.discNumber || 1) > 1);
+            let prevDiscNumber = null;
+            let discIdx = -1;
+            return pl.map((track, idx) => {
+            const currentDiscNumber = track.discNumber || 1;
+            let discHeader = null;
+            if (hasMultipleDiscs && currentDiscNumber !== prevDiscNumber) {
+              discIdx++;
+              discHeader = (
+                <div key={`disc-${currentDiscNumber}`} style={{ padding: '12px 16px 4px', fontSize: 12, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: '0.05em', borderTop: discIdx > 0 ? '1px solid rgba(255,255,255,0.06)' : 'none', marginTop: discIdx > 0 ? 8 : 0 }}>
+                  Disc {currentDiscNumber}
+                </div>
+              );
+              prevDiscNumber = currentDiscNumber;
+            }
             const isActive = currentTrack?.id === track.id
               || (currentTrack?.isYtPreview && currentTrack?.title === track.title
                   && currentAlbumInfo?.artist === artist && currentAlbumInfo?.album === album);
             const isHovered = hoveredTrack === track.id;
             const trackArtist = track.artist || artist;
+            const displayNumber = track.trackNumber || (idx + 1);
             return (
+              <React.Fragment key={track.id}>
+                {discHeader}
               <div
-                key={track.id}
                 role="listitem"
                 style={trackRowStyle(isActive, isHovered, isMobile)}
                 onClick={() => playTrack(track, pl, idx, { artist, album, coverArt, rgid })}
@@ -422,7 +441,7 @@ export function AlbumView({
                 ]))}
               >
                 <span style={{ width: isMobile ? 28 : 32, textAlign: 'right', marginRight: isMobile ? 12 : 16, fontSize: 14, color: isActive ? COLORS.accent : isHovered ? COLORS.accent : COLORS.textSecondary, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-                  <TrackNum isActive={isActive} isHovered={isHovered} number={idx + 1} />
+                  <TrackNum isActive={isActive} isHovered={isHovered} number={displayNumber} />
                 </span>
                 <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
                   <div style={{ fontSize: 14, fontWeight: 500, color: isActive ? COLORS.accent : COLORS.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -446,8 +465,10 @@ export function AlbumView({
                   </span>
                 )}
               </div>
+              </React.Fragment>
             );
-          })}
+          });
+          })()}
           {excludedTracks.map((track) => {
             const trackArtist = track.artist || artist;
             // Extract original filename for restore — stored in track.id as "excluded-<filename>"

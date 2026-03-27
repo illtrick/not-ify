@@ -783,13 +783,7 @@ function upsertAlbumTrack({ id, albumId, title, artist, trackNumber, discNumber,
   return timedRun(`
     INSERT INTO album_tracks (id, album_id, title, artist, track_number, disc_number, duration, mbid)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET
-      title = excluded.title,
-      artist = excluded.artist,
-      track_number = excluded.track_number,
-      disc_number = excluded.disc_number,
-      duration = excluded.duration,
-      mbid = excluded.mbid
+    ON CONFLICT(id) DO NOTHING
   `, id, albumId, title, artist, trackNumber, discNumber || 1, duration || null, mbid || null);
 }
 
