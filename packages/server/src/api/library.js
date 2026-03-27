@@ -295,35 +295,85 @@ router.get('/library', (req, res) => {
     // -------------------------------------------------------------------
     const albumsData = db.getAllAlbumsWithTracks();
 
+    // Build active job/queue state for badge derivation
+    // This makes badges reflect real-time system state, not just static DB rows
+    const activeAlbumJobs = new Map(); // key: 'artist|album' → job type
+    try {
+      const jobQueue = require('../services/job-queue');
+      const activeJobs = [...jobQueue.getByStatus('active'), ...jobQueue.getByStatus('pending')];
+      for (const job of activeJobs) {
+        const payload = typeof job.payload === 'string' ? JSON.parse(job.payload) : job.payload;
+        if (payload?.artist && payload?.album) {
+          const key = (payload.artist + '|' + payload.album).toLowerCase();
+          // upgrade > download > soulseek-download in priority
+          if (!activeAlbumJobs.has(key) || job.type === 'upgrade') {
+            activeAlbumJobs.set(key, job.type);
+          }
+        }
+      }
+    } catch {}
+
+    const activeYtAlbums = new Set(); // albums with active YT downloads
+    try {
+      const yt = require('./youtube');
+      const ytStatus = yt.getQueueStatus?.();
+      if (ytStatus?.active?.length || ytStatus?.queued?.length) {
+        for (const item of [...(ytStatus.active || []), ...(ytStatus.queued || [])]) {
+          if (item.artist && item.album) {
+            activeYtAlbums.add((item.artist + '|' + item.album).toLowerCase());
+          }
+        }
+      }
+    } catch {}
+
     // Transform to client-friendly format
-    const albums = albumsData.map(a => ({
-      albumId: a.id,
-      artist: a.album_artist,
-      album: a.title,
-      year: a.year,
-      trackCount: a.track_count,
-      duration: a.duration,
-      coverArt: a.cover_art_url,
-      mbid: a.mbid,
-      rgid: a.rgid,
-      compilation: !!a.compilation,
-      tracks: (a.tracks || []).map(t => ({
-        id: t.id,
-        title: t.title,
-        artist: t.artist,
-        trackNumber: t.track_number,
-        discNumber: t.disc_number,
-        duration: t.duration,
-        mbid: t.mbid,
-        // File state (null if not downloaded)
-        format: t.file?.format || null,
-        filepath: t.file?.filepath || null,
-        fileSize: t.file?.file_size || null,
-        scanStatus: t.file?.scan_status || null,
-        // Derived status for badges
-        fileStatus: t.file ? 'available' : null,
-      })),
-    }));
+    const albums = albumsData.map(a => {
+      const albumKey = (a.album_artist + '|' + a.title).toLowerCase();
+      const activeJobType = activeAlbumJobs.get(albumKey);
+      const hasActiveYt = activeYtAlbums.has(albumKey);
+
+      return {
+        albumId: a.id,
+        artist: a.album_artist,
+        album: a.title,
+        year: a.year,
+        trackCount: a.track_count,
+        duration: a.duration,
+        coverArt: a.cover_art_url,
+        mbid: a.mbid,
+        rgid: a.rgid,
+        compilation: !!a.compilation,
+        tracks: (a.tracks || []).map(t => {
+          // Derive fileStatus from system state
+          let fileStatus = null;
+          if (t.file) {
+            if (activeJobType === 'upgrade' || activeJobType === 'download' || activeJobType === 'soulseek-download') {
+              fileStatus = 'upgrading'; // has file + active upgrade = show format↑
+            } else {
+              fileStatus = 'available';
+            }
+          } else if (hasActiveYt || activeJobType) {
+            fileStatus = 'processing'; // no file + active download = processing
+          }
+
+          return {
+            id: t.id,
+            title: t.title,
+            artist: t.artist,
+            trackNumber: t.track_number,
+            discNumber: t.disc_number,
+            duration: t.duration,
+            mbid: t.mbid,
+            // File state (null if not downloaded)
+            format: t.file?.format || null,
+            filepath: t.file?.filepath || null,
+            fileSize: t.file?.file_size || null,
+            scanStatus: t.file?.scan_status || null,
+            fileStatus,
+          };
+        }),
+      };
+    });
 
     // Also generate flat track array for backward compatibility
     // This keeps existing client code working during transition

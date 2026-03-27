@@ -398,7 +398,7 @@ if confirm "Enable VPN?"; then
       *)                         VPN_REGION="" ;;
     esac
     if [ -n "$VPN_REGION" ]; then
-      success "VPN configured: ${BOLD}${VPN_PROVIDER}${NC} (${VPN_REGION} — change in Settings)"
+      success "VPN configured: ${BOLD}${VPN_PROVIDER}${NC} (default region: ${VPN_REGION}, change anytime in Settings)"
     else
       success "VPN configured: ${BOLD}${VPN_PROVIDER}${NC}"
     fi
@@ -454,8 +454,11 @@ else
 fi
 
 info "Pulling latest Not-ify image..."
-docker pull ghcr.io/illtrick/not-ify:latest 2>&1 | grep -E 'Pulling|Digest|Status|latest' | sed 's/^/  /' || true
-echo ""
+if docker pull ghcr.io/illtrick/not-ify:latest > /dev/null 2>&1; then
+  success "Image ready"
+else
+  warn "Pull failed — using cached image if available"
+fi
 
 info "Generating configuration and starting services..."
 echo ""

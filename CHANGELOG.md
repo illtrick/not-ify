@@ -7,6 +7,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 - **MINOR** (0.x.0): New features, meaningful improvements
 - **PATCH** (0.0.x): Bug fixes, polish, iteration on current features
 
+## [1.7.9] - 2026-03-26
+
+### Changed
+- **ClamAV scan policy corrected**: YouTube downloads (trusted CDN) now skip ClamAV scanning. Torrent/Real-Debrid and Soulseek downloads (untrusted peers) run full sync ClamAV validation before accepting files into the library. Previously this was backwards.
+- **CLI status lines**: Added ANSI clear-to-end-of-line (`\033[K`) to fix trailing character glitch during service startup progress display.
+- **CLI docker pull output**: Suppressed raw layer/digest output, shows clean "✓ Image ready" or "! Pull failed" message.
+- **CLI VPN region message**: Changed to "default region: US East, change anytime in Settings" for clarity.
+- **CLI service startup hints**: Shows estimated startup time for slow services (ClamAV: "usually 2-3 min", slskd: "usually 10-30s").
+
+### Added
+- **Metadata architecture redesign document**: `docs/architecture/metadata-redesign.md` — three-table schema (albums → album_tracks → track_files) separating immutable MB metadata from mutable file state. Addresses VA album splitting, cross-album bleed, duration recalculation, and badge timing issues. Implementation planned as separate initiative.
+- **Track lifecycle state model**: 17 system states mapped to 7 UI badge states (untouched, processing, streamable, format, upgrading, error). Documented in session notes.
+
 ## [1.7.4] - 2026-03-26
 
 ### Changed

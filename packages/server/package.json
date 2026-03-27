@@ -1,6 +1,6 @@
 {
   "name": "@not-ify/server",
-  "version": "1.7.8",
+  "version": "1.7.10",
   "private": true,
   "scripts": {
     "start": "node src/index.js",

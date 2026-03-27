@@ -604,4 +604,12 @@ router.get('/yt/stream/:videoId', async (req, res) => {
   }
 });
 
-module.exports = { router, ytQueueAlbum };
+// Expose queue status for library badge derivation (called internally, not via HTTP)
+function getQueueStatus() {
+  return {
+    active: ytQueue.filter(e => e.status === 'active').map(e => ({ artist: e.artist, album: e.album, title: e.title })),
+    queued: ytQueue.filter(e => e.status === 'queued').map(e => ({ artist: e.artist, album: e.album, title: e.title })),
+  };
+}
+
+module.exports = { router, ytQueueAlbum, getQueueStatus };

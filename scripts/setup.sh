@@ -168,7 +168,7 @@ CONTAINERS="not-ify slskd watchtower"
 TOTAL=$(echo "$CONTAINERS" | wc -w)
 
 # Configure slskd API key (wait for slskd to be running, not a fixed sleep)
-printf "\r  ${CYAN}▸${NC} Configuring services... [1/${TOTAL}]"
+printf "\r\033[K  ${CYAN}▸${NC} Configuring services... [1/${TOTAL}]"
 slskd_ready=0
 for i in $(seq 1 15); do
   if docker inspect --format='{{.State.Running}}' slskd 2>/dev/null | grep -q true; then
@@ -192,15 +192,19 @@ fi
 DONE=0
 for container in $CONTAINERS; do
   DONE=$((DONE + 1))
-  printf "\r  ${CYAN}▸${NC} Starting services... [${DONE}/${TOTAL}] %-20s" "$container"
+  printf "\r\033[K  ${CYAN}▸${NC} Starting services... [${DONE}/${TOTAL}] %s" "$container"
   if wait_healthy "$container" 30; then
     version_suffix=""
     if [ "$container" = "not-ify" ]; then
       running_ver=$(get_running_version "$PORT")
       [ -n "$running_ver" ] && version_suffix=" (v${running_ver})"
     fi
-    printf "\r  ${GREEN}✓${NC} %-30s\n" "${container}${version_suffix}"
+    printf "\r\033[K  ${GREEN}✓${NC} %s\n" "${container}${version_suffix}"
   else
-    printf "\r  ${YELLOW}!${NC} %-30s\n" "${container} — may still be starting"
+    # Show helpful estimates for slow-starting services
+    hint=""
+    [ "$container" = "clamav" ] && hint=" (usually 2-3 min)"
+    [ "$container" = "slskd" ] && hint=" (usually 10-30s)"
+    printf "\r\033[K  ${YELLOW}!${NC} %s\n" "${container} — may still be starting${hint}"
   fi
 done
