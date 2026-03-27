@@ -90,16 +90,16 @@ npm test --prefix packages/server  # Server only (550+ tests)
 
 ## Recent Changes
 
-**v1.6.0** — First-run setup wizard, one-command Docker install, no more hardcoded users
+**v1.7.13** — YT download reliability (concurrency tuning, per-track retry), VPN credential lifecycle fixes, Soulseek config seeding
 
-**v1.5.2** — MusicBrainz search 3-22x faster (token bucket, SQLite cache, strategy short-circuit, pre-warming)
+**v1.7.12** — 16 bug fixes across player, badges, data integrity, pipeline, and health dashboard
 
-**v1.5.1** — Settings UI for Soulseek credentials and music library path with folder browser
+**v1.7.9** — ClamAV scan policy, bootstrap UX improvements, metadata architecture redesign
 
-**v1.4.1** — Soulseek pipeline integration, per-track upgrades, track deletion with soft-exclude
+**v1.6.0** — First-run setup wizard, one-command Docker install
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
 ## License
 
-Private — personal use only.
+MIT
