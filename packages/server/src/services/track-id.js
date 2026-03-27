@@ -47,4 +47,20 @@ function titleFromFilename(filename) {
   return withoutExt.replace(/^\d+[\s._-]+/, '') || withoutExt;
 }
 
-module.exports = { generateTrackId, normalize, extractTrackNumber, titleFromFilename };
+/**
+ * Generate a stable album ID from artist + album name.
+ * Prefers the MusicBrainz release-group ID (rgid) when available;
+ * otherwise hashes (artist, album) the same way as track IDs.
+ *
+ * @param {string} artist
+ * @param {string} album
+ * @param {string} [rgid] - MusicBrainz release-group ID
+ * @returns {string} rgid or 16 hex char ID
+ */
+function generateAlbumId(artist, album, rgid) {
+  if (rgid) return rgid;
+  const key = normalize(artist) + '|' + normalize(album);
+  return crypto.createHash('sha256').update(key).digest('hex').slice(0, 16);
+}
+
+module.exports = { generateTrackId, generateAlbumId, normalize, extractTrackNumber, titleFromFilename };

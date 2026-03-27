@@ -159,6 +159,46 @@ function getDb() {
       created_at INTEGER NOT NULL,
       hit_count INTEGER DEFAULT 0
     );
+
+    CREATE TABLE IF NOT EXISTS albums (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      album_artist TEXT NOT NULL,
+      year INTEGER,
+      track_count INTEGER,
+      duration INTEGER,
+      mbid TEXT,
+      rgid TEXT,
+      cover_art_url TEXT,
+      genres TEXT,
+      compilation INTEGER DEFAULT 0,
+      created_at INTEGER DEFAULT (unixepoch()),
+      updated_at INTEGER DEFAULT (unixepoch())
+    );
+
+    CREATE TABLE IF NOT EXISTS album_tracks (
+      id TEXT PRIMARY KEY,
+      album_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      artist TEXT NOT NULL,
+      track_number INTEGER NOT NULL,
+      disc_number INTEGER DEFAULT 1,
+      duration INTEGER,
+      mbid TEXT,
+      created_at INTEGER DEFAULT (unixepoch())
+    );
+
+    CREATE TABLE IF NOT EXISTS track_files (
+      track_id TEXT PRIMARY KEY,
+      filepath TEXT NOT NULL UNIQUE,
+      format TEXT NOT NULL,
+      bitrate INTEGER,
+      file_size INTEGER,
+      file_duration REAL,
+      scan_status TEXT DEFAULT 'clean',
+      downloaded_at INTEGER DEFAULT (unixepoch()),
+      updated_at INTEGER DEFAULT (unixepoch())
+    );
   `);
 
   // Create indexes
@@ -170,6 +210,10 @@ function getDb() {
     CREATE INDEX IF NOT EXISTS idx_scrobbles_user_time ON scrobbles(user_id, played_at);
     CREATE INDEX IF NOT EXISTS idx_tracks_artist_album ON tracks(artist, album);
     CREATE INDEX IF NOT EXISTS idx_mb_cache_expires ON mb_cache(expires_at);
+    CREATE INDEX IF NOT EXISTS idx_album_tracks_album_id ON album_tracks(album_id);
+    CREATE INDEX IF NOT EXISTS idx_albums_rgid ON albums(rgid);
+    CREATE INDEX IF NOT EXISTS idx_albums_mbid ON albums(mbid);
+    CREATE INDEX IF NOT EXISTS idx_albums_artist_title ON albums(album_artist, title);
   `);
 
   // Migration: add role column if missing
@@ -694,6 +738,191 @@ function pruneDeletedTracks(validFilepaths) {
   }
 }
 
+// --- Albums ---
+
+function upsertAlbum({ id, title, albumArtist, year, trackCount, duration, mbid, rgid, coverArtUrl, genres, compilation }) {
+  return timedRun(`
+    INSERT INTO albums (id, title, album_artist, year, track_count, duration, mbid, rgid, cover_art_url, genres, compilation, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
+    ON CONFLICT(id) DO UPDATE SET
+      title = COALESCE(excluded.title, title),
+      album_artist = COALESCE(excluded.album_artist, album_artist),
+      year = COALESCE(excluded.year, year),
+      track_count = COALESCE(excluded.track_count, track_count),
+      duration = COALESCE(excluded.duration, duration),
+      cover_art_url = COALESCE(excluded.cover_art_url, cover_art_url),
+      genres = COALESCE(excluded.genres, genres),
+      compilation = COALESCE(excluded.compilation, compilation),
+      updated_at = unixepoch()
+  `, id, title, albumArtist, year || null, trackCount || null, duration || null,
+    mbid || null, rgid || null, coverArtUrl || null, genres || null, compilation ? 1 : 0);
+}
+
+function getAlbumById(id) {
+  return timedGet('SELECT * FROM albums WHERE id = ?', id);
+}
+
+function getAlbumByArtistAndTitle(albumArtist, title) {
+  return timedGet('SELECT * FROM albums WHERE LOWER(album_artist) = LOWER(?) AND LOWER(title) = LOWER(?)', albumArtist, title);
+}
+
+function getAlbumByRgid(rgid) {
+  return timedGet('SELECT * FROM albums WHERE rgid = ?', rgid);
+}
+
+function getAlbumByMbid(mbid) {
+  return timedGet('SELECT * FROM albums WHERE mbid = ?', mbid);
+}
+
+// --- Album Tracks ---
+
+function upsertAlbumTrack({ id, albumId, title, artist, trackNumber, discNumber, duration, mbid }) {
+  return timedRun(`
+    INSERT INTO album_tracks (id, album_id, title, artist, track_number, disc_number, duration, mbid)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      title = excluded.title,
+      artist = excluded.artist,
+      track_number = excluded.track_number,
+      disc_number = excluded.disc_number,
+      duration = excluded.duration,
+      mbid = excluded.mbid
+  `, id, albumId, title, artist, trackNumber, discNumber || 1, duration || null, mbid || null);
+}
+
+function getAlbumTracks(albumId) {
+  return timedAll('SELECT * FROM album_tracks WHERE album_id = ? ORDER BY disc_number, track_number', albumId);
+}
+
+function getAlbumTrackById(id) {
+  return timedGet('SELECT * FROM album_tracks WHERE id = ?', id);
+}
+
+// --- Track Files ---
+
+function upsertTrackFile({ trackId, filepath, format, bitrate, fileSize, fileDuration, scanStatus }) {
+  return timedRun(`
+    INSERT INTO track_files (track_id, filepath, format, bitrate, file_size, file_duration, scan_status, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, unixepoch())
+    ON CONFLICT(track_id) DO UPDATE SET
+      filepath = excluded.filepath,
+      format = excluded.format,
+      bitrate = excluded.bitrate,
+      file_size = excluded.file_size,
+      file_duration = excluded.file_duration,
+      scan_status = excluded.scan_status,
+      updated_at = unixepoch()
+  `, trackId, filepath, format, bitrate || null, fileSize || null, fileDuration || null, scanStatus || 'clean');
+}
+
+function getTrackFile(trackId) {
+  return timedGet('SELECT * FROM track_files WHERE track_id = ?', trackId);
+}
+
+function getTrackFilepath(trackId) {
+  const row = timedGet('SELECT filepath FROM track_files WHERE track_id = ?', trackId);
+  return row ? row.filepath : null;
+}
+
+function getTrackFilesByAlbumId(albumId) {
+  return timedAll(
+    'SELECT tf.* FROM track_files tf JOIN album_tracks at ON at.id = tf.track_id WHERE at.album_id = ?',
+    albumId
+  );
+}
+
+function removeTrackFile(trackId) {
+  return timedRun('DELETE FROM track_files WHERE track_id = ?', trackId);
+}
+
+function removeAlbumCascade(albumId) {
+  const db = getDb();
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM track_files WHERE track_id IN (SELECT id FROM album_tracks WHERE album_id = ?)').run(albumId);
+    db.prepare('DELETE FROM album_tracks WHERE album_id = ?').run(albumId);
+    db.prepare('DELETE FROM albums WHERE id = ?').run(albumId);
+  });
+  const start = performance.now();
+  tx();
+  const duration = performance.now() - start;
+  if (duration > SLOW_QUERY_MS) {
+    getLog().warn({ event: 'db.query.slow', duration: Math.round(duration), operation: 'removeAlbumCascade (transaction)' }, 'Slow transaction');
+  }
+}
+
+// --- Combined Queries ---
+
+function _groupAlbumRows(rows) {
+  const map = new Map();
+  for (const row of rows) {
+    if (!map.has(row.id)) {
+      map.set(row.id, {
+        id: row.id,
+        title: row.title,
+        album_artist: row.album_artist,
+        year: row.year,
+        track_count: row.track_count,
+        duration: row.duration,
+        mbid: row.mbid,
+        rgid: row.rgid,
+        cover_art_url: row.cover_art_url,
+        genres: row.genres,
+        compilation: row.compilation,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        tracks: [],
+      });
+    }
+    const album = map.get(row.id);
+    album.tracks.push({
+      id: row.track_id,
+      title: row.track_title,
+      artist: row.track_artist,
+      track_number: row.track_number,
+      disc_number: row.disc_number,
+      duration: row.track_duration,
+      mbid: row.track_mbid,
+      file: row.filepath ? {
+        filepath: row.filepath,
+        format: row.format,
+        bitrate: row.bitrate,
+        file_size: row.file_size,
+        file_duration: row.file_duration,
+        scan_status: row.scan_status,
+      } : null,
+    });
+  }
+  return [...map.values()];
+}
+
+function getAllAlbumsWithTracks() {
+  const rows = timedAll(`
+    SELECT a.*, at.id as track_id, at.title as track_title, at.artist as track_artist,
+           at.track_number, at.disc_number, at.duration as track_duration, at.mbid as track_mbid,
+           tf.filepath, tf.format, tf.bitrate, tf.file_size, tf.file_duration, tf.scan_status
+    FROM albums a
+    JOIN album_tracks at ON at.album_id = a.id
+    LEFT JOIN track_files tf ON tf.track_id = at.id
+    ORDER BY a.album_artist, a.title, at.disc_number, at.track_number
+  `);
+  return _groupAlbumRows(rows);
+}
+
+function getAlbumWithTracks(albumId) {
+  const rows = timedAll(`
+    SELECT a.*, at.id as track_id, at.title as track_title, at.artist as track_artist,
+           at.track_number, at.disc_number, at.duration as track_duration, at.mbid as track_mbid,
+           tf.filepath, tf.format, tf.bitrate, tf.file_size, tf.file_duration, tf.scan_status
+    FROM albums a
+    JOIN album_tracks at ON at.album_id = a.id
+    LEFT JOIN track_files tf ON tf.track_id = at.id
+    WHERE a.id = ?
+    ORDER BY at.disc_number, at.track_number
+  `, albumId);
+  const albums = _groupAlbumRows(rows);
+  return albums[0] || null;
+}
+
 // --- MB Cache ---
 
 function mbCacheGet(key) {
@@ -824,6 +1053,26 @@ module.exports = {
   removeTrackById,
   syncAlbumTracks,
   pruneDeletedTracks,
+  // Albums (v2 metadata)
+  upsertAlbum,
+  getAlbumById,
+  getAlbumByArtistAndTitle,
+  getAlbumByRgid,
+  getAlbumByMbid,
+  // Album Tracks (v2 metadata)
+  upsertAlbumTrack,
+  getAlbumTracks,
+  getAlbumTrackById,
+  // Track Files (v2 metadata)
+  upsertTrackFile,
+  getTrackFile,
+  getTrackFilepath,
+  getTrackFilesByAlbumId,
+  removeTrackFile,
+  removeAlbumCascade,
+  // Combined Queries (v2 metadata)
+  getAllAlbumsWithTracks,
+  getAlbumWithTracks,
   // MB Cache
   mbCacheGet,
   mbCacheSet,
