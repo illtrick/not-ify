@@ -230,6 +230,9 @@ function getDb() {
     _db.exec("ALTER TABLE tracks ADD COLUMN year TEXT");
   }
 
+  // Migration: populate albums/album_tracks/track_files from existing tracks
+  migrateToAlbumSchema();
+
   return _db;
 }
 
@@ -979,6 +982,132 @@ function optimize() {
   getDb().pragma('optimize');
 }
 
+// --- Migration: Album Schema (v2) ---
+
+function migrateToAlbumSchema() {
+  const db = getDb();
+
+  // Check schema version — skip if already migrated
+  const version = getGlobalSetting('schema_version') || 1;
+  if (version >= 2) return;
+
+  console.log('[db] Migrating to album schema (v2)...');
+
+  const MUSIC_DIR = process.env.MUSIC_DIR || '/music';
+  const tracks = db.prepare('SELECT * FROM tracks').all();
+
+  // Group tracks by (artist, album)
+  const albumGroups = new Map();
+  for (const t of tracks) {
+    const key = t.artist + '|' + t.album;
+    if (!albumGroups.has(key)) albumGroups.set(key, []);
+    albumGroups.get(key).push(t);
+  }
+
+  const { generateAlbumId, generateTrackId, normalize } = require('./track-id');
+
+  for (const [key, groupTracks] of albumGroups) {
+    const firstTrack = groupTracks[0];
+    const artist = firstTrack.artist;
+    const album = firstTrack.album;
+
+    // Try to read .metadata.json for MB data
+    let meta = null;
+    try {
+      const { sanitizePath } = require('./downloader');
+      const metaPath = path.join(MUSIC_DIR, sanitizePath(artist), sanitizePath(album), '.metadata.json');
+      if (fs.existsSync(metaPath)) {
+        meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+      }
+    } catch {}
+
+    // Determine album_artist
+    const uniqueArtists = new Set(groupTracks.map(t => normalize(t.artist)));
+    const isCompilation = uniqueArtists.size >= 3;
+    const albumArtist = isCompilation ? 'Various Artists' : artist;
+
+    // Generate album ID
+    const albumId = generateAlbumId(albumArtist, album, meta?.rgid);
+
+    // Calculate duration from tracks (in seconds)
+    // If MB data has lengthMs, use that. Otherwise use 0.
+    let totalDuration = 0;
+    if (meta?.mbTracks) {
+      totalDuration = Math.round(meta.mbTracks.reduce((sum, t) => sum + (t.lengthMs || 0), 0) / 1000);
+    }
+
+    // Upsert album
+    upsertAlbum({
+      id: albumId,
+      title: meta?.album || album,
+      albumArtist,
+      year: meta?.year || firstTrack.year || null,
+      trackCount: meta?.mbTracks?.length || groupTracks.length,
+      duration: totalDuration || null,
+      mbid: meta?.mbid || null,
+      rgid: meta?.rgid || null,
+      coverArtUrl: meta?.coverArt || null,
+      genres: null,
+      compilation: isCompilation ? 1 : 0,
+    });
+
+    // Create album_tracks — prefer MB data if available
+    if (meta?.mbTracks && meta.mbTracks.length > 0) {
+      for (const mbTrack of meta.mbTracks) {
+        const trackId = generateTrackId(albumArtist, album, mbTrack.title, 0);
+        upsertAlbumTrack({
+          id: trackId,
+          albumId,
+          title: mbTrack.title,
+          artist: albumArtist, // per-track artist defaults to album artist
+          trackNumber: mbTrack.position || 0,
+          discNumber: 1,
+          duration: mbTrack.lengthMs ? Math.round(mbTrack.lengthMs / 1000) : null,
+          mbid: null,
+        });
+      }
+    } else {
+      // No MB data — create from existing tracks
+      for (const t of groupTracks) {
+        upsertAlbumTrack({
+          id: t.id,
+          albumId,
+          title: t.title,
+          artist: t.artist,
+          trackNumber: t.track_number || 0,
+          discNumber: 1,
+          duration: null,
+          mbid: null,
+        });
+      }
+    }
+
+    // Create track_files for each existing file
+    for (const t of groupTracks) {
+      // Find matching album_track by title
+      const albumTracks = getAlbumTracks(albumId);
+      const matchingTrack = albumTracks.find(at =>
+        normalize(at.title) === normalize(t.title)
+      ) || albumTracks.find(at => at.track_number === t.track_number);
+
+      if (matchingTrack && t.filepath) {
+        upsertTrackFile({
+          trackId: matchingTrack.id,
+          filepath: t.filepath,
+          format: t.format,
+          bitrate: null,
+          fileSize: t.file_size || null,
+          fileDuration: null,
+          scanStatus: 'clean',
+        });
+      }
+    }
+  }
+
+  setGlobalSetting('schema_version', 2);
+  console.log('[db] Migration to album schema complete. ' + albumGroups.size + ' albums migrated.');
+}
+
 // --- Cleanup ---
 
 function close() {
@@ -1078,6 +1207,8 @@ module.exports = {
   mbCacheSet,
   mbCacheCleanup,
   mbCacheStats,
+  // Migration
+  migrateToAlbumSchema,
   // Diagnostics
   benchmark,
   getWalSize,
