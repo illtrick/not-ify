@@ -195,12 +195,23 @@ export function search(q) {
 // MusicBrainz
 // ---------------------------------------------------------------------------
 
-export function getMbReleaseTracks(mbid) {
-  return get(`/api/mb/release/${mbid}/tracks`);
+export function getMbReleaseTracks(mbid, { artist, album, year, rgid } = {}) {
+  const params = new URLSearchParams();
+  if (artist) params.set('artist', artist);
+  if (album) params.set('album', album);
+  if (year) params.set('year', year);
+  if (rgid) params.set('rgid', rgid);
+  const qs = params.toString();
+  return get(`/api/mb/release/${mbid}/tracks${qs ? '?' + qs : ''}`);
 }
 
-export function getMbRgTracks(rgid) {
-  return get(`/api/mb/release-group/${rgid}/tracks`);
+export function getMbRgTracks(rgid, { artist, album, year } = {}) {
+  const params = new URLSearchParams();
+  if (artist) params.set('artist', artist);
+  if (album) params.set('album', album);
+  if (year) params.set('year', year);
+  const qs = params.toString();
+  return get(`/api/mb/release-group/${rgid}/tracks${qs ? '?' + qs : ''}`);
 }
 
 // ---------------------------------------------------------------------------

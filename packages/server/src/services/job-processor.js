@@ -322,9 +322,6 @@ async function processDownload(job, payload) {
     const skippedWorse = [];
     const skippedExcluded = [];
     const failedFiles = [];
-    const deferClam = !payload.upgradeFrom;
-    const filesToScanLater = [];
-
     for (const link of links) {
       let unrestricted;
       try {
@@ -362,9 +359,9 @@ async function processDownload(job, payload) {
       }
 
       // Validate + replace each file immediately
-      // ClamAV is deferred so tracks land in the library quickly — scan runs async after sync
+      // ClamAV runs sync for torrent/RD downloads (untrusted source)
       for (const filePath of filesToProcess) {
-        const validation = await fileValidator.validateFile(filePath, { deferClam });
+        const validation = await fileValidator.validateFile(filePath);
         if (!validation.passed) {
           const failedChecks = validation.checks.filter(c => !c.passed && !c.skipped).map(c => c.name).join(', ');
           log('pipeline', 'info', `[job ${job.id}] Validation failed for ${path.basename(filePath)}: ${failedChecks}`);
@@ -377,7 +374,6 @@ async function processDownload(job, payload) {
         upgraded.push(...trackResult.upgraded);
         skippedWorse.push(...trackResult.skippedWorse);
         skippedExcluded.push(...trackResult.skippedExcluded);
-        if (deferClam) filesToScanLater.push(...trackResult.upgraded);
 
         // Clean up staging copy
         try { fs.unlinkSync(filePath); } catch {}
@@ -399,24 +395,75 @@ async function processDownload(job, payload) {
       library.invalidateCache();
     } catch (e) { console.warn('[pipeline] syncAlbum failed:', e.message); }
 
-    // Async ClamAV scan for deferred files — runs after tracks are already streamable
-    if (filesToScanLater.length > 0) {
-      setImmediate(async () => {
-        for (const f of filesToScanLater) {
-          const destPath = path.join(destDir, path.basename(f));
-          if (!fs.existsSync(destPath)) continue;
-          const clamResult = await fileValidator.scanClamAV(destPath);
-          if (!clamResult.skipped && !clamResult.passed) {
-            log('pipeline', 'warn', `[job ${job.id}] Async ClamAV failed for ${path.basename(f)}: ${clamResult.detail} — removing file`);
-            try { fs.unlinkSync(destPath); } catch {}
-            try {
-              const library = require('../api/library');
-              library.syncAlbum(artist, album);
-              library.invalidateCache();
-            } catch {}
+    // Sync new album schema (albums/album_tracks/track_files) — best-effort
+    try {
+      const db = require('./db');
+      const { generateAlbumId, generateTrackId, normalize } = require('./track-id');
+      const metaPath = path.join(destDir, '.metadata.json');
+      let meta = {};
+      try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); } catch {}
+
+      const albumId = generateAlbumId(meta.artist || artist, meta.album || album, meta.rgid);
+
+      // Ensure album exists
+      if (!db.getAlbumById(albumId)) {
+        db.upsertAlbum({
+          id: albumId,
+          title: meta.album || album,
+          albumArtist: meta.artist || artist,
+          year: meta.year ? parseInt(meta.year, 10) : null,
+          trackCount: meta.mbTracks ? meta.mbTracks.length : upgraded.length,
+          duration: meta.mbTracks ? Math.round(meta.mbTracks.reduce((s, t) => s + (t.lengthMs || 0), 0) / 1000) : null,
+          mbid: meta.mbid || null,
+          rgid: meta.rgid || null,
+          coverArtUrl: meta.coverArt || null,
+          genres: null,
+          compilation: 0,
+        });
+
+        if (meta.mbTracks) {
+          for (const t of meta.mbTracks) {
+            db.upsertAlbumTrack({
+              id: generateTrackId(meta.artist || artist, meta.album || album, t.title, 0),
+              albumId,
+              title: t.title,
+              artist: meta.artist || artist,
+              trackNumber: t.position || 0,
+              discNumber: 1,
+              duration: t.lengthMs ? Math.round(t.lengthMs / 1000) : null,
+              mbid: null,
+            });
           }
         }
-      });
+      }
+
+      // Write track_files for each audio file in the album directory
+      const albumTracks = db.getAlbumTracks(albumId);
+      const audioFiles = fs.readdirSync(destDir).filter(f => /\.(mp3|flac|ogg|m4a|opus|wav|aiff|alac|aac|wma)$/i.test(f));
+      for (const file of audioFiles) {
+        const title = file.replace(/^\d+[-_\s]*/, '').replace(/\.[^.]+$/, '').replace(/_/g, ' ').trim();
+        const matchingTrack = albumTracks.find(at => normalize(at.title) === normalize(title))
+          || albumTracks.find(at => {
+            const fileNum = parseInt(file.match(/^(\d+)/)?.[1], 10);
+            return fileNum && at.track_number === fileNum;
+          });
+
+        if (matchingTrack) {
+          const filepath = path.join(destDir, file);
+          const ext = path.extname(file).replace('.', '').toLowerCase();
+          db.upsertTrackFile({
+            trackId: matchingTrack.id,
+            filepath,
+            format: ext,
+            bitrate: null,
+            fileSize: fs.statSync(filepath).size,
+            fileDuration: null,
+            scanStatus: 'clean',
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('[pipeline] Failed to sync album schema:', err.message);
     }
 
     return {
@@ -623,8 +670,8 @@ async function processSoulseekDownload(job, payload) {
         const stagingPath = path.join(stagingDir, safeName);
         fs.copyFileSync(foundPath, stagingPath);
 
-        // Validate (MIME + ffprobe; ClamAV deferred for initial downloads)
-        const fileVal = await fileValidator.validateFile(stagingPath, { deferClam: true });
+        // Validate (MIME + ffprobe + ClamAV — Soulseek is untrusted source)
+        const fileVal = await fileValidator.validateFile(stagingPath);
         if (!fileVal.passed) {
           const failedChecks = fileVal.checks.filter(c => !c.passed && !c.skipped).map(c => c.name).join(', ');
           log('pipeline', 'info', `[job ${job.id}] Validation failed for ${bn}: ${failedChecks}`);
@@ -696,24 +743,75 @@ async function processSoulseekDownload(job, payload) {
       library.invalidateCache();
     } catch (e) { console.warn('[pipeline] syncAlbum failed:', e.message); }
 
-    // Async ClamAV scan for deferred files — runs after tracks are already streamable
-    if (upgraded.length > 0) {
-      setImmediate(async () => {
-        for (const f of upgraded) {
-          const destPath = path.join(destDir, path.basename(f));
-          if (!fs.existsSync(destPath)) continue;
-          const clamResult = await fileValidator.scanClamAV(destPath);
-          if (!clamResult.skipped && !clamResult.passed) {
-            log('pipeline', 'warn', `[job ${job.id}] Async ClamAV failed for ${path.basename(f)}: ${clamResult.detail} — removing file`);
-            try { fs.unlinkSync(destPath); } catch {}
-            try {
-              const library = require('../api/library');
-              library.syncAlbum(artist, album);
-              library.invalidateCache();
-            } catch {}
+    // Sync new album schema (albums/album_tracks/track_files) — best-effort
+    try {
+      const db = require('./db');
+      const { generateAlbumId, generateTrackId, normalize } = require('./track-id');
+      const slskMetaPath = path.join(destDir, '.metadata.json');
+      let slskMeta = {};
+      try { slskMeta = JSON.parse(fs.readFileSync(slskMetaPath, 'utf8')); } catch {}
+
+      const slskAlbumId = generateAlbumId(slskMeta.artist || artist, slskMeta.album || album, slskMeta.rgid);
+
+      // Ensure album exists
+      if (!db.getAlbumById(slskAlbumId)) {
+        db.upsertAlbum({
+          id: slskAlbumId,
+          title: slskMeta.album || album,
+          albumArtist: slskMeta.artist || artist,
+          year: slskMeta.year ? parseInt(slskMeta.year, 10) : null,
+          trackCount: slskMeta.mbTracks ? slskMeta.mbTracks.length : upgraded.length,
+          duration: slskMeta.mbTracks ? Math.round(slskMeta.mbTracks.reduce((s, t) => s + (t.lengthMs || 0), 0) / 1000) : null,
+          mbid: slskMeta.mbid || null,
+          rgid: slskMeta.rgid || null,
+          coverArtUrl: slskMeta.coverArt || null,
+          genres: null,
+          compilation: 0,
+        });
+
+        if (slskMeta.mbTracks) {
+          for (const t of slskMeta.mbTracks) {
+            db.upsertAlbumTrack({
+              id: generateTrackId(slskMeta.artist || artist, slskMeta.album || album, t.title, 0),
+              albumId: slskAlbumId,
+              title: t.title,
+              artist: slskMeta.artist || artist,
+              trackNumber: t.position || 0,
+              discNumber: 1,
+              duration: t.lengthMs ? Math.round(t.lengthMs / 1000) : null,
+              mbid: null,
+            });
           }
         }
-      });
+      }
+
+      // Write track_files for each audio file in the album directory
+      const slskAlbumTracks = db.getAlbumTracks(slskAlbumId);
+      const slskAudioFiles = fs.readdirSync(destDir).filter(f => /\.(mp3|flac|ogg|m4a|opus|wav|aiff|alac|aac|wma)$/i.test(f));
+      for (const file of slskAudioFiles) {
+        const title = file.replace(/^\d+[-_\s]*/, '').replace(/\.[^.]+$/, '').replace(/_/g, ' ').trim();
+        const matchingTrack = slskAlbumTracks.find(at => normalize(at.title) === normalize(title))
+          || slskAlbumTracks.find(at => {
+            const fileNum = parseInt(file.match(/^(\d+)/)?.[1], 10);
+            return fileNum && at.track_number === fileNum;
+          });
+
+        if (matchingTrack) {
+          const filepath = path.join(destDir, file);
+          const ext = path.extname(file).replace('.', '').toLowerCase();
+          db.upsertTrackFile({
+            trackId: matchingTrack.id,
+            filepath,
+            format: ext,
+            bitrate: null,
+            fileSize: fs.statSync(filepath).size,
+            fileDuration: null,
+            scanStatus: 'clean',
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('[pipeline] Failed to sync album schema:', err.message);
     }
 
     return {

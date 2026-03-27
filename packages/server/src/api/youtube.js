@@ -269,6 +269,78 @@ async function ytDownloadOne(entry, abort) {
     console.warn(`Could not write .metadata.json: ${err.message}`);
   }
 
+  // Write to track_files in new album schema (best-effort)
+  try {
+    const db = require('../services/db');
+    const { generateAlbumId, generateTrackId, normalize } = require('../services/track-id');
+
+    const albumArtist = entry.artist || 'Unknown Artist';
+    const albumTitle = entry.album || 'Singles';
+
+    let album = db.getAlbumByArtistAndTitle(albumArtist, albumTitle);
+    if (!album) {
+      // Album not in new schema yet — create from .metadata.json if available
+      const metaPath = path.join(destDir, '.metadata.json');
+      let meta = {};
+      try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); } catch {}
+
+      const albumId = generateAlbumId(meta.artist || albumArtist, meta.album || albumTitle, meta.rgid);
+      db.upsertAlbum({
+        id: albumId,
+        title: meta.album || albumTitle,
+        albumArtist: meta.artist || albumArtist,
+        year: meta.year ? parseInt(meta.year, 10) : null,
+        trackCount: meta.trackCount || (meta.mbTracks ? meta.mbTracks.length : null),
+        duration: meta.mbTracks ? Math.round(meta.mbTracks.reduce((s, t) => s + (t.lengthMs || 0), 0) / 1000) : null,
+        mbid: meta.mbid || null,
+        rgid: meta.rgid || null,
+        coverArtUrl: meta.coverArt || null,
+        genres: null,
+        compilation: 0,
+      });
+
+      // Create album_tracks from mbTracks if available
+      if (meta.mbTracks) {
+        for (const t of meta.mbTracks) {
+          const trackId = generateTrackId(meta.artist || albumArtist, meta.album || albumTitle, t.title, 0);
+          db.upsertAlbumTrack({
+            id: trackId,
+            albumId,
+            title: t.title,
+            artist: meta.artist || albumArtist,
+            trackNumber: t.position || 0,
+            discNumber: 1,
+            duration: t.lengthMs ? Math.round(t.lengthMs / 1000) : null,
+            mbid: null,
+          });
+        }
+      }
+      album = db.getAlbumById(albumId);
+    }
+
+    if (album) {
+      // Match downloaded file to an album_track by title
+      const trackTitle = (entry.title || '').replace(/^\d+-/, '').replace(/_/g, ' ').trim();
+      const albumTracks = db.getAlbumTracks(album.id);
+      const matchingTrack = albumTracks.find(at => normalize(at.title) === normalize(trackTitle));
+
+      if (matchingTrack) {
+        const ext = path.extname(downloadedFile).replace('.', '').toLowerCase();
+        db.upsertTrackFile({
+          trackId: matchingTrack.id,
+          filepath: downloadedFile,
+          format: ext || 'mp3',
+          bitrate: null,
+          fileSize: fs.statSync(downloadedFile).size,
+          fileDuration: null,
+          scanStatus: 'clean',
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('[yt-queue] Failed to write track_files:', err.message);
+  }
+
   // Pre-warm cover art cache
   try {
     fetch(`http://localhost:3000/api/cover/search?artist=${encodeURIComponent(dlArtist)}&album=${encodeURIComponent(dlAlbum)}`, { signal: AbortSignal.timeout(10000) }).catch(() => {});

@@ -10,12 +10,13 @@ export function useMbTracks(selectedAlbum, setSelectedAlbum) {
       setMbTracks([]);
       const cacheKey = selectedAlbum.mbid || selectedAlbum.rgid;
       const cached = getCachedMbTracks(cacheKey);
+      const meta = { artist: selectedAlbum.artist, album: selectedAlbum.album, year: selectedAlbum.year };
       if (selectedAlbum.mbid) {
-        (cached || api.getMbReleaseTracks(selectedAlbum.mbid))
+        (cached || api.getMbReleaseTracks(selectedAlbum.mbid, { ...meta, rgid: selectedAlbum.rgid }))
           .then(d => setMbTracks(d.tracks || []))
           .catch(() => {});
       } else if (selectedAlbum.rgid) {
-        (cached || api.getMbRgTracks(selectedAlbum.rgid))
+        (cached || api.getMbRgTracks(selectedAlbum.rgid, meta))
           .then(d => {
             setMbTracks(d.tracks || []);
             if (d.releaseMbid && !selectedAlbum.mbid) {

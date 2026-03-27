@@ -718,6 +718,72 @@ router.get('/mb/release/:mbid/tracks', async (req, res) => {
   if (!/^[0-9a-f-]{36}$/.test(mbid)) return res.status(400).json({ error: 'Invalid mbid' });
   try {
     const tracks = await getReleaseTracks(mbid);
+
+    // Side-effect: persist album + tracks to new schema (best-effort)
+    try {
+      const { artist, album, year, rgid } = req.query;
+      if (artist && album) {
+        const db = require('../services/db');
+        const { generateAlbumId, generateTrackId } = require('../services/track-id');
+
+        const albumArtist = artist;
+        const albumTitle = album;
+        const parsedYear = year ? parseInt(year, 10) : null;
+
+        const albumId = generateAlbumId(albumArtist, albumTitle, rgid || null);
+
+        const totalDuration = Math.round(tracks.reduce((sum, t) => sum + (t.lengthMs || 0), 0) / 1000);
+
+        db.upsertAlbum({
+          id: albumId,
+          title: albumTitle,
+          albumArtist,
+          year: parsedYear,
+          trackCount: tracks.length,
+          duration: totalDuration,
+          mbid: mbid,
+          rgid: rgid || null,
+          coverArtUrl: null,
+          genres: null,
+          compilation: 0,
+        });
+
+        // Detect compilation (3+ unique per-track artists)
+        const uniqueArtists = new Set(tracks.map(t => (t.artist || albumArtist).toLowerCase()));
+        if (uniqueArtists.size >= 3) {
+          db.upsertAlbum({
+            id: albumId,
+            title: albumTitle,
+            albumArtist: 'Various Artists',
+            year: parsedYear,
+            trackCount: tracks.length,
+            duration: totalDuration,
+            mbid: mbid,
+            rgid: rgid || null,
+            coverArtUrl: null,
+            genres: null,
+            compilation: 1,
+          });
+        }
+
+        for (const t of tracks) {
+          const trackId = generateTrackId(albumArtist, albumTitle, t.title, 0);
+          db.upsertAlbumTrack({
+            id: trackId,
+            albumId,
+            title: t.title,
+            artist: t.artist || albumArtist,
+            trackNumber: t.position || 0,
+            discNumber: 1,
+            duration: t.lengthMs ? Math.round(t.lengthMs / 1000) : null,
+            mbid: null,
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('[search] Failed to persist album metadata:', err.message);
+    }
+
     res.json({ tracks });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -730,6 +796,73 @@ router.get('/mb/release-group/:rgid/tracks', async (req, res) => {
   if (!/^[0-9a-f-]{36}$/.test(rgid)) return res.status(400).json({ error: 'Invalid rgid' });
   try {
     const result = await getReleaseGroupTracks(rgid);
+
+    // Side-effect: persist album + tracks to new schema (best-effort)
+    try {
+      const { artist, album, year } = req.query;
+      if (artist && album) {
+        const db = require('../services/db');
+        const { generateAlbumId, generateTrackId } = require('../services/track-id');
+
+        const albumArtist = artist;
+        const albumTitle = album;
+        const parsedYear = year ? parseInt(year, 10) : null;
+        const tracks = result.tracks || [];
+
+        const albumId = generateAlbumId(albumArtist, albumTitle, rgid);
+
+        const totalDuration = Math.round(tracks.reduce((sum, t) => sum + (t.lengthMs || 0), 0) / 1000);
+
+        db.upsertAlbum({
+          id: albumId,
+          title: albumTitle,
+          albumArtist,
+          year: parsedYear,
+          trackCount: tracks.length,
+          duration: totalDuration,
+          mbid: result.releaseMbid || null,
+          rgid: rgid,
+          coverArtUrl: null,
+          genres: null,
+          compilation: 0,
+        });
+
+        // Detect compilation (3+ unique per-track artists)
+        const uniqueArtists = new Set(tracks.map(t => (t.artist || albumArtist).toLowerCase()));
+        if (uniqueArtists.size >= 3) {
+          db.upsertAlbum({
+            id: albumId,
+            title: albumTitle,
+            albumArtist: 'Various Artists',
+            year: parsedYear,
+            trackCount: tracks.length,
+            duration: totalDuration,
+            mbid: result.releaseMbid || null,
+            rgid: rgid,
+            coverArtUrl: null,
+            genres: null,
+            compilation: 1,
+          });
+        }
+
+        for (const t of tracks) {
+          const trackId = generateTrackId(albumArtist, albumTitle, t.title, 0);
+          db.upsertAlbumTrack({
+            id: trackId,
+            albumId,
+            title: t.title,
+            artist: t.artist || albumArtist,
+            trackNumber: t.position || 0,
+            discNumber: 1,
+            duration: t.lengthMs ? Math.round(t.lengthMs / 1000) : null,
+            mbid: null,
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('[search] Failed to persist album metadata:', err.message);
+    }
+
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
