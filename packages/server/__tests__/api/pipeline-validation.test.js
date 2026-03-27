@@ -222,14 +222,14 @@ describe('Pipeline validation — YouTube path', () => {
         album: 'Singles',
       });
 
-    // Allow the queue processor to run
-    await new Promise(r => setTimeout(r, 300));
+    // Allow the queue processor to run (includes 5s retry backoff + retry attempt)
+    await new Promise(r => setTimeout(r, 8000));
 
     const queueRes = await request(app).get('/api/download/yt/queue');
 
     expect(mockFsUnlinkSync).toHaveBeenCalled();
     expect(queueRes.body.errors).toBeGreaterThan(0);
-  });
+  }, 15000);
 
   test('YouTube file that passes validation completes successfully', async () => {
     mockValidateFile.mockResolvedValue({
@@ -252,14 +252,15 @@ describe('Pipeline validation — YouTube path', () => {
         album: 'Singles',
       });
 
-    await new Promise(r => setTimeout(r, 300));
+    // Allow the queue processor to run (includes 3s cooldown between batches)
+    await new Promise(r => setTimeout(r, 5000));
 
     const queueRes = await request(app).get('/api/download/yt/queue');
     // A new entry completed successfully
     expect(queueRes.body.completed).toBeGreaterThan(completedBefore);
     // No new errors were added
     expect(queueRes.body.errors).toBe(errorsBefore);
-  });
+  }, 15000);
 });
 
 // ---------------------------------------------------------------------------
