@@ -86,6 +86,7 @@ export function useLibrary({ recentlyPlayed = [] } = {}) {
         tracks: a.tracks || [],
         coverArt: a.coverArt,
         mbid: a.mbid,
+        rgid: a.rgid,  // BUG-D02: expose rgid for consistent cover art URLs
         trackCount: a.trackCount,
         year: a.year,
       }));

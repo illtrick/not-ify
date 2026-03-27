@@ -92,11 +92,11 @@ export function MobileLibrary({
         <div style={{ textAlign: 'center', color: COLORS.textSecondary, fontSize: 14, padding: '32px 12px' }}>
           {libraryFilter ? 'No matches' : 'No music yet. Search and add some!'}
         </div>
-      ) : albums.map(({ artist, album, tracks, coverArt, mbid }) => {
+      ) : albums.map(({ artist, album, tracks, coverArt, mbid, rgid }) => {
         const isPlaying_ = currentAlbumInfo?.artist === artist && currentAlbumInfo?.album === album;
         return (
           <div key={`${artist}::${album}`}
-            onClick={() => { openAlbumFromLibrary(artist, album, tracks, coverArt, mbid); }}
+            onClick={() => { openAlbumFromLibrary(artist, album, tracks, coverArt, mbid, rgid); }}
             style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 8px', borderRadius: 8, cursor: 'pointer', minHeight: 56 }}
             {...contextMenuProps(e => showContextMenu(e, [
               { label: 'Play', action: () => playTrack(tracks[0], tracks, 0, { artist, album, coverArt }) },

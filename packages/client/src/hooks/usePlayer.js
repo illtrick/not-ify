@@ -162,6 +162,20 @@ export function usePlayer({
           setCurrentTrack({ ...track, path: undefined, isYtPreview: false });
         }
       }
+      // BUG-P01: If track is a YT preview with no library match, don't use a
+      // /api/stream/{mbTrackId} URL that will 404 — use the YT stream path or
+      // show an error if no YT video ID is available
+      if (track.isYtPreview && !trackPathMap?.get(track.id)) {
+        if (track.path && !track.path.startsWith('/api/stream/')) {
+          src = track.path; // Already a YT stream URL
+        } else if (track.ytVideoId) {
+          src = `/api/yt/stream/${track.ytVideoId}`;
+        } else {
+          // No YT video ID and no library file — can't play this track
+          setTrackError({ trackId: track.id, message: 'Track not yet downloaded' });
+          return;
+        }
+      }
       audioRef.current.src = src;
 
       try {

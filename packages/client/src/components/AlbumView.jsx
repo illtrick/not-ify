@@ -42,6 +42,7 @@ export function AlbumView({
   restoreExcludedTrack,
   getTrackDlStatus,
   onUpgradeTriggered,
+  upgradeOutcome,
   updatePlaylist,
   trackError,
 }) {
@@ -49,7 +50,7 @@ export function AlbumView({
   const renderStartRef = useRef(null);
   const albumHeaderRef = useRef(null);
   const [showStickyHeader, setShowStickyHeader] = useState(false);
-  const [upgradeState, setUpgradeState] = useState(null); // null | 'triggering' | 'queued' | 'error'
+  const [upgradeState, setUpgradeState] = useState(null); // null | 'triggering' | 'queued' | 'not_available' | 'error'
   const [lastUpgrade, setLastUpgrade] = useState(null); // { outcome, reason, quality, timestamp }
 
   const lossyFormats = ['mp3', 'aac', 'm4a', 'ogg', 'opus'];
@@ -70,6 +71,23 @@ export function AlbumView({
     observer.observe(albumHeaderRef.current);
     return () => observer.disconnect();
   }, [selectedAlbum, mainContentRef]);
+
+  // BUG-U02: React to SSE upgrade outcomes for this album
+  useEffect(() => {
+    if (!upgradeOutcome || !selectedAlbum) return;
+    const matchesAlbum = upgradeOutcome.artist?.toLowerCase() === artist?.toLowerCase()
+      && upgradeOutcome.album?.toLowerCase() === album?.toLowerCase();
+    if (!matchesAlbum && upgradeState !== 'queued' && upgradeState !== 'triggering') return;
+    // If we're waiting for a result and get any outcome, apply it
+    if (upgradeState === 'queued' || upgradeState === 'triggering') {
+      if (upgradeOutcome.type === 'not_available') {
+        setUpgradeState('not_available');
+        setTimeout(() => setUpgradeState(null), 10000);
+      } else if (upgradeOutcome.type === 'success') {
+        setUpgradeState(null); // Clear — badge will update via library refresh
+      }
+    }
+  }, [upgradeOutcome]);
 
   // Fetch last upgrade attempt for this album
   useEffect(() => {
@@ -366,12 +384,12 @@ export function AlbumView({
                       setTimeout(() => setUpgradeState(null), 4000);
                     }
                   }}
-                  disabled={upgradeState === 'triggering' || upgradeState === 'queued'}
+                  disabled={upgradeState === 'triggering' || upgradeState === 'queued' || upgradeState === 'not_available'}
                   style={{
                     padding: '7px 14px', borderRadius: 20,
                     border: `1px solid ${upgradeState === 'queued' ? COLORS.success : upgradeState === 'error' ? COLORS.danger || '#e94560' : COLORS.border}`,
                     background: 'transparent',
-                    color: upgradeState === 'queued' ? COLORS.success : upgradeState === 'error' ? (COLORS.danger || '#e94560') : COLORS.textSecondary,
+                    color: upgradeState === 'queued' ? COLORS.success : upgradeState === 'not_available' ? COLORS.textSecondary : upgradeState === 'error' ? (COLORS.danger || '#e94560') : COLORS.textSecondary,
                     fontSize: 12, fontWeight: 500,
                     cursor: upgradeState === 'triggering' || upgradeState === 'queued' ? 'default' : 'pointer',
                     transition: 'color 0.15s, border-color 0.15s',
@@ -382,7 +400,7 @@ export function AlbumView({
                   title={lastUpgrade ? `Last attempt: ${lastUpgrade.outcome}${lastUpgrade.reason ? ' — ' + lastUpgrade.reason : ''} (${(() => { const ago = Date.now() - lastUpgrade.timestamp; if (ago < 60000) return 'just now'; if (ago < 3600000) return Math.round(ago/60000) + 'm ago'; if (ago < 86400000) return Math.round(ago/3600000) + 'h ago'; return Math.round(ago/86400000) + 'd ago'; })()})` : 'Queue this album for quality upgrade'}
                 >
                   {upgradeState === 'triggering' && <span className="spin-slow" style={{ display: 'inline-flex' }}>{Icon.music(12, COLORS.textSecondary)}</span>}
-                  {upgradeState === 'queued' ? 'Upgrade queued' : upgradeState === 'error' ? 'Upgrade failed' : 'Upgrade'}
+                  {upgradeState === 'queued' ? 'Upgrade queued' : upgradeState === 'not_available' ? 'No upgrade available' : upgradeState === 'error' ? 'Upgrade failed' : 'Upgrade'}
                 </button>
               )}
             </div>
@@ -429,11 +447,24 @@ export function AlbumView({
               <div
                 role="listitem"
                 style={trackRowStyle(isActive, isHovered, isMobile)}
-                onClick={() => playTrack(track, pl, idx, { artist, album, coverArt, rgid })}
+                onClick={() => {
+                  // BUG-P01: undownloaded tracks (isYtPreview) should stream via YT, not 404
+                  if (track.isYtPreview && !track.format) {
+                    playAllFromYouTube([{ title: track.title, artist: track.artist || artist, position: track.trackNumber || idx + 1 }], artist, album, coverArt);
+                  } else {
+                    playTrack(track, pl, idx, { artist, album, coverArt, rgid });
+                  }
+                }}
                 onMouseEnter={() => setHoveredTrack(track.id)}
                 onMouseLeave={() => setHoveredTrack(null)}
                 {...contextMenuProps(e => showContextMenu(e, [
-                  { label: 'Play', action: () => playTrack(track, pl, idx, { artist, album, coverArt, rgid }) },
+                  { label: 'Play', action: () => {
+                    if (track.isYtPreview && !track.format) {
+                      playAllFromYouTube([{ title: track.title, artist: track.artist || artist, position: track.trackNumber || idx + 1 }], artist, album, coverArt);
+                    } else {
+                      playTrack(track, pl, idx, { artist, album, coverArt, rgid });
+                    }
+                  }},
                   { label: 'Play Next', action: () => { setQueue(prev => [track, ...prev]); } },
                   { label: 'Add to Queue', action: () => addToQueue(track) },
                   { divider: true },

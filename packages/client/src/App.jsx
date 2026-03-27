@@ -245,6 +245,9 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
     fetchLibraryConfig();
   }, [fetchLibraryConfig]);
 
+  // BUG-U02: Track latest upgrade outcome from SSE so AlbumView can show feedback
+  const [upgradeOutcome, setUpgradeOutcome] = useState(null);
+
   // ── Persistent SSE listener for upgrade completions ────────────────────────
   // Runs independently of the activity log panel — refreshes library when
   // background upgrades complete so format badges update in real time.
@@ -258,14 +261,28 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
           const entry = JSON.parse(event.data);
           // Refresh library on: upgrade completion, per-track upgrades, or YT download saves
           const isSaveEvent = entry.category === 'youtube' && entry.level === 'success' && entry.message?.startsWith('Saved:');
-          const isUpgradeEvent = (entry.category === 'upgrade' && entry.level === 'success')
-            || (entry.category === 'pipeline' && entry.level === 'info' && entry.message?.includes('upgraded'));
-          if (isSaveEvent) {
-            // Immediate refresh for track saves — badge should update ASAP
+          const isUpgradeComplete = entry.category === 'upgrade' && entry.level === 'success';
+          const isPerTrackUpgrade = entry.category === 'pipeline' && entry.level === 'info' && entry.message?.includes('upgraded');
+          // BUG-U02: Detect "no upgrade" outcomes from SSE and surface to AlbumView
+          const isUpgradeSkipped = entry.category === 'upgrade' && entry.level === 'info'
+            && (entry.message?.includes('Skipped') || entry.message?.includes('skipped'));
+          const isNoUpgradeFound = entry.category === 'pipeline' && entry.level === 'info'
+            && entry.message?.includes('No upgrade found');
+          if (isUpgradeSkipped || isNoUpgradeFound) {
+            // Extract artist/album from message metadata or text
+            const meta = entry.meta || {};
+            setUpgradeOutcome({ type: 'not_available', artist: meta.artist, album: meta.album, ts: Date.now() });
+          }
+          if (isUpgradeComplete) {
+            const meta = entry.meta || {};
+            setUpgradeOutcome({ type: 'success', artist: meta.artist, album: meta.album, ts: Date.now() });
+          }
+          // BUG-B01: Immediate refresh for high-priority events so badges update within 1s
+          if (isSaveEvent || isUpgradeComplete) {
             clearTimeout(connect._debounce);
             connect._debounce = null;
             loadLibrary?.();
-          } else if (isUpgradeEvent) {
+          } else if (isPerTrackUpgrade) {
             // Debounce rapid per-track updates — only refresh every 1s max
             if (!connect._debounce) {
               connect._debounce = setTimeout(() => {
@@ -494,7 +511,9 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
       loadLibrary();
       const pl = libMatch.tracks.map(t => ({ ...t, path: buildTrackPath(t.id), coverArt: libMatch.coverArt }));
       const year = libMatch.year || libMatch.tracks.find(t => t.year)?.year || '';
-      setSelectedAlbum({ artist: libMatch.artist, album: libMatch.album, year, tracks: pl, coverArt: libMatch.coverArt, mbid: libMatch.mbid, sources: [], fromSearch: false });
+      // BUG-D02: include rgid for consistent cover art URLs
+      const effectiveRgid = libMatch.rgid || r.rgid;
+      setSelectedAlbum({ artist: libMatch.artist, album: libMatch.album, year, tracks: pl, coverArt: libMatch.coverArt, mbid: libMatch.mbid, rgid: effectiveRgid, sources: [], fromSearch: false });
       prevViewRef.current = view;
       setView('album');
     } else {
@@ -605,7 +624,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
     setView('album');
   }
 
-  function openAlbumFromLibrary(artist, albumName, tracks, coverArt, mbid) {
+  function openAlbumFromLibrary(artist, albumName, tracks, coverArt, mbid, rgid) {
     try { telemetry.emit('nav_album', { source: 'library', artist, album: albumName }); } catch {}
     // Refresh library to get latest format info (badges may be stale after upgrades)
     loadLibrary();
@@ -614,7 +633,8 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
     const year = tracks.find(t => t.year)?.year
       || recentlyPlayed.find(r => r.artist === artist && r.album === albumName)?.year
       || '';
-    setSelectedAlbum({ artist, album: albumName, year, tracks: pl, coverArt, mbid, sources: [], fromSearch: false });
+    // BUG-D02: include rgid for consistent cover art URLs
+    setSelectedAlbum({ artist, album: albumName, year, tracks: pl, coverArt, mbid, rgid, sources: [], fromSearch: false });
     prevViewRef.current = view;
     setView('album');
   }
@@ -630,7 +650,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
       const match = albums.find(a => a.artist === currentAlbumInfo.artist && a.album === currentAlbumInfo.album);
       if (match && match.tracks.length > 1) {
         // Library album has multiple tracks — open from library (complete album)
-        openAlbumFromLibrary(match.artist, match.album, match.tracks, match.coverArt, match.mbid);
+        openAlbumFromLibrary(match.artist, match.album, match.tracks, match.coverArt, match.mbid, match.rgid);
         return;
       }
       // Library album has only 1 track (likely auto-downloaded single) and we have MB metadata
@@ -648,7 +668,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
       }
       // Library album with 1 track and no MB metadata — open from library as fallback
       if (match) {
-        openAlbumFromLibrary(match.artist, match.album, match.tracks, match.coverArt, match.mbid);
+        openAlbumFromLibrary(match.artist, match.album, match.tracks, match.coverArt, match.mbid, match.rgid);
         return;
       }
     }
@@ -665,7 +685,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
         a.tracks.some(t => normArtist(t.title) === nt)
       );
       if (trackMatch) {
-        openAlbumFromLibrary(trackMatch.artist, trackMatch.album, trackMatch.tracks, trackMatch.coverArt, trackMatch.mbid);
+        openAlbumFromLibrary(trackMatch.artist, trackMatch.album, trackMatch.tracks, trackMatch.coverArt, trackMatch.mbid, trackMatch.rgid);
         return;
       }
     }
@@ -949,6 +969,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
                     restoreExcludedTrack={restoreExcludedTrackFromLibrary}
                     getTrackDlStatus={getTrackDlStatus}
                     onUpgradeTriggered={startJobQueuePoll}
+                    upgradeOutcome={upgradeOutcome}
                     updatePlaylist={updatePlaylist}
                     trackError={trackError}
                   />
