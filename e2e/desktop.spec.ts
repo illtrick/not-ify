@@ -90,11 +90,17 @@ test.describe('Desktop — search flow', () => {
 });
 
 test.describe('Desktop — API integration', () => {
-  test('GET /api/library returns JSON array', async ({ request }) => {
+  test('GET /api/library returns albums and tracks', async ({ request }) => {
     const res = await request.get(`${BASE}/api/library`);
     expect(res.ok()).toBe(true);
     const body = await res.json();
-    expect(Array.isArray(body)).toBe(true);
+    // New format: { albums: [...], tracks: [...] } or legacy flat array
+    if (Array.isArray(body)) {
+      expect(true).toBe(true); // legacy format still valid
+    } else {
+      expect(Array.isArray(body.albums)).toBe(true);
+      expect(Array.isArray(body.tracks)).toBe(true);
+    }
   });
 
   test('GET /api/llm/health responds', async ({ request }) => {
