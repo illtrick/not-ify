@@ -730,14 +730,20 @@ router.get('/mb/release/:mbid/tracks', async (req, res) => {
         const albumTitle = album;
         const parsedYear = year ? parseInt(year, 10) : null;
 
-        const albumId = generateAlbumId(albumArtist, albumTitle, rgid || null);
+        // Check if album with this rgid already exists — avoids creating duplicates
+        const existingAlbum = rgid ? db.getAlbumByRgid(rgid) : null;
+        const albumId = existingAlbum ? existingAlbum.id : generateAlbumId(albumArtist, albumTitle, rgid || null);
 
         const totalDuration = Math.round(tracks.reduce((sum, t) => sum + (t.lengthMs || 0), 0) / 1000);
+
+        // Detect compilation (3+ unique per-track artists)
+        const uniqueArtists = new Set(tracks.map(t => (t.artist || albumArtist).toLowerCase()));
+        const isCompilation = uniqueArtists.size >= 3;
 
         db.upsertAlbum({
           id: albumId,
           title: albumTitle,
-          albumArtist,
+          albumArtist: isCompilation ? 'Various Artists' : albumArtist,
           year: parsedYear,
           trackCount: tracks.length,
           duration: totalDuration,
@@ -745,26 +751,8 @@ router.get('/mb/release/:mbid/tracks', async (req, res) => {
           rgid: rgid || null,
           coverArtUrl: null,
           genres: null,
-          compilation: 0,
+          compilation: isCompilation ? 1 : 0,
         });
-
-        // Detect compilation (3+ unique per-track artists)
-        const uniqueArtists = new Set(tracks.map(t => (t.artist || albumArtist).toLowerCase()));
-        if (uniqueArtists.size >= 3) {
-          db.upsertAlbum({
-            id: albumId,
-            title: albumTitle,
-            albumArtist: 'Various Artists',
-            year: parsedYear,
-            trackCount: tracks.length,
-            duration: totalDuration,
-            mbid: mbid,
-            rgid: rgid || null,
-            coverArtUrl: null,
-            genres: null,
-            compilation: 1,
-          });
-        }
 
         for (const t of tracks) {
           const trackId = generateTrackId(albumArtist, albumTitle, t.title, 0);
@@ -809,14 +797,20 @@ router.get('/mb/release-group/:rgid/tracks', async (req, res) => {
         const parsedYear = year ? parseInt(year, 10) : null;
         const tracks = result.tracks || [];
 
-        const albumId = generateAlbumId(albumArtist, albumTitle, rgid);
+        // Check if album with this rgid already exists — avoids creating duplicates
+        const existingAlbum = db.getAlbumByRgid(rgid);
+        const albumId = existingAlbum ? existingAlbum.id : generateAlbumId(albumArtist, albumTitle, rgid);
 
         const totalDuration = Math.round(tracks.reduce((sum, t) => sum + (t.lengthMs || 0), 0) / 1000);
+
+        // Detect compilation (3+ unique per-track artists)
+        const uniqueArtists = new Set(tracks.map(t => (t.artist || albumArtist).toLowerCase()));
+        const isCompilation = uniqueArtists.size >= 3;
 
         db.upsertAlbum({
           id: albumId,
           title: albumTitle,
-          albumArtist,
+          albumArtist: isCompilation ? 'Various Artists' : albumArtist,
           year: parsedYear,
           trackCount: tracks.length,
           duration: totalDuration,
@@ -824,26 +818,8 @@ router.get('/mb/release-group/:rgid/tracks', async (req, res) => {
           rgid: rgid,
           coverArtUrl: null,
           genres: null,
-          compilation: 0,
+          compilation: isCompilation ? 1 : 0,
         });
-
-        // Detect compilation (3+ unique per-track artists)
-        const uniqueArtists = new Set(tracks.map(t => (t.artist || albumArtist).toLowerCase()));
-        if (uniqueArtists.size >= 3) {
-          db.upsertAlbum({
-            id: albumId,
-            title: albumTitle,
-            albumArtist: 'Various Artists',
-            year: parsedYear,
-            trackCount: tracks.length,
-            duration: totalDuration,
-            mbid: result.releaseMbid || null,
-            rgid: rgid,
-            coverArtUrl: null,
-            genres: null,
-            compilation: 1,
-          });
-        }
 
         for (const t of tracks) {
           const trackId = generateTrackId(albumArtist, albumTitle, t.title, 0);

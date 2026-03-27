@@ -5,10 +5,12 @@ import { Icon } from './Icon';
 // ---------------------------------------------------------------------------
 // AlbumArt component — shows cover with placeholder fallback
 // ---------------------------------------------------------------------------
-export function AlbumArt({ src, size = 48, radius = 4, style = {}, artist, album }) {
-  const fallbackUrl = artist && album
+export function AlbumArt({ src, size = 48, radius = 4, style = {}, artist, album, rgid }) {
+  const rgidUrl = rgid ? `/api/cover/rg/${rgid}` : null;
+  const searchUrl = artist && album
     ? `/api/cover/search?artist=${encodeURIComponent(artist)}&album=${encodeURIComponent(album)}`
     : null;
+  const fallbackUrl = rgidUrl || searchUrl;
 
   const [phase, setPhase] = useState(() => src ? 'primary' : fallbackUrl ? 'fallback' : 'none');
 

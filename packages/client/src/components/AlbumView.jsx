@@ -123,7 +123,7 @@ export function AlbumView({
   }, [selectedAlbum]);
 
   if (!selectedAlbum) return null;
-  const { artist, album, year, coverArt, tracks, sources, fromSearch, trackCount } = selectedAlbum;
+  const { artist, album, year, coverArt, tracks, sources, fromSearch, trackCount, rgid } = selectedAlbum;
 
   // Build a map of library tracks for this album — keyed by both ID and lowercase title.
   // When tracks download while the user stays on the page, this map lets us replace stale
@@ -193,9 +193,11 @@ export function AlbumView({
     ? `rgba(${albumColor.join(',')},0.3)`
     : COLORS.surface;
 
-  // Compute total duration
+  // Compute total duration — prefer album-level duration from DB, then sum tracks
   const totalTrackCount = mbTracks.length || trackCount || pl.length;
   const computeTotalDuration = () => {
+    // Prefer album-level duration from DB (already populated by MB data)
+    if (selectedAlbum.duration) return selectedAlbum.duration;
     let totalSec = 0;
     if (isLib && trackDurations) {
       for (const t of pl) {
@@ -247,7 +249,7 @@ export function AlbumView({
           display: 'flex', alignItems: 'center', gap: 12,
           borderBottom: `1px solid rgba(255,255,255,0.06)`,
         }}>
-          <AlbumArt src={coverArt} size={48} radius={4} artist={artist} album={album} />
+          <AlbumArt src={coverArt} size={48} radius={4} artist={artist} album={album} rgid={rgid} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 15, fontWeight: 700, color: COLORS.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{album}</div>
             <div style={{ fontSize: 12, color: COLORS.textSecondary }}>{artist}</div>
@@ -258,7 +260,7 @@ export function AlbumView({
               <button
                 onClick={() => {
                   if (isThisPlaying) { togglePlay(); return; }
-                  if (isLib) playTrack(pl[0], pl, 0, { artist, album, coverArt });
+                  if (isLib) playTrack(pl[0], pl, 0, { artist, album, coverArt, rgid });
                   else playAllFromYouTube(mbTracks, artist, album, coverArt);
                 }}
                 style={{ width: 36, height: 36, borderRadius: '50%', border: 'none', background: COLORS.accent, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
@@ -278,7 +280,7 @@ export function AlbumView({
         </button>
 
         <div style={{ display: 'flex', gap: isMobile ? 16 : 28, alignItems: 'flex-end' }}>
-          <AlbumArt src={coverArt} size={isMobile ? 140 : 220} radius={8} style={{ boxShadow: '0 8px 48px rgba(0,0,0,0.6), 0 2px 12px rgba(0,0,0,0.3)', flexShrink: 0 }} artist={artist} album={album} />
+          <AlbumArt src={coverArt} size={isMobile ? 140 : 220} radius={8} style={{ boxShadow: '0 8px 48px rgba(0,0,0,0.6), 0 2px 12px rgba(0,0,0,0.3)', flexShrink: 0 }} artist={artist} album={album} rgid={rgid} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>Album</div>
             <h1 style={{ fontSize: isMobile ? 28 : 52, fontWeight: 900, color: COLORS.textPrimary, margin: '0 0 8px', lineHeight: 1.15, letterSpacing: '-0.5px' }}>{album}</h1>
@@ -325,7 +327,7 @@ export function AlbumView({
                     onClick={() => {
                       if (isThisAlbumPlaying) { togglePlay(); return; }
                       if (ytSearching) return;
-                      if (isLib) playTrack(pl[0], pl, 0, { artist, album, coverArt });
+                      if (isLib) playTrack(pl[0], pl, 0, { artist, album, coverArt, rgid });
                       else playAllFromYouTube(mbTracks, artist, album, coverArt);
                     }}
                     style={{
@@ -408,11 +410,11 @@ export function AlbumView({
                 key={track.id}
                 role="listitem"
                 style={trackRowStyle(isActive, isHovered, isMobile)}
-                onClick={() => playTrack(track, pl, idx, { artist, album, coverArt })}
+                onClick={() => playTrack(track, pl, idx, { artist, album, coverArt, rgid })}
                 onMouseEnter={() => setHoveredTrack(track.id)}
                 onMouseLeave={() => setHoveredTrack(null)}
                 {...contextMenuProps(e => showContextMenu(e, [
-                  { label: 'Play', action: () => playTrack(track, pl, idx, { artist, album, coverArt }) },
+                  { label: 'Play', action: () => playTrack(track, pl, idx, { artist, album, coverArt, rgid }) },
                   { label: 'Play Next', action: () => { setQueue(prev => [track, ...prev]); } },
                   { label: 'Add to Queue', action: () => addToQueue(track) },
                   { divider: true },

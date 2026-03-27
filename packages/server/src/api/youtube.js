@@ -319,13 +319,16 @@ async function ytDownloadOne(entry, abort) {
     }
 
     if (album) {
-      // Match downloaded file to an album_track by title
+      // Match downloaded file to an album_track — prefer track number, fall back to title
       const trackTitle = (entry.title || '').replace(/^\d+-/, '').replace(/_/g, ' ').trim();
       const albumTracks = db.getAlbumTracks(album.id);
-      const matchingTrack = albumTracks.find(at => normalize(at.title) === normalize(trackTitle));
+      const fileNum = parseInt((entry.title || '').match(/^(\d+)/)?.[1], 10);
+      const matchingTrack = (fileNum && albumTracks.find(at => at.track_number === fileNum))
+        || albumTracks.find(at => normalize(at.title) === normalize(trackTitle));
 
       if (matchingTrack) {
         const ext = path.extname(downloadedFile).replace('.', '').toLowerCase();
+        console.log(`[pipeline] track_files: ${matchingTrack.title} → ${ext} (${downloadedFile})`);
         db.upsertTrackFile({
           trackId: matchingTrack.id,
           filepath: downloadedFile,

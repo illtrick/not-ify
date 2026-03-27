@@ -25,7 +25,7 @@ export function useRecentlyPlayed() {
               for (const line of lines) {
                 if (line.startsWith('data: ')) {
                   try {
-                    const list = JSON.parse(line.slice(6));
+                    const list = JSON.parse(line.slice(6)).filter(r => r.artist && r.album);
                     setRecentlyPlayed(prev => {
                       if (prev.length === list.length && prev[0]?.playedAt === list[0]?.playedAt) return prev;
                       return list;
@@ -61,7 +61,7 @@ export function useRecentlyPlayed() {
             }
           } catch {}
         }
-        setRecentlyPlayed(serverList);
+        setRecentlyPlayed(serverList.filter(r => r.artist && r.album));
         try { localStorage.removeItem(RECENTLY_PLAYED_KEY); } catch {}
       })
       .catch(() => {
@@ -74,6 +74,7 @@ export function useRecentlyPlayed() {
 
   function addToRecentlyPlayed(item) {
     // item: { artist, album, coverArt, mbid, rgid }
+    if (!item.artist || !item.album) return; // Validate: skip empty entries
     setRecentlyPlayed(prev => {
       const key = (item.artist + '::' + item.album).toLowerCase();
       const filtered = prev.filter(r => (r.artist + '::' + r.album).toLowerCase() !== key);

@@ -442,15 +442,15 @@ async function processDownload(job, payload) {
       const audioFiles = fs.readdirSync(destDir).filter(f => /\.(mp3|flac|ogg|m4a|opus|wav|aiff|alac|aac|wma)$/i.test(f));
       for (const file of audioFiles) {
         const title = file.replace(/^\d+[-_\s]*/, '').replace(/\.[^.]+$/, '').replace(/_/g, ' ').trim();
-        const matchingTrack = albumTracks.find(at => normalize(at.title) === normalize(title))
-          || albumTracks.find(at => {
-            const fileNum = parseInt(file.match(/^(\d+)/)?.[1], 10);
-            return fileNum && at.track_number === fileNum;
-          });
+        // Track-number-first matching: unambiguous even when title matches album name
+        const fileNum = parseInt(file.match(/^(\d+)/)?.[1], 10);
+        const matchingTrack = (fileNum && albumTracks.find(at => at.track_number === fileNum))
+          || albumTracks.find(at => normalize(at.title) === normalize(title));
 
         if (matchingTrack) {
           const filepath = path.join(destDir, file);
           const ext = path.extname(file).replace('.', '').toLowerCase();
+          console.log(`[pipeline] track_files: ${matchingTrack.title} → ${ext} (${filepath})`);
           db.upsertTrackFile({
             trackId: matchingTrack.id,
             filepath,
@@ -790,15 +790,15 @@ async function processSoulseekDownload(job, payload) {
       const slskAudioFiles = fs.readdirSync(destDir).filter(f => /\.(mp3|flac|ogg|m4a|opus|wav|aiff|alac|aac|wma)$/i.test(f));
       for (const file of slskAudioFiles) {
         const title = file.replace(/^\d+[-_\s]*/, '').replace(/\.[^.]+$/, '').replace(/_/g, ' ').trim();
-        const matchingTrack = slskAlbumTracks.find(at => normalize(at.title) === normalize(title))
-          || slskAlbumTracks.find(at => {
-            const fileNum = parseInt(file.match(/^(\d+)/)?.[1], 10);
-            return fileNum && at.track_number === fileNum;
-          });
+        // Track-number-first matching: unambiguous even when title matches album name
+        const fileNum = parseInt(file.match(/^(\d+)/)?.[1], 10);
+        const matchingTrack = (fileNum && slskAlbumTracks.find(at => at.track_number === fileNum))
+          || slskAlbumTracks.find(at => normalize(at.title) === normalize(title));
 
         if (matchingTrack) {
           const filepath = path.join(destDir, file);
           const ext = path.extname(file).replace('.', '').toLowerCase();
+          console.log(`[pipeline] track_files: ${matchingTrack.title} → ${ext} (${filepath})`);
           db.upsertTrackFile({
             trackId: matchingTrack.id,
             filepath,

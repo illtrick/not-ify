@@ -257,17 +257,21 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
         try {
           const entry = JSON.parse(event.data);
           // Refresh library on: upgrade completion, per-track upgrades, or YT download saves
-          if (
-            (entry.category === 'upgrade' && entry.level === 'success') ||
-            (entry.category === 'pipeline' && entry.level === 'info' && entry.message?.includes('upgraded')) ||
-            (entry.category === 'youtube' && entry.level === 'success' && entry.message?.startsWith('Saved:'))
-          ) {
-            // Debounce rapid per-track updates — only refresh every 3s max
+          const isSaveEvent = entry.category === 'youtube' && entry.level === 'success' && entry.message?.startsWith('Saved:');
+          const isUpgradeEvent = (entry.category === 'upgrade' && entry.level === 'success')
+            || (entry.category === 'pipeline' && entry.level === 'info' && entry.message?.includes('upgraded'));
+          if (isSaveEvent) {
+            // Immediate refresh for track saves — badge should update ASAP
+            clearTimeout(connect._debounce);
+            connect._debounce = null;
+            loadLibrary?.();
+          } else if (isUpgradeEvent) {
+            // Debounce rapid per-track updates — only refresh every 1s max
             if (!connect._debounce) {
               connect._debounce = setTimeout(() => {
                 loadLibrary?.();
                 connect._debounce = null;
-              }, 3000);
+              }, 1000);
             }
           }
         } catch {}
