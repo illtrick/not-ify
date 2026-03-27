@@ -122,6 +122,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
     loadLibrary,
     libraryAlbums,
     isInLibrary,
+    trackPathMap,
     sidebarAlbums,
   } = useLibrary({ recentlyPlayed });
 
@@ -133,6 +134,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
     loadLibrary,
     isInLibrary,
     library,
+    trackPathMap,
     onStartBgPoll: () => download.startBgPoll(),
     onSetBgStatus: (status) => download.setBgDownloadStatus(status),
   });
@@ -147,6 +149,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
     playlistIdx, setPlaylistIdx,
     currentCoverArt, setCurrentCoverArt,
     crossfadeDuration, setCrossfadeDuration,
+    trackError,
     ytSearching,
     ytPendingTrack,
     hoveredTrack, setHoveredTrack,
@@ -943,6 +946,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
                     getTrackDlStatus={getTrackDlStatus}
                     onUpgradeTriggered={startJobQueuePoll}
                     updatePlaylist={updatePlaylist}
+                    trackError={trackError}
                   />
                 )}
                 {view === 'artist' && (

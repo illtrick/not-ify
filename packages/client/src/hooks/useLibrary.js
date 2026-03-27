@@ -94,6 +94,17 @@ export function useLibrary({ recentlyPlayed = [] } = {}) {
     return oldGroupLibrary();
   }
 
+  // O(1) track path lookup by ID — used by usePlayer to avoid scanning the full library array
+  const trackPathMap = useMemo(() => {
+    const map = new Map();
+    for (const t of library) {
+      if (t.id && (t.filepath || t.path)) {
+        map.set(t.id, t.filepath || t.path || `/api/stream/${t.id}`);
+      }
+    }
+    return map;
+  }, [library]);
+
   const libraryKeys = useMemo(() => {
     const s = new Set();
     libraryAlbums().forEach(a => s.add((a.artist + '::' + a.album).toLowerCase()));
@@ -152,6 +163,7 @@ export function useLibrary({ recentlyPlayed = [] } = {}) {
     loadLibrary,
     libraryAlbums,
     libraryKeys,
+    trackPathMap,
     isInLibrary,
     sidebarAlbums,
     buildLibraryTrackPath,

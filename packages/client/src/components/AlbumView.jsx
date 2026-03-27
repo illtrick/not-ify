@@ -43,6 +43,7 @@ export function AlbumView({
   getTrackDlStatus,
   onUpgradeTriggered,
   updatePlaylist,
+  trackError,
 }) {
   const telemetry = useTelemetry();
   const renderStartRef = useRef(null);
@@ -168,7 +169,9 @@ export function AlbumView({
         isYtPreview: false,            // no longer a preview
       };
     }
-    return t;
+    // No library file — mark as YT preview so the player uses YT streaming instead of
+    // generating a /api/stream/{mbTrackId} URL that will 404 (BUG-P01)
+    return { ...t, isYtPreview: !t.format, path: t.format ? `/api/stream/${t.id}` : undefined };
   });
 
   // Sync the live playlist to the player when library tracks update (BUG-018/019/020)

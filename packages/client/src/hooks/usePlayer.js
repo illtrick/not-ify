@@ -20,6 +20,7 @@ export function usePlayer({
   loadLibrary,
   isInLibrary,
   library = [],
+  trackPathMap,
   onStartBgPoll,
   onSetBgStatus,
 } = {}) {
@@ -38,6 +39,11 @@ export function usePlayer({
   const [ytPendingTrack, setYtPendingTrack] = useState(null);
   const [hoveredTrack, setHoveredTrack] = useState(null);
   const [hoveredMbTrack, setHoveredMbTrack] = useState(null);
+  const [trackError, setTrackError] = useState(null);
+
+  // Serial skip queue — prevents rapid-click cascades (BUG-P04)
+  const skipQueueRef = useRef([]);
+  const skipProcessingRef = useRef(false);
 
   // Playlist version counter — bumped when playlist ref changes, triggers UI re-render
   const [playlistVersion, setPlaylistVersion] = useState(0);
@@ -132,9 +138,10 @@ export function usePlayer({
     } catch {}
 
     cancelCrossfade();
+    setTrackError(null);
     const i = idx ?? (pl ? pl.findIndex(t => t.id === track.id) : 0);
     setCurrentTrack(track);
-    setCurrentCoverArt(track.coverArt || null);
+    setCurrentCoverArt(track.coverArt || albumInfo?.coverArt || null);
     setCurrentAlbumInfo(albumInfo || { artist: track.artist, album: track.album, coverArt: track.coverArt });
     setIsPlaying(true);
     isPlayingRef.current = true;
@@ -148,21 +155,14 @@ export function usePlayer({
       // Library-first: if this is a YT preview but the track exists in the library,
       // use the library stream (faster, higher quality, no YT dependency)
       let src = track.path || buildTrackPath(track.id);
-      const lib = libraryRef.current;
-      if (track.isYtPreview && lib.length > 0) {
-        const titleLower = (track.title || '').toLowerCase();
-        const artistLower = (track.artist || albumInfo?.artist || '').toLowerCase();
-        const libMatch = lib.find(t =>
-          (t.title || '').toLowerCase() === titleLower &&
-          (t.artist || '').toLowerCase() === artistLower
-        );
-        if (libMatch) {
-          src = buildTrackPath(libMatch.id);
-          setCurrentTrack({ ...track, id: libMatch.id, path: undefined, isYtPreview: false, format: libMatch.format });
+      if (track.isYtPreview && trackPathMap && trackPathMap.size > 0) {
+        const libPath = trackPathMap.get(track.id);
+        if (libPath) {
+          src = libPath.startsWith('/') ? libPath : `/api/stream/${track.id}`;
+          setCurrentTrack({ ...track, path: undefined, isYtPreview: false });
         }
       }
       audioRef.current.src = src;
-      pendingIdxRef.current = null;
 
       try {
         traceRef.current?.emit('audio_src_set', { streamUrl: src, isYtPreview: !!track.isYtPreview });
@@ -202,7 +202,7 @@ export function usePlayer({
       }
     }
     setCurrentTrack(nextTrack);
-    setCurrentCoverArt(nextTrack.coverArt || null);
+    setCurrentCoverArt(nextTrack.coverArt || currentAlbumInfoRef.current?.coverArt || null);
     recentlyPlayedAddedRef.current = false;
     const artist = nextTrack.artist || '';
     const album = nextTrack.album || '';
@@ -210,7 +210,8 @@ export function usePlayer({
     lastfm.nowPlaying(artist, nextTrack.title, album);
   }
 
-  function playNext(_reason) {
+  // Internal: advance to next track immediately (used by ended/crossfade and skip queue)
+  function _advanceNext(_reason) {
     const fromTrackId = currentTrackRef.current?.id || null;
     const reason = _reason || 'skip';
 
@@ -241,9 +242,7 @@ export function usePlayer({
     const pl = playlistRef.current;
     if (!pl.length) return;
 
-    const baseIdx = pendingIdxRef.current != null ? pendingIdxRef.current : playlistIdxRef.current;
-    const next = (baseIdx + 1) % pl.length;
-    pendingIdxRef.current = next;
+    const next = (playlistIdxRef.current + 1) % pl.length;
 
     try { telemetry.emit('track_advance', { fromTrackId, toTrackId: pl[next]?.id, reason }); } catch {}
 
@@ -251,7 +250,45 @@ export function usePlayer({
     _setPlaylistIdx(next);
   }
 
-  const pendingIdxRef = useRef(null);
+  // Internal: go to previous track immediately
+  function _advancePrev() {
+    const pl = playlistRef.current;
+    if (!pl.length) return;
+    const prev = (playlistIdxRef.current - 1 + pl.length) % pl.length;
+    playTrack(pl[prev], null, prev, undefined, 'prev');
+    _setPlaylistIdx(prev);
+  }
+
+  // Serial skip queue processor — ensures rapid skip clicks are processed one at a time
+  function processSkipQueue() {
+    if (skipProcessingRef.current || skipQueueRef.current.length === 0) return;
+    skipProcessingRef.current = true;
+    const direction = skipQueueRef.current.shift();
+
+    if (direction === 'next') {
+      _advanceNext('skip');
+    } else {
+      _advancePrev();
+    }
+
+    // Allow next skip after a short delay (ensures audio src is set)
+    setTimeout(() => {
+      skipProcessingRef.current = false;
+      if (skipQueueRef.current.length > 0) processSkipQueue();
+    }, 50);
+  }
+
+  function playNext(_reason) {
+    const reason = _reason || 'skip';
+    // For 'ended' source (natural track transition), execute immediately
+    if (reason === 'ended') {
+      _advanceNext('ended');
+      return;
+    }
+    // For user-initiated skips, queue them to prevent rapid-click cascades
+    skipQueueRef.current.push('next');
+    processSkipQueue();
+  }
 
   const prevRestartedAt = useRef(0);
   function playPrev() {
@@ -265,9 +302,8 @@ export function usePlayer({
       return;
     }
     prevRestartedAt.current = 0;
-    const prev = (playlistIdxRef.current - 1 + pl.length) % pl.length;
-    playTrack(pl[prev], null, prev, undefined, 'prev');
-    _setPlaylistIdx(prev);
+    skipQueueRef.current.push('prev');
+    processSkipQueue();
   }
 
   function handleSeekClick(e) {
@@ -488,6 +524,8 @@ export function usePlayer({
     },
     onCanPlay: () => {
       try { traceRef.current?.emit('audio_canplay', { trackId: currentTrackRef.current?.id }); } catch {}
+      // Pre-buffer next track as soon as current starts playing (gives full track duration to load)
+      preBufferNext();
     },
     onPlay: () => {
       setIsPlaying(true);
@@ -499,24 +537,17 @@ export function usePlayer({
       isPlayingRef.current = false;
     },
     onError: (e) => {
+      const src = audioRef.current?.src || '';
+      console.warn('[player] Audio error:', e?.target?.error?.message || 'unknown', 'src:', src);
       try {
         traceRef.current?.emit('audio_error', {
-          trackId: currentTrackRef.current?.id,
           error: e?.target?.error?.message || 'unknown',
+          src,
         });
       } catch {}
-
-      if (currentTrackRef.current) {
-        console.warn('Audio load failed for:', currentTrackRef.current.title, '— skipping to next');
-        const pl = playlistRef.current;
-        if (pl.length > 0 && playlistIdxRef.current < pl.length - 1) {
-          playNext('error');
-        } else {
-          setCurrentTrack(null);
-          setIsPlaying(false);
-          isPlayingRef.current = false;
-        }
-      }
+      setTrackError({ trackId: currentTrackRef.current?.id, message: e?.target?.error?.message || 'Failed to load' });
+      setIsPlaying(false);
+      isPlayingRef.current = false;
     },
     onStalled: () => {
       try {
@@ -542,6 +573,7 @@ export function usePlayer({
     playlistVersion, // UI components can depend on this to re-render
     currentCoverArt, setCurrentCoverArt,
     crossfadeDuration, setCrossfadeDuration,
+    trackError,
     ytSearching,
     ytPendingTrack,
     hoveredTrack, setHoveredTrack,
