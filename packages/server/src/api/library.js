@@ -289,41 +289,137 @@ function syncAlbum(artist, album) {
 
 // GET /api/library
 router.get('/library', (req, res) => {
-  const { tracks } = getTrackMap();
-  // Remove internal _fullPath from response
-  const cleaned = tracks.map(({ _fullPath, ...rest }) => rest);
+  try {
+    // -------------------------------------------------------------------
+    // New schema: album-grouped with nested tracks from three-table schema
+    // -------------------------------------------------------------------
+    const albumsData = db.getAllAlbumsWithTracks();
 
-  // Append excluded tracks from .metadata.json so the UI can render them greyed out
-  const albumDirs = new Set();
-  for (const t of tracks) {
-    albumDirs.add(path.dirname(t._fullPath));
-  }
-  const excludedEntries = [];
-  for (const dir of albumDirs) {
-    const meta = readDirMeta(dir);
-    if (!meta || !Array.isArray(meta.excluded) || meta.excluded.length === 0) continue;
-    // Derive artist/album from the directory structure relative to MUSIC_DIR
-    const rel = path.relative(MUSIC_DIR, dir);
-    const parts = rel.split(path.sep);
-    const artist = parts.length >= 2 ? (cleanFolderName(parts[0]) || parts[0]) : 'Unknown Artist';
-    const album = parts.length >= 2 ? (cleanFolderName(parts[1]) || parts[1]) : (cleanFolderName(parts[0]) || parts[0]);
-    for (const excludedName of meta.excluded) {
-      excludedEntries.push({
-        id: `excluded-${excludedName}`,
-        title: excludedName.replace(/^\d+[-_ ]*/, '').replace(/\.\w+$/, ''),
-        artist,
-        album,
-        format: null,
-        excluded: true,
-        _dir: dir,
-        _filename: excludedName,
-      });
+    // Transform to client-friendly format
+    const albums = albumsData.map(a => ({
+      albumId: a.id,
+      artist: a.album_artist,
+      album: a.title,
+      year: a.year,
+      trackCount: a.track_count,
+      duration: a.duration,
+      coverArt: a.cover_art_url,
+      mbid: a.mbid,
+      rgid: a.rgid,
+      compilation: !!a.compilation,
+      tracks: (a.tracks || []).map(t => ({
+        id: t.id,
+        title: t.title,
+        artist: t.artist,
+        trackNumber: t.track_number,
+        discNumber: t.disc_number,
+        duration: t.duration,
+        mbid: t.mbid,
+        // File state (null if not downloaded)
+        format: t.file?.format || null,
+        filepath: t.file?.filepath || null,
+        fileSize: t.file?.file_size || null,
+        scanStatus: t.file?.scan_status || null,
+        // Derived status for badges
+        fileStatus: t.file ? 'available' : null,
+      })),
+    }));
+
+    // Also generate flat track array for backward compatibility
+    // This keeps existing client code working during transition
+    const flatTracks = [];
+    for (const album of albumsData) {
+      for (const t of (album.tracks || [])) {
+        if (t.file) {
+          flatTracks.push({
+            id: t.id,
+            title: t.title,
+            artist: t.artist,
+            album: album.title,
+            year: album.year ? String(album.year) : null,
+            track_number: t.track_number,
+            coverArt: album.cover_art_url,
+            mbid: album.mbid,
+            path: `/api/stream/${t.id}`,
+            format: t.file.format,
+            filepath: t.file.filepath,
+            _fullPath: t.file.filepath,
+          });
+        }
+      }
+    }
+
+    // Append excluded tracks from .metadata.json so the UI can render them greyed out
+    const excludedEntries = [];
+    const seenDirs = new Set();
+    for (const t of flatTracks) {
+      if (t._fullPath) seenDirs.add(path.dirname(t._fullPath));
+    }
+    for (const dir of seenDirs) {
+      const meta = readDirMeta(dir);
+      if (!meta || !Array.isArray(meta.excluded) || meta.excluded.length === 0) continue;
+      const rel = path.relative(MUSIC_DIR, dir);
+      const parts = rel.split(path.sep);
+      const artist = parts.length >= 2 ? (cleanFolderName(parts[0]) || parts[0]) : 'Unknown Artist';
+      const albumName = parts.length >= 2 ? (cleanFolderName(parts[1]) || parts[1]) : (cleanFolderName(parts[0]) || parts[0]);
+      for (const excludedName of meta.excluded) {
+        excludedEntries.push({
+          id: `excluded-${excludedName}`,
+          title: excludedName.replace(/^\d+[-_ ]*/, '').replace(/\.\w+$/, ''),
+          artist,
+          album: albumName,
+          format: null,
+          excluded: true,
+        });
+      }
+    }
+
+    // Strip _fullPath from flat tracks before sending
+    const cleaned = flatTracks.map(({ _fullPath, ...rest }) => rest);
+
+    // Return both formats
+    res.json({
+      albums,                                     // New: album-grouped with all tracks (even undownloaded)
+      tracks: [...cleaned, ...excludedEntries],   // Legacy: flat array of downloaded tracks + excluded
+    });
+  } catch (err) {
+    // Fallback to old getTrackMap if new schema fails
+    console.warn('[library] New schema read failed, falling back:', err.message);
+    try {
+      const { tracks } = getTrackMap();
+      const cleaned = tracks.map(({ _fullPath, ...rest }) => rest);
+
+      // Append excluded tracks from .metadata.json
+      const albumDirs = new Set();
+      for (const t of tracks) {
+        albumDirs.add(path.dirname(t._fullPath));
+      }
+      const excludedEntries = [];
+      for (const dir of albumDirs) {
+        const meta = readDirMeta(dir);
+        if (!meta || !Array.isArray(meta.excluded) || meta.excluded.length === 0) continue;
+        const rel = path.relative(MUSIC_DIR, dir);
+        const parts = rel.split(path.sep);
+        const artist = parts.length >= 2 ? (cleanFolderName(parts[0]) || parts[0]) : 'Unknown Artist';
+        const album = parts.length >= 2 ? (cleanFolderName(parts[1]) || parts[1]) : (cleanFolderName(parts[0]) || parts[0]);
+        for (const excludedName of meta.excluded) {
+          excludedEntries.push({
+            id: `excluded-${excludedName}`,
+            title: excludedName.replace(/^\d+[-_ ]*/, '').replace(/\.\w+$/, ''),
+            artist,
+            album,
+            format: null,
+            excluded: true,
+          });
+        }
+      }
+
+      res.json([...cleaned, ...excludedEntries]);
+    } catch (fallbackErr) {
+      console.error('[library] Fallback also failed:', fallbackErr.message);
+      res.json([]);
     }
   }
-
-  // Merge: include excluded entries, exposing dir info for restore but stripping internal fields
-  const excludedCleaned = excludedEntries.map(({ _dir, ...rest }) => rest);
-  res.json([...cleaned, ...excludedCleaned]);
 });
 
 // GET /api/stream/:id — serve audio with range request support
@@ -338,8 +434,19 @@ router.get('/stream/:id', (req, res) => {
     }
   }
 
-  // Look up filepath from DB (fast), fall back to cached map
-  const track = db.getTrackById(req.params.id);
+  // Look up filepath from DB (fast), fall back to new schema, then cached map
+  let track = db.getTrackById(req.params.id);
+  if (!track && typeof db.getTrackFilepath === 'function') {
+    // Fallback to new three-table schema
+    try {
+      const newFilepath = db.getTrackFilepath(req.params.id);
+      if (newFilepath) {
+        track = { id: req.params.id, filepath: newFilepath };
+      }
+    } catch (e) {
+      // New schema not available, continue to cached map fallback
+    }
+  }
   const filePath = track?.filepath || getTrackMap().map[req.params.id];
 
   if (!filePath || !fs.existsSync(filePath)) {
