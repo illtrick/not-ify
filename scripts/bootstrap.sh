@@ -28,9 +28,15 @@ ask() {
 }
 
 confirm() {
-  local result
-  result=$(ask "$1 [Y/n/q]:" "Y")
-  [[ "$result" =~ ^[yY]$ ]] || [ -z "$result" ]
+  while true; do
+    local result
+    result=$(ask "$1 [Y/n/q]:" "Y")
+    case "${result}" in
+      [yY]|"") return 0 ;;
+      [nN]) return 1 ;;
+      *) echo -e "  ${RED}✗ Invalid input. Enter Y, n, or q.${NC}" ;;
+    esac
+  done
 }
 
 # ── Reusable folder browser ──────────────────────────
@@ -374,15 +380,18 @@ if confirm "Enable VPN?"; then
   echo -e "    ${BOLD}[4]${NC} Surfshark"
   echo -e "    ${BOLD}[5]${NC} Other (enter manually)"
   echo -e "    ${BOLD}[S]${NC} Skip — configure in Settings later"
-  vpn_choice=$(ask "Select:" "S")
-  case "$vpn_choice" in
-    1) VPN_PROVIDER="private internet access" ;;
-    2) VPN_PROVIDER="mullvad" ;;
-    3) VPN_PROVIDER="nordvpn" ;;
-    4) VPN_PROVIDER="surfshark" ;;
-    5) VPN_PROVIDER=$(ask "Provider name (as shown on gluetun wiki):" "") ;;
-    *) VPN_PROVIDER="" ;;
-  esac
+  while true; do
+    vpn_choice=$(ask "Select:" "S")
+    case "$vpn_choice" in
+      1) VPN_PROVIDER="private internet access"; break ;;
+      2) VPN_PROVIDER="mullvad"; break ;;
+      3) VPN_PROVIDER="nordvpn"; break ;;
+      4) VPN_PROVIDER="surfshark"; break ;;
+      5) VPN_PROVIDER=$(ask "Provider name (as shown on gluetun wiki):" ""); break ;;
+      [sS]) VPN_PROVIDER=""; break ;;
+      *) echo -e "  ${RED}✗ Invalid selection. Enter 1-5 or S to skip.${NC}" ;;
+    esac
+  done
 
   if [ -n "$VPN_PROVIDER" ]; then
     VPN_USERNAME=$(ask "VPN username:" "")

@@ -188,6 +188,21 @@ SLSKDEOF" 2>/dev/null || true
   docker restart slskd > /dev/null 2>&1 || true
 fi
 
+# Save Soulseek credentials to app DB so the services status page shows them as configured
+# (bootstrap generates placeholder creds; the user updates them in Settings later)
+if [ -n "${SLSK_AUTO_USER}" ]; then
+  # Wait for not-ify to be healthy before hitting the API
+  for i in $(seq 1 15); do
+    if curl -sf "http://localhost:${PORT}/api/health" > /dev/null 2>&1; then
+      curl -s -X POST "http://localhost:${PORT}/api/soulseek/config" \
+        -H 'Content-Type: application/json' \
+        -d "{\"username\":\"${SLSK_AUTO_USER}\",\"password\":\"${SLSK_AUTO_PASS}\"}" > /dev/null 2>&1 || true
+      break
+    fi
+    sleep 1
+  done
+fi
+
 # Health checks with progress counter
 DONE=0
 for container in $CONTAINERS; do

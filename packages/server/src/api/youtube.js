@@ -163,13 +163,27 @@ async function ytDownloadOne(entry, abort) {
   const destDir = path.join(getMusicDir(), dlArtist, dlAlbum);
   fs.mkdirSync(destDir, { recursive: true });
 
-  // Skip if a file with the same track number already exists (avoid re-downloading).
-  // Filenames vary: "08-Legs.mp3" (YT), "08 Legs.mp3" (torrent), "08 Legs.flac" (upgrade)
+  // Skip if track already exists — match by number OR by normalized title
   const trackNum = sanitizePath(dlTitle).match(/^(\d+)/)?.[1];
-  if (trackNum) {
+  if (trackNum || dlTitle) {
     try {
       const existing = fs.readdirSync(destDir);
-      const match = existing.find(f => f.match(/^(\d+)/)?.[1] === trackNum && /\.(mp3|flac|ogg|m4a|opus|wav)$/i.test(f));
+      // Match by track number prefix
+      let match = trackNum ? existing.find(f =>
+        f.match(/^(\d+)/)?.[1] === trackNum && /\.(mp3|flac|ogg|m4a|opus|wav)$/i.test(f)
+      ) : null;
+      // Also match by normalized title (handles unnumbered files from single-track plays)
+      if (!match) {
+        const { normalize } = require('../services/track-id');
+        const titleNorm = normalize(dlTitle.replace(/^\d+-/, ''));
+        if (titleNorm) {
+          match = existing.find(f => {
+            if (!/\.(mp3|flac|ogg|m4a|opus|wav)$/i.test(f)) return false;
+            const fTitle = normalize(f.replace(/^\d+[-_\s]*/, '').replace(/\.[^.]+$/, ''));
+            return fTitle === titleNorm;
+          });
+        }
+      }
       if (match) {
         activity.log('youtube', 'info', `Skipped (exists): ${dlTitle}`, { artist: dlArtist, album: dlAlbum, title: dlTitle });
         return path.join(destDir, match);
@@ -350,6 +364,21 @@ async function ytDownloadOne(entry, abort) {
   } catch {}
 
   activity.log('youtube', 'success', `Saved: ${dlTitle}`, { artist: dlArtist, album: dlAlbum, title: dlTitle, path: downloadedFile });
+
+  // Clean up intermediate files left by yt-dlp (webm, opus, m4a before conversion to mp3)
+  try {
+    const baseName = path.basename(downloadedFile, path.extname(downloadedFile));
+    const intermediateExts = ['.webm', '.opus', '.m4a', '.part', '.temp'];
+    for (const ext of intermediateExts) {
+      const intermediate = path.join(destDir, baseName + ext);
+      if (fs.existsSync(intermediate) && intermediate !== downloadedFile) {
+        fs.unlinkSync(intermediate);
+      }
+    }
+  } catch (cleanupErr) {
+    console.warn('[yt-queue] Cleanup failed:', cleanupErr.message);
+  }
+
   return downloadedFile;
 }
 
@@ -426,6 +455,16 @@ async function ytQueueAlbum({ artist, album, tracks, mbid, rgid, coverArt, year 
   if (!artist || !album) throw new Error('Missing artist or album');
   if (!Array.isArray(tracks) || tracks.length === 0) throw new Error('Missing tracks array');
 
+  // Ensure year is populated — fall back to album schema if client didn't send it
+  let albumYear = year;
+  if (!albumYear && rgid) {
+    try {
+      const db = require('../services/db');
+      const existingAlbum = db.getAlbumByRgid(rgid);
+      if (existingAlbum?.year) albumYear = existingAlbum.year;
+    } catch {}
+  }
+
   const safeArtist = sanitizePath(artist);
   const safeAlbum = sanitizePath(album);
 
@@ -442,7 +481,7 @@ async function ytQueueAlbum({ artist, album, tracks, mbid, rgid, coverArt, year 
     if (titleLower === '[silence]' || titleLower === 'silence'
       || titleLower === '[data track]' || titleLower === 'data track'
       || titleLower === '[untitled]' || titleLower === ''
-      || (track.lengthMs && track.lengthMs < 5000)) { // <5 seconds
+      || (track.lengthMs && track.lengthMs < 2000)) { // <2 seconds
       continue;
     }
 
@@ -516,20 +555,27 @@ async function ytQueueAlbum({ artist, album, tracks, mbid, rgid, coverArt, year 
       rgid: rgid || null,
       mbid: mbid || null,
       coverArt: coverArt || null,
-      year: year || null,
+      year: albumYear || null,
       source: 'yt-album-download',
       trackCount: tracks.length,
       downloadedAt: new Date().toISOString(),
       // Store MB tracklist so syncAlbum can assign track numbers to downloaded files
+      // Sorted by position to ensure correct track ordering
       mbTracks: tracks.map((t, i) => ({
         position: t.position || i + 1,
         title: t.title || t.name,
         lengthMs: t.lengthMs || null,
-      })),
+      })).sort((a, b) => a.position - b.position),
     };
     try {
       fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2));
     } catch {}
+  }
+
+  if (errors.length > 0) {
+    activity.log('youtube', 'warn', `Album ${artist} — ${album}: ${errors.length} tracks failed YT matching`, {
+      artist, album, errors: errors.map(e => e.track),
+    });
   }
 
   activity.log('youtube', 'info', `Album queued: ${artist} — ${album} (${queued.length} tracks, ${errors.length} failed)`, { artist, album, queued: queued.length, errors: errors.length });

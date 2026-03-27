@@ -183,6 +183,7 @@ export function useDownload({ playTrack, loadLibrary, library = [] } = {}) {
         rgid: albumInfo.rgid || null,
         mbid: albumInfo.mbid || null,
         coverArt: albumInfo.coverArt || null,
+        year: albumInfo.year || null,
       });
       setDownloadStatus(prev => ({
         ...prev,
@@ -318,6 +319,7 @@ export function useDownload({ playTrack, loadLibrary, library = [] } = {}) {
       rgid: albumInfo.rgid || null,
       mbid: albumInfo.mbid || null,
       coverArt: albumInfo.coverArt || null,
+      year: albumInfo.year || null,
     }).then(() => startBgPoll()).catch(() => {});
   }
 

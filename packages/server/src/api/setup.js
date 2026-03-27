@@ -149,25 +149,23 @@ router.get('/services', async (req, res) => {
   const vpnConfigured = !!(vpnConfig && vpnConfig.username) || vpnFromEnv;
   services.push({ name: 'vpn', label: 'VPN', configured: vpnConfigured, connected: vpnConfigured });
 
-  // Soulseek — check DB config OR live slskd connection (bootstrap configures via CLI, not DB)
+  // Soulseek — check DB config AND live slskd connection
   const soulseekConfig = db.getGlobalSetting('soulseekConfig');
   const soulseekDbConfigured = !!(soulseekConfig && soulseekConfig.username);
+  // Always check live slskd connection status (not just when DB config is absent)
   let soulseekConnected = false;
-  if (!soulseekDbConfigured) {
-    // DB has no config — check if slskd is live (bootstrap configured it via slskd.yml)
-    try {
-      const slskdUrl = process.env.SLSKD_URL || 'http://slskd:5030';
-      const slskdKey = process.env.SLSKD_API_KEY || '';
-      const r = await fetch(`${slskdUrl}/api/v0/application`, {
-        headers: { 'X-API-Key': slskdKey },
-        signal: AbortSignal.timeout(3000),
-      });
-      if (r.ok) {
-        const data = await r.json();
-        soulseekConnected = data.server?.isConnected || false;
-      }
-    } catch { /* slskd unavailable */ }
-  }
+  try {
+    const slskdUrl = process.env.SLSKD_URL || 'http://slskd:5030';
+    const slskdKey = process.env.SLSKD_API_KEY || '';
+    const r = await fetch(`${slskdUrl}/api/v0/application`, {
+      headers: { 'X-API-Key': slskdKey },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (r.ok) {
+      const data = await r.json();
+      soulseekConnected = data.server?.isConnected || false;
+    }
+  } catch { /* slskd unavailable */ }
   const soulseekConfigured = soulseekDbConfigured || soulseekConnected;
   services.push({ name: 'soulseek', label: 'Soulseek', configured: soulseekConfigured, connected: soulseekConnected || soulseekDbConfigured });
 
