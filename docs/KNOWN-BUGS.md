@@ -1,6 +1,6 @@
 # Known Bugs — Not-ify
 
-Last updated: 2026-03-27 (v1.7.10 staging test)
+Last updated: 2026-03-27 (v1.7.13 — all bugs closed)
 
 ## Status Key
 - **OPEN** — not fixed, needs implementation

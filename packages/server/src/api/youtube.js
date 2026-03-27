@@ -58,7 +58,8 @@ router.get('/sc/search', async (req, res) => {
 // ---------------------------------------------------------------------------
 // YT download queue system — concurrent pool, accepts multiple requests
 // ---------------------------------------------------------------------------
-const YT_CONCURRENCY = parseInt(process.env.YT_CONCURRENCY || '3', 10);
+// YouTube rate-limits concurrent downloads — 2 balances speed vs reliability
+const YT_CONCURRENCY = parseInt(process.env.YT_CONCURRENCY || '2', 10);
 const ytQueue = [];       // [{id, url, title, artist, album, coverArt, status, progress, error}]
 let ytQueueProcessing = false;
 let ytQueueIdCounter = 0;
@@ -122,14 +123,33 @@ async function ytQueueProcess() {
             library.invalidateCache();
           } catch {}
         })
-        .catch(err => {
+        .catch(async err => {
           if (err.message === 'Download cancelled') {
             next.status = 'cancelled';
-          } else {
-            next.status = 'error';
-            next.error = err.message;
-            activity.log('youtube', 'error', `Failed: ${next.title} — ${err.message}`, { title: next.title, error: err.message });
+            return;
           }
+          // Retry once after a 5s backoff (catches YT rate limits)
+          if (!next._retried) {
+            next._retried = true;
+            activity.log('youtube', 'info', `Retrying: ${next.title} (${err.message})`, { title: next.title });
+            await new Promise(r => setTimeout(r, 5000));
+            const retryAbort = new AbortController();
+            try {
+              await ytDownloadOne(next, retryAbort);
+              next.status = 'done';
+              try {
+                const library = require('./library');
+                library.syncAlbum(next.artist, next.album);
+                library.invalidateCache();
+              } catch {}
+              return;
+            } catch (retryErr) {
+              err = retryErr;
+            }
+          }
+          next.status = 'error';
+          next.error = err.message;
+          activity.log('youtube', 'error', `Failed: ${next.title} — ${err.message}`, { title: next.title, error: err.message });
         })
         .finally(() => {
           activeYtDownloads.delete(next.id);
@@ -143,8 +163,9 @@ async function ytQueueProcess() {
     // No running tasks and nothing queued — we're done
     if (running.size === 0) break;
 
-    // Wait for any one to finish, then loop to refill slots
+    // Wait for any one to finish, then pause briefly to avoid YT rate limits
     await Promise.race(running.values());
+    await new Promise(r => setTimeout(r, 3000));
   }
 
   ytQueueProcessing = false;
@@ -205,6 +226,7 @@ async function ytDownloadOne(entry, abort) {
   const downloadedFile = await new Promise((resolve, reject) => {
     const proc = spawn('yt-dlp', args);
     let lastFile = '';
+    let stderrBuf = '';
     let settled = false;
 
     // 120s hard timeout — abort via the existing AbortController so cleanup is unified
@@ -232,7 +254,10 @@ async function ytDownloadOne(entry, abort) {
 
     proc.stderr.on('data', (d) => {
       const line = d.toString().trim();
-      if (line) console.error(`yt-dlp stderr: ${line}`);
+      if (line) {
+        console.error(`yt-dlp stderr: ${line}`);
+        stderrBuf += line + '\n';
+      }
     });
 
     proc.on('close', (code) => {
@@ -241,7 +266,11 @@ async function ytDownloadOne(entry, abort) {
       clearTimeout(timeoutId);
       abort.signal.removeEventListener('abort', onAbort);
       if (abort.signal.aborted) return reject(new Error('Download cancelled'));
-      if (code !== 0) return reject(new Error(`yt-dlp exited with code ${code}`));
+      if (code !== 0) {
+        // Extract the most useful line from stderr for the activity log
+        const reason = stderrBuf.split('\n').filter(l => l && !l.startsWith('WARNING')).pop() || `exit code ${code}`;
+        return reject(new Error(reason));
+      }
       if (lastFile && fs.existsSync(lastFile)) return resolve(lastFile);
       const mp3Path = path.join(destDir, `${sanitizePath(dlTitle)}.mp3`);
       if (fs.existsSync(mp3Path)) return resolve(mp3Path);
@@ -706,10 +735,15 @@ router.get('/yt/stream/:videoId', async (req, res) => {
 
     const upstream = await fetch(url, { headers, signal: AbortSignal.timeout(30000) });
 
+    if (!upstream.ok && !upstream.status.toString().startsWith('2')) {
+      return res.status(502).json({ error: `YouTube returned ${upstream.status}` });
+    }
+
     // Forward status and relevant headers
     res.status(upstream.status);
     const ct = upstream.headers.get('content-type');
-    if (ct) res.setHeader('Content-Type', ct);
+    // Ensure Content-Type is set so <audio> can decode — YouTube sometimes omits it
+    res.setHeader('Content-Type', ct || 'audio/webm');
     const cl = upstream.headers.get('content-length');
     if (cl) res.setHeader('Content-Length', cl);
     const cr = upstream.headers.get('content-range');
@@ -717,20 +751,31 @@ router.get('/yt/stream/:videoId', async (req, res) => {
     const ar = upstream.headers.get('accept-ranges');
     if (ar) res.setHeader('Accept-Ranges', ar);
 
-    // Pipe the stream
+    // Pipe the stream with a stall timeout — if no data arrives for 15s, abort
     const reader = upstream.body.getReader();
+    let stallTimer;
+    const resetStallTimer = () => {
+      clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+        try { reader.cancel(); } catch {}
+        if (!res.writableEnded) res.end();
+      }, 15000);
+    };
+    resetStallTimer();
+
     const pump = async () => {
       while (true) {
         const { done, value } = await reader.read();
-        if (done) { res.end(); break; }
+        if (done) { clearTimeout(stallTimer); res.end(); break; }
+        resetStallTimer();
         if (!res.write(Buffer.from(value))) {
           await new Promise(r => res.once('drain', r));
         }
       }
     };
-    pump().catch(() => res.end());
+    pump().catch(() => { clearTimeout(stallTimer); res.end(); });
 
-    req.on('close', () => { try { reader.cancel(); } catch {} });
+    req.on('close', () => { clearTimeout(stallTimer); try { reader.cancel(); } catch {} });
   } catch (err) {
     console.error('YT stream error:', err.message);
     if (!res.headersSent) res.status(500).json({ error: err.message });

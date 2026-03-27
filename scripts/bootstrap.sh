@@ -394,10 +394,27 @@ if confirm "Enable VPN?"; then
   done
 
   if [ -n "$VPN_PROVIDER" ]; then
-    VPN_USERNAME=$(ask "VPN username:" "")
+    while true; do
+      VPN_USERNAME=$(ask "VPN username:" "")
+      if [ -n "$VPN_USERNAME" ]; then break; fi
+      echo -e "  ${RED}✗ Username is required for VPN. Enter S to skip VPN instead.${NC}"
+      skip_check=$(ask "Try again? [Y/s]:" "Y")
+      if [[ "$skip_check" =~ ^[sS]$ ]]; then VPN_PROVIDER=""; ENABLE_VPN="n"; break; fi
+    done
+  fi
+  if [ -n "$VPN_PROVIDER" ]; then
     echo -ne "  VPN password: "
     read -rs VPN_PASSWORD
     echo ""
+    if [ -z "$VPN_PASSWORD" ]; then
+      echo -e "  ${RED}✗ Password is required. VPN will be skipped.${NC}"
+      echo -e "  ${DIM}You can configure VPN credentials in Settings later.${NC}"
+      VPN_PROVIDER=""
+      VPN_USERNAME=""
+      ENABLE_VPN="n"
+    fi
+  fi
+  if [ -n "$VPN_PROVIDER" ]; then
     # Auto-select a known working region per provider — user can change in Settings
     case "$VPN_PROVIDER" in
       "private internet access") VPN_REGION="US East" ;;

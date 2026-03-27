@@ -12,6 +12,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { execFile } = require('child_process');
 
 // Docker socket path
 const UNIX_SOCKET = '/var/run/docker.sock';
@@ -86,6 +87,48 @@ async function restartContainer(name, timeout = 10) {
     console.error(`[container-manager] Failed to restart ${name}: ${err.message}`);
     return false;
   }
+}
+
+/**
+ * Recreate a container via `docker compose up -d` so it picks up .env changes.
+ * A plain `docker restart` reuses the same env vars baked in at creation time.
+ * @param {string} name — container name (e.g., 'gluetun')
+ * @returns {Promise<boolean>} true if recreated successfully
+ */
+async function recreateContainer(name) {
+  const ALLOWED = ['slskd', 'gluetun', 'clamav'];
+  if (!ALLOWED.includes(name)) {
+    throw new Error(`Container "${name}" is not in the allowed recreate list`);
+  }
+
+  // Find the compose file directory (same dir as .env)
+  const envPath = getEnvFilePath();
+  if (!envPath) {
+    console.warn(`[container-manager] .env not found — cannot recreate ${name}`);
+    return false;
+  }
+  const composeDir = path.dirname(envPath);
+  const composePath = path.join(composeDir, 'docker-compose.yml');
+  if (!fs.existsSync(composePath)) {
+    console.warn(`[container-manager] docker-compose.yml not found in ${composeDir}`);
+    return false;
+  }
+
+  return new Promise((resolve) => {
+    execFile('docker', ['compose', 'up', '-d', '--force-recreate', name], {
+      cwd: composeDir,
+      timeout: 60000,
+    }, (err, stdout, stderr) => {
+      if (err) {
+        console.error(`[container-manager] Failed to recreate ${name}: ${err.message}`);
+        if (stderr) console.error(`[container-manager] stderr: ${stderr}`);
+        resolve(false);
+      } else {
+        console.log(`[container-manager] Recreated container: ${name}`);
+        resolve(true);
+      }
+    });
+  });
 }
 
 /**
@@ -214,6 +257,7 @@ async function writeSlskdApiKeyConfig(apiKey) {
 module.exports = {
   dockerAvailable,
   restartContainer,
+  recreateContainer,
   getContainerStatus,
   getAllContainerStatus,
   updateEnvFile,

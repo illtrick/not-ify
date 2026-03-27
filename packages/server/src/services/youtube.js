@@ -64,26 +64,34 @@ async function getStreamUrl(videoId) {
   const cached = urlCache.get(videoId);
   if (cached && Date.now() - cached.ts < URL_TTL) return cached.data;
 
-  await waitForSlot();
-  try {
-    return await new Promise((resolve, reject) => {
-      const proc = spawn('yt-dlp', ['--get-url', '-f', 'bestaudio', '--no-warnings', `https://www.youtube.com/watch?v=${videoId}`], { timeout: 10000 });
-      let stdout = '';
-      let stderr = '';
-      proc.stdout.on('data', d => stdout += d);
-      proc.stderr.on('data', d => stderr += d);
-      proc.on('close', code => {
-        if (code !== 0) return reject(new Error(stderr || `yt-dlp exited ${code}`));
-        const url = stdout.trim();
-        if (!url) return reject(new Error('No URL returned'));
-        urlCache.set(videoId, { data: url, ts: Date.now() });
-        resolve(url);
+  // Try up to 2 attempts (yt-dlp can fail transiently)
+  let lastErr;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await waitForSlot();
+    try {
+      const url = await new Promise((resolve, reject) => {
+        const proc = spawn('yt-dlp', ['--get-url', '-f', 'bestaudio', '--no-warnings', `https://www.youtube.com/watch?v=${videoId}`], { timeout: 15000 });
+        let stdout = '';
+        let stderr = '';
+        proc.stdout.on('data', d => stdout += d);
+        proc.stderr.on('data', d => stderr += d);
+        proc.on('close', code => {
+          if (code !== 0) return reject(new Error(stderr || `yt-dlp exited ${code}`));
+          const u = stdout.trim();
+          if (!u) return reject(new Error('No URL returned'));
+          resolve(u);
+        });
+        proc.on('error', reject);
       });
-      proc.on('error', reject);
-    });
-  } finally {
-    activeProcesses--;
+      urlCache.set(videoId, { data: url, ts: Date.now() });
+      return url;
+    } catch (err) {
+      lastErr = err;
+    } finally {
+      activeProcesses--;
+    }
   }
+  throw lastErr;
 }
 
 async function searchSoundCloud(query, limit = 10) {

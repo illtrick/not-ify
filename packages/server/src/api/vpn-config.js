@@ -88,10 +88,14 @@ router.post('/config', async (req, res) => {
     VPN_REGION: vpnRegion,
   });
 
-  // Restart gluetun to pick up new creds
+  // Recreate gluetun to pick up new .env creds (docker restart reuses old env vars)
   let restarted = false;
   if (containerManager.dockerAvailable()) {
-    restarted = await containerManager.restartContainer('gluetun').catch(() => false);
+    restarted = await containerManager.recreateContainer('gluetun').catch(() => false);
+    if (!restarted) {
+      // Fall back to plain restart if compose isn't available
+      restarted = await containerManager.restartContainer('gluetun').catch(() => false);
+    }
   }
 
   res.json({ saved: true, persistent: envUpdated, restarted });

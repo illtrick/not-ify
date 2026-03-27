@@ -7,6 +7,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 - **MINOR** (0.x.0): New features, meaningful improvements
 - **PATCH** (0.0.x): Bug fixes, polish, iteration on current features
 
+## [1.7.13] - 2026-03-27
+
+### Fixed
+- **YT download reliability**: Reduced concurrency from 3 to 2 with 3s cooldown between batches. Failed tracks now retry once with 5s backoff. Previously ~40% of tracks failed due to YouTube rate limiting.
+- **YT stream proxy**: Added 15s stall timeout so hanging streams abort cleanly instead of leaving `<audio>` at readyState 0 forever. Added `Content-Type: audio/webm` fallback header.
+- **YT stream URL retry**: `getStreamUrl` now retries once on yt-dlp failure (timeout bumped 10s → 15s).
+- **YT error diagnostics**: yt-dlp stderr is now captured and included in activity log events instead of the opaque "yt-dlp exited with code 1".
+- **VPN credential validation (bootstrap)**: Empty username/password now skip VPN setup instead of starting Gluetun with blank credentials that crash on boot.
+- **VPN container recreate (Settings UI)**: Saving VPN credentials now runs `docker compose up -d --force-recreate gluetun` instead of `docker restart`, so updated `.env` vars are actually picked up. Previously, credentials saved via the web UI never took effect until manual `docker compose up`.
+- **Soulseek config seeding**: On startup, seeds Soulseek config from `SLSKD_SLSK_USERNAME` env var (written by bootstrap). Previously required querying slskd API which often wasn't ready on first boot, leaving Settings showing "unconfigured".
+
 ## [1.7.9] - 2026-03-26
 
 ### Changed

@@ -627,7 +627,13 @@ async function seedConfigFromEnv() {
     if (!slskConfig?.username) {
       const slskdUrl = process.env.SLSKD_URL || 'http://slskd:5030';
       const slskdKey = process.env.SLSKD_API_KEY || '';
-      if (slskdKey) {
+      // First try: seed from env vars (bootstrap writes SLSKD_SLSK_USERNAME to .env)
+      const envSlskUser = process.env.SLSKD_SLSK_USERNAME;
+      if (envSlskUser) {
+        db.setGlobalSetting('soulseekConfig', { ...slskConfig, username: envSlskUser, password: '***', slskdUrl, slskdApiKey: slskdKey });
+        log.info({ event: 'startup.seed.soulseek', username: envSlskUser }, `Seeded Soulseek config from env: ${envSlskUser}`);
+      } else if (slskdKey) {
+        // Fallback: query slskd API for connected username
         try {
           const r = await fetch(`${slskdUrl}/api/v0/application`, {
             headers: { 'X-API-Key': slskdKey },
