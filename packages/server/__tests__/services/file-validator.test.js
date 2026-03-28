@@ -16,15 +16,15 @@ afterEach(() => {
   delete process.env.MIME_CHECK_ENABLED;
 });
 
-// Sets up execSync mock: mime + ffprobe return values/errors
+// Sets up execFileSync mock: mime + ffprobe return values/errors
 function mockExecSync({ mime = 'audio/mpeg\n', ffprobe } = {}) {
   const ffprobeOut = ffprobe !== undefined ? ffprobe : VALID_FFPROBE_OUTPUT;
-  jest.spyOn(childProcess, 'execSync').mockImplementation((cmd) => {
-    if (cmd.includes('file --mime-type')) {
+  jest.spyOn(childProcess, 'execFileSync').mockImplementation((cmd) => {
+    if (cmd === 'file') {
       if (mime instanceof Error) throw mime;
       return Buffer.from(mime);
     }
-    if (cmd.includes('ffprobe')) {
+    if (cmd === 'ffprobe') {
       if (ffprobeOut instanceof Error) throw ffprobeOut;
       return Buffer.from(ffprobeOut);
     }
@@ -101,8 +101,8 @@ describe('file-validator', () => {
     it('fails when file exceeds 500 MB', async () => {
       process.env.MIME_CHECK_ENABLED = 'false';
       mockStatSync(501 * 1024 * 1024);
-      // execSync should not be called at all (early return after size check)
-      const execSpy = jest.spyOn(childProcess, 'execSync');
+      // execFileSync should not be called at all (early return after size check)
+      const execSpy = jest.spyOn(childProcess, 'execFileSync');
 
       const result = await fileValidator.validateFile(FAKE_PATH);
 

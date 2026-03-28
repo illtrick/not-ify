@@ -34,7 +34,7 @@ function checkFileSize(filePath) {
 
 function checkMimeType(filePath) {
   try {
-    const raw = childProcess.execSync(`file --mime-type -b "${filePath}"`).toString().trim();
+    const raw = childProcess.execFileSync('file', ['--mime-type', '-b', filePath], { timeout: 5000 }).toString().trim();
     const passed = AUDIO_MIMES.has(raw);
     return { name: 'mime', passed, detail: raw };
   } catch (err) {
@@ -49,8 +49,8 @@ function checkMimeType(filePath) {
 
 function checkFfprobe(filePath) {
   try {
-    const raw = childProcess.execSync(
-      `ffprobe -v error -show_format -of json "${filePath}"`
+    const raw = childProcess.execFileSync(
+      'ffprobe', ['-v', 'error', '-show_format', '-of', 'json', filePath], { timeout: 10000 }
     ).toString();
     const parsed = JSON.parse(raw);
     const fmt = parsed.format || {};
