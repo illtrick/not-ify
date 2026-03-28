@@ -777,6 +777,11 @@ function getAlbumByMbid(mbid) {
   return timedGet('SELECT * FROM albums WHERE mbid = ?', mbid);
 }
 
+function getAlbumByAnyId(id) {
+  if (!id) return null;
+  return getAlbumById(id) || getAlbumByRgid(id) || getAlbumByMbid(id) || null;
+}
+
 function updateAlbumCoverArt(artist, album, coverArtUrl) {
   return timedRun(
     'UPDATE albums SET cover_art_url = ?, updated_at = unixepoch() WHERE LOWER(album_artist) = LOWER(?) AND LOWER(title) = LOWER(?)',
@@ -1203,6 +1208,7 @@ module.exports = {
   getAlbumByArtistAndTitle,
   getAlbumByRgid,
   getAlbumByMbid,
+  getAlbumByAnyId,
   updateAlbumCoverArt,
   findAlbumByNormalizedName,
   // Album Tracks (v2 metadata)

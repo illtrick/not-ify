@@ -349,7 +349,7 @@ export function AlbumView({
             </div>
 
             {/* Edition picker pill */}
-            {mbEditions?.length > 1 && (fromSearch || selectedAlbum.mbid || rgid) && (() => {
+            {mbEditions?.length > 1 && (() => {
               const selected = mbEditions.find(e => e.selected);
               const formatLabel = (ed) => {
                 const discPrefix = ed.discCount > 1 ? `${ed.discCount}\u00d7` : '';
