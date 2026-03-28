@@ -210,7 +210,11 @@ async function ytDownloadOne(entry, abort) {
         activity.log('youtube', 'info', `Skipped (exists): ${dlTitle}`, { artist: dlArtist, album: dlAlbum, title: dlTitle });
         return path.join(destDir, match);
       }
-    } catch { /* dir doesn't exist yet */ }
+    } catch (err) {
+      if (err.code !== 'ENOENT') {
+        console.warn(`[youtube] Error checking existing tracks: ${err.message}`);
+      }
+    }
   }
 
   activity.log('youtube', 'info', `Downloading: ${dlTitle}`, { artist: dlArtist, album: dlAlbum, title: dlTitle });
