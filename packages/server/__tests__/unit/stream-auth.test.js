@@ -9,12 +9,12 @@ process.env.CONFIG_DIR = tmp;
 const streamAuth = require('../../src/services/stream-auth');
 
 describe('stream-auth', () => {
-  const BASE = 'http://192.168.1.100:3000';
+  const BASE = 'http://10.0.0.100:3000';
 
   describe('generateSignedUrl', () => {
     it('returns a URL with sig and exp query params', () => {
       const url = streamAuth.generateSignedUrl('abc123', BASE);
-      expect(url).toMatch(/^http:\/\/192\.168\.1\.100:3000\/api\/stream\/abc123\?sig=[0-9a-f]+&exp=\d+$/);
+      expect(url).toMatch(/^http:\/\/10\.0\.0\.100:3000\/api\/stream\/abc123\?sig=[0-9a-f]+&exp=\d+$/);
     });
 
     it('exp is in the future', () => {
