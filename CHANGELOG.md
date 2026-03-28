@@ -7,6 +7,47 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 - **MINOR** (0.x.0): New features, meaningful improvements
 - **PATCH** (0.0.x): Bug fixes, polish, iteration on current features
 
+## [1.8.0] - 2026-03-28
+
+### Removed
+- **Tauri desktop app**: Deleted `packages/desktop` — unnecessary complexity while the web client and server need work. Desktop will return in v2.
+- **ClamAV antivirus scanning**: Removed all ClamAV integration (file-validator, Docker service, CLI wizard, test mocks). File validation still checks MIME type, ffprobe, and file size.
+- **Unused dependencies**: Removed `node-ssdp` and `upnp-client-ts` — replaced by custom DLNA implementation.
+
+### Security
+- **Command injection fixes**: All `execSync` calls with user-controlled paths replaced with `execFileSync` array form (`file-validator.js`, `setup.js`, `library-check.js`).
+- **Path traversal**: Library-config browse endpoint now validates paths and blocks `/proc`, `/sys`, `/dev`, `/etc`.
+- **Heredoc injection**: Container-manager YAML config write switched from shell heredoc to safe positional parameter.
+- **Env file injection**: Values validated and sanitized (newlines stripped, keys validated) before writing to `.env`.
+- **Account creation race**: Setup endpoint catches duplicate key constraint to prevent parallel admin creation.
+- **Stream auth hex validation**: Invalid hex signatures return 403 instead of crashing the request.
+- **yt-dlp checksum**: Dockerfile now verifies SHA256 after downloading yt-dlp binary.
+- **Rate limiting**: Search endpoint rate-limited to 20 req/10s per user to protect external APIs.
+- **Import body limit**: Spotify import JSON limit lowered from 50MB to 10MB.
+- **Error sanitization**: Gluetun error responses truncated to 200 chars before returning to client.
+
+### Fixed
+- **Wrong require path** (`index.js:792`): `lastfm-client` → `lastfm` — fixed runtime crash during graceful shutdown scrobble flush.
+- **Real-Debrid token persistence**: `setToken()` now writes to database, not just in-memory cache.
+- **Scrobble sync null guard**: `result.tracks` null-checked before `.filter()` in both `fullSync` and `deltaSync`.
+- **useCast stale closure**: `isCasting` tracked via ref inside SSE handler to prevent stale state reads.
+- **useSession dependency loop**: `Object.values()` replaced with `JSON.stringify()` for stable dependency comparison — stops continuous session saves.
+- **Mobile seek + cast**: Mobile seek bar now checks cast state and sends seek to cast device instead of only local audio.
+- **Error Boundary**: Added React Error Boundary so a single component crash shows a recovery UI instead of a white screen.
+- **Silent error catches**: Replaced 20+ empty `.catch(() => {})` blocks with logged warnings across pipeline, search, youtube, and job-processor.
+- **VPN settings UX**: Password field shows saved indicator, region-only changes no longer require re-entering credentials, auto-test delay increased to 20s with visible status.
+- **Standardized error responses**: Config test endpoints (Real-Debrid, Soulseek, VPN) now return proper HTTP 4xx/5xx instead of 200 with error in body.
+
+### Improved
+- **SSE listener cleanup**: Cast SSE endpoint adds 30-minute safety timeout to prevent listener leaks.
+- **Audio element cleanup**: `useTrackDurations` cancels pending Audio requests on unmount.
+- **Async readdir**: Library-config browse uses `fs.promises.readdir` instead of blocking `readdirSync`.
+- **Import batch cache**: MusicBrainz results cached per batch to reduce N+1 API calls.
+- **Prefetch cache bounds**: MusicBrainz prefetch cache limited to 200 entries with 10-minute TTL.
+- **DLNA regex cache**: XML value extraction regex precompiled instead of compiled per call.
+- **Infrastructure hardening**: Docker resource limits, CI health check timeout, Node version pinned, bootstrap script timeouts.
+- **Code quality**: Magic numbers extracted as constants, dead code removed, test IPs replaced with RFC 5737 addresses.
+
 ## [1.7.14] - 2026-03-27
 
 ### Fixed

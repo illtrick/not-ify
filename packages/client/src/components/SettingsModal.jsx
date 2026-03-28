@@ -37,6 +37,7 @@ export function SettingsModal({
   const [rdToken, setRdToken] = useState('');
   const [vpnUser, setVpnUser] = useState('');
   const [vpnPass, setVpnPass] = useState('');
+  const [vpnHasSavedPassword, setVpnHasSavedPassword] = useState(false);
   const [vpnRegion, setVpnRegion] = useState('US East');
   const [vpnProvider, setVpnProvider] = useState('');
   const [vpnCustomProvider, setVpnCustomProvider] = useState('');
@@ -177,6 +178,7 @@ export function SettingsModal({
   useEffect(() => {
     if (vpnConfig?.status) {
       if (vpnConfig.status.username) setVpnUser(vpnConfig.status.username);
+      if (vpnConfig.status.hasPassword) setVpnHasSavedPassword(true);
       if (vpnConfig.status.region) setVpnRegion(vpnConfig.status.region);
       if (vpnConfig.status.provider) setVpnProvider(vpnConfig.status.provider);
     }
@@ -522,7 +524,7 @@ export function SettingsModal({
               />
               <input
                 type="password"
-                placeholder="Password"
+                placeholder={vpnHasSavedPassword ? '••••••••  (saved — enter new to change)' : 'Password'}
                 value={vpnPass}
                 onChange={(e) => setVpnPass(e.target.value)}
                 style={inputStyle}
@@ -538,7 +540,7 @@ export function SettingsModal({
             </div>
             {vpnConfig.saving && (
               <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 8 }}>
-                Saving... Restarting VPN container...
+                Saving... Restarting VPN container — will auto-test in ~20s
               </div>
             )}
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
@@ -546,8 +548,8 @@ export function SettingsModal({
                 onClick={async () => {
                   const provider = vpnProvider === 'custom' ? vpnCustomProvider : vpnProvider;
                   await vpnConfig.save({ username: vpnUser, password: vpnPass, region: vpnRegion, provider });
-                  // Auto-test after save to verify connection
-                  setTimeout(() => vpnConfig.test(), 10000);
+                  // Auto-test after save — 20s delay gives gluetun time to reconnect
+                  setTimeout(() => vpnConfig.test(), 20000);
                 }}
                 disabled={vpnConfig.saving}
                 style={vpnConfig.saving ? buttonDisabledStyle : buttonPrimaryStyle}
