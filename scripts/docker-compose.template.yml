@@ -25,6 +25,10 @@ services:
       - SLSKD_API_KEY=${SLSKD_API_KEY}
       - SLSKD_DOWNLOADS_DIR=/app/slskd-downloads
       - VPN_PROXY=${VPN_PROXY:-}
+      - VPN_USERNAME=${VPN_USERNAME:-}
+      - VPN_PASSWORD=${VPN_PASSWORD:-}
+      - VPN_PROVIDER=${VPN_PROVIDER:-}
+      - VPN_REGION=${VPN_REGION:-}
       - GLUETUN_CONTROL_URL=${GLUETUN_CONTROL_URL:-}
       - INSTALL_DIR=${INSTALL_DIR:-}
     healthcheck:
