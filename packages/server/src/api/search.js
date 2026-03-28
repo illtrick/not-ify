@@ -12,7 +12,12 @@ const COVERS_DIR = path.join(process.env.CONFIG_DIR || './config', 'covers');
 
 const { cleanSearchQuery, foldDiacritics } = require('../services/query-utils');
 
+const rateLimit = require('../middleware/rate-limit');
+
 const router = express.Router();
+
+// Rate limit search endpoints — 20 requests per 10s per user
+router.use('/search', rateLimit({ windowMs: 10000, max: 20 }));
 
 // Multi-strategy search: try progressively simpler queries if ApiBay returns 0
 async function searchMusicMultiStrategy(query) {
