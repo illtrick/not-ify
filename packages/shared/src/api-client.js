@@ -159,6 +159,10 @@ export function getLibrary() {
   return get('/api/library');
 }
 
+export function getAlbum(id) {
+  return get(`/api/album/${enc(id)}`);
+}
+
 export function streamUrl(id) {
   return `${_baseUrl}/api/stream/${id}`;
 }
