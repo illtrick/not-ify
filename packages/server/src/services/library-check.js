@@ -32,6 +32,25 @@ function detectFileQuality(filePath) {
   }
 }
 
+/**
+ * Probe an audio file for quality and duration.
+ * Used by job-processor for upgrade quality comparisons.
+ */
+function probeFile(filePath) {
+  const quality = detectFileQuality(filePath);
+  let duration = 0;
+  try {
+    const out = execFileSync(
+      'ffprobe',
+      ['-v', 'quiet', '-print_format', 'json', '-show_format', filePath],
+      { timeout: 5000 }
+    );
+    const info = JSON.parse(out);
+    duration = Math.round(parseFloat(info.format?.duration || '0'));
+  } catch {}
+  return { quality, duration };
+}
+
 function getExistingQuality(artist, album) {
   const musicDir = process.env.MUSIC_DIR || '/app/music';
   const normArtist = normalize(artist);
@@ -210,10 +229,11 @@ function resolveAlbumDir(rgid, artist, album) {
   const musicDir = process.env.MUSIC_DIR || '/app/music';
 
   // Layer 1: rgid lookup (O(1), indexed)
+  // albums table uses album_artist/title columns, not artist/album
   if (rgid) {
     const existing = db.getAlbumByRgid(rgid);
     if (existing) {
-      const dir = path.join(musicDir, existing.artist, existing.album);
+      const dir = path.join(musicDir, existing.album_artist, existing.title);
       if (fs.existsSync(dir)) return dir;
     }
   }
@@ -232,4 +252,4 @@ function resolveAlbumDir(rgid, artist, album) {
   return path.join(musicDir, sanitize(artist), sanitize(album));
 }
 
-module.exports = { albumExistsInLibrary, albumTrackCount, excludedTrackCount, normalize, QUALITY_RANK, getExistingQuality, isUpgrade, resolveAlbumDir };
+module.exports = { albumExistsInLibrary, albumTrackCount, excludedTrackCount, normalize, QUALITY_RANK, getExistingQuality, isUpgrade, resolveAlbumDir, probeFile };

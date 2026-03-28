@@ -143,7 +143,7 @@ describe('library-check', () => {
     test('returns existing dir when rgid matches DB album', () => {
       jest.doMock('../../src/services/db', () => ({
         getAlbumByRgid: jest.fn((rgid) =>
-          rgid === 'rgid123' ? { artist: 'Tool', album: 'Fear Inoculum' } : undefined
+          rgid === 'rgid123' ? { album_artist: 'Tool', title: 'Fear Inoculum' } : undefined
         ),
         findAlbumByNormalizedName: jest.fn(() => null),
       }));
