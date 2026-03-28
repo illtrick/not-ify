@@ -19,6 +19,7 @@ import { MobileLibrary } from './components/MobileLibrary';
 import { BottomTabBar } from './components/BottomTabBar';
 import { UserPicker, getCurrentUser, clearCurrentUser } from './components/UserPicker';
 import { SetupWizard } from './components/SetupWizard';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { useQueue } from './hooks/useQueue';
 import { useRecentlyPlayed } from './hooks/useRecentlyPlayed';
 import { useSearch } from './hooks/useSearch';
@@ -1149,12 +1150,14 @@ function App() {
   }
 
   return (
-    <MainApp
-      currentUser={currentUser}
-      isAdmin={isAdmin}
-      setIsAdmin={setIsAdmin}
-      switchUser={switchUser}
-    />
+    <ErrorBoundary>
+      <MainApp
+        currentUser={currentUser}
+        isAdmin={isAdmin}
+        setIsAdmin={setIsAdmin}
+        switchUser={switchUser}
+      />
+    </ErrorBoundary>
   );
 }
 
