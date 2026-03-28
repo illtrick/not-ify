@@ -13,12 +13,11 @@ const VALID_FFPROBE_OUTPUT = JSON.stringify({
 
 afterEach(() => {
   jest.restoreAllMocks();
-  delete process.env.CLAM_ENABLED;
   delete process.env.MIME_CHECK_ENABLED;
 });
 
-// Sets up execSync mock: mime + ffprobe return values/errors, clam optional
-function mockExecSync({ mime = 'audio/mpeg\n', ffprobe, clamResult } = {}) {
+// Sets up execSync mock: mime + ffprobe return values/errors
+function mockExecSync({ mime = 'audio/mpeg\n', ffprobe } = {}) {
   const ffprobeOut = ffprobe !== undefined ? ffprobe : VALID_FFPROBE_OUTPUT;
   jest.spyOn(childProcess, 'execSync').mockImplementation((cmd) => {
     if (cmd.includes('file --mime-type')) {
@@ -28,10 +27,6 @@ function mockExecSync({ mime = 'audio/mpeg\n', ffprobe, clamResult } = {}) {
     if (cmd.includes('ffprobe')) {
       if (ffprobeOut instanceof Error) throw ffprobeOut;
       return Buffer.from(ffprobeOut);
-    }
-    if (cmd.includes('clamdscan')) {
-      if (clamResult instanceof Error) throw clamResult;
-      return Buffer.from(clamResult || 'OK');
     }
     return Buffer.from('');
   });
@@ -44,7 +39,6 @@ function mockStatSync(size) {
 describe('file-validator', () => {
   describe('rejects non-audio MIME type', () => {
     it('fails validation when MIME type is not audio', async () => {
-      process.env.CLAM_ENABLED = 'false';
       process.env.MIME_CHECK_ENABLED = 'true';
       mockStatSync(1024 * 1024);
       mockExecSync({ mime: 'application/zip\n' });
@@ -60,7 +54,6 @@ describe('file-validator', () => {
 
   describe('rejects file that ffprobe cannot parse', () => {
     it('fails validation when ffprobe throws', async () => {
-      process.env.CLAM_ENABLED = 'false';
       process.env.MIME_CHECK_ENABLED = 'false';
       mockStatSync(1024 * 1024);
       mockExecSync({ ffprobe: new Error('ffprobe: invalid data found when processing input') });
@@ -76,7 +69,6 @@ describe('file-validator', () => {
 
   describe('accepts valid FLAC file', () => {
     it('passes all checks for a valid FLAC', async () => {
-      process.env.CLAM_ENABLED = 'false';
       process.env.MIME_CHECK_ENABLED = 'false';
       const flacFfprobe = JSON.stringify({
         format: { format_name: 'flac', bit_rate: '900000', duration: '240' },
@@ -93,7 +85,6 @@ describe('file-validator', () => {
 
   describe('accepts valid MP3 file', () => {
     it('passes all checks for a valid MP3', async () => {
-      process.env.CLAM_ENABLED = 'false';
       process.env.MIME_CHECK_ENABLED = 'false';
       mockStatSync(5 * 1024 * 1024);
       mockExecSync({ ffprobe: VALID_FFPROBE_OUTPUT });
@@ -106,42 +97,8 @@ describe('file-validator', () => {
     });
   });
 
-  describe('ClamAV behaviour', () => {
-    it('skips ClamAV when CLAM_ENABLED=false', async () => {
-      process.env.CLAM_ENABLED = 'false';
-      process.env.MIME_CHECK_ENABLED = 'false';
-      mockStatSync(1024 * 1024);
-      mockExecSync({ ffprobe: VALID_FFPROBE_OUTPUT });
-
-      const result = await fileValidator.validateFile(FAKE_PATH);
-
-      const clamCheck = result.checks.find(c => c.name === 'clam');
-      expect(clamCheck).toBeDefined();
-      expect(clamCheck.skipped).toBe(true);
-      expect(clamCheck.passed).toBeUndefined();
-    });
-
-    it('rejects file flagged by ClamAV', async () => {
-      process.env.CLAM_ENABLED = 'true';
-      process.env.MIME_CHECK_ENABLED = 'false';
-      mockStatSync(1024 * 1024);
-      mockExecSync({
-        ffprobe: VALID_FFPROBE_OUTPUT,
-        clamResult: new Error('FOUND Eicar-Test-Signature'),
-      });
-
-      const result = await fileValidator.validateFile(FAKE_PATH);
-
-      expect(result.passed).toBe(false);
-      const clamCheck = result.checks.find(c => c.name === 'clam');
-      expect(clamCheck).toBeDefined();
-      expect(clamCheck.passed).toBe(false);
-    });
-  });
-
   describe('rejects files over MAX_AUDIO_FILE_SIZE (500MB)', () => {
     it('fails when file exceeds 500 MB', async () => {
-      process.env.CLAM_ENABLED = 'false';
       process.env.MIME_CHECK_ENABLED = 'false';
       mockStatSync(501 * 1024 * 1024);
       // execSync should not be called at all (early return after size check)
@@ -157,7 +114,6 @@ describe('file-validator', () => {
     });
 
     it('passes when file is exactly at the 500 MB limit', async () => {
-      process.env.CLAM_ENABLED = 'false';
       process.env.MIME_CHECK_ENABLED = 'false';
       mockStatSync(500 * 1024 * 1024);
       mockExecSync({ ffprobe: VALID_FFPROBE_OUTPUT });
@@ -171,7 +127,6 @@ describe('file-validator', () => {
 
   describe('result structure', () => {
     it('returns path, passed, and checks array', async () => {
-      process.env.CLAM_ENABLED = 'false';
       process.env.MIME_CHECK_ENABLED = 'false';
       mockStatSync(1024 * 1024);
       mockExecSync({ ffprobe: VALID_FFPROBE_OUTPUT });
@@ -185,7 +140,6 @@ describe('file-validator', () => {
     });
 
     it('each check has a name and detail', async () => {
-      process.env.CLAM_ENABLED = 'false';
       process.env.MIME_CHECK_ENABLED = 'false';
       mockStatSync(1024 * 1024);
       mockExecSync({ ffprobe: VALID_FFPROBE_OUTPUT });

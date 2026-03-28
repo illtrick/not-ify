@@ -65,7 +65,7 @@ function dockerApi(method, apiPath, body) {
  */
 async function restartContainer(name, timeout = 10) {
   // Whitelist of containers we're allowed to restart
-  const ALLOWED = ['slskd', 'gluetun', 'clamav', 'not-ify', 'watchtower'];
+  const ALLOWED = ['slskd', 'gluetun', 'not-ify', 'watchtower'];
   if (!ALLOWED.includes(name)) {
     throw new Error(`Container "${name}" is not in the allowed restart list`);
   }
@@ -96,7 +96,7 @@ async function restartContainer(name, timeout = 10) {
  * @returns {Promise<boolean>} true if recreated successfully
  */
 async function recreateContainer(name) {
-  const ALLOWED = ['slskd', 'gluetun', 'clamav'];
+  const ALLOWED = ['slskd', 'gluetun'];
   if (!ALLOWED.includes(name)) {
     throw new Error(`Container "${name}" is not in the allowed recreate list`);
   }
@@ -157,7 +157,7 @@ async function getContainerStatus(name) {
  * Get status of all known containers.
  */
 async function getAllContainerStatus() {
-  const names = ['not-ify', 'slskd', 'gluetun', 'clamav', 'watchtower'];
+  const names = ['not-ify', 'slskd', 'gluetun', 'watchtower'];
   const results = {};
   for (const name of names) {
     results[name] = await getContainerStatus(name);

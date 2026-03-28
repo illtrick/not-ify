@@ -1,5 +1,5 @@
 # =============================================================================
-# Not-ify — Production overrides (QNAP deployment)
+# Not-ify — Production overrides (NAS deployment)
 # =============================================================================
 # Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 # With VPN: docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile vpn up -d

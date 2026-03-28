@@ -192,7 +192,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 - YouTube yt-dlp correctly bypasses VPN (stream extraction blocked on 5/7 VPN regions, search unaffected)
 - Gluetun control API auth: disabled default auth config to enable region switching
 - Region switching uses correct gluetun endpoint (`/v1/vpn/settings` with nested provider payload)
-- QNAP staging volumes use absolute `/share/CACHEDEV1_DATA/` paths (prevents 16MB tmpfs issue)
+- NAS staging volumes use absolute paths (prevents 16MB tmpfs issue)
 - Settings UI: merged Save and Switch Region into single Save button
 
 ### Changed

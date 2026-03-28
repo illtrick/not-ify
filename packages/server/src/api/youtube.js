@@ -291,9 +291,7 @@ async function ytDownloadOne(entry, abort) {
   entry.progress = 100;
 
   // Validate the downloaded file before accepting it into the library
-  // Skip ClamAV for YT downloads — YouTube CDN is a trusted source
-  // ClamAV scanning is reserved for untrusted sources (torrents, Soulseek)
-  const validation = await validateFile(downloadedFile, { deferClam: true });
+  const validation = await validateFile(downloadedFile);
   if (!validation.passed) {
     console.warn('[yt-queue] File failed validation, deleting:', downloadedFile, validation.checks);
     try { fs.unlinkSync(downloadedFile); } catch (e) { /* ignore */ }

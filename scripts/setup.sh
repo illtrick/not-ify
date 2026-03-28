@@ -13,7 +13,7 @@ source "${SCRIPT_DIR}/setup-lib.sh"
 # ═══════════════════════════════════════════════
 
 # Parse args
-INSTALL_DIR="" MUSIC_DIR="" PORT="" API_KEY="" ENABLE_VPN="n" ENABLE_CLAMAV="n"
+INSTALL_DIR="" MUSIC_DIR="" PORT="" API_KEY="" ENABLE_VPN="n"
 for arg in "$@"; do
   case "$arg" in
     --install-dir=*) INSTALL_DIR="${arg#*=}" ;;
@@ -21,7 +21,6 @@ for arg in "$@"; do
     --port=*)        PORT="${arg#*=}" ;;
     --api-key=*)     API_KEY="${arg#*=}" ;;
     --vpn=*)         ENABLE_VPN="${arg#*=}" ;;
-    --clamav=*)      ENABLE_CLAMAV="${arg#*=}" ;;
     --help|-h)
       echo "Not-ify setup (container-side)"
       echo ""
@@ -45,7 +44,6 @@ MUSIC_DIR="${MUSIC_DIR:-$NOTIFY_MUSIC_DIR}"
 PORT="${PORT:-${NOTIFY_PORT:-3000}}"
 API_KEY="${API_KEY:-${NOTIFY_SLSKD_API_KEY:-$(generate_uuid)}}"
 ENABLE_VPN="${ENABLE_VPN:-${NOTIFY_ENABLE_VPN:-n}}"
-ENABLE_CLAMAV="${ENABLE_CLAMAV:-${NOTIFY_ENABLE_CLAMAV:-n}}"
 
 HOST_INSTALL="/host/install"
 
@@ -144,16 +142,6 @@ VPN_REGION=${vpn_region}
 EOF
 fi
 
-# Enable ClamAV if requested
-if [ "$ENABLE_CLAMAV" = "y" ]; then
-  sed -i 's/^#CLAM#//' "${HOST_INSTALL}/docker-compose.yml"
-  cat >> "${HOST_INSTALL}/.env" << EOF
-CLAM_ENABLED=true
-CLAM_HOST=localhost
-CLAM_PORT=3310
-EOF
-fi
-
 success "Configuration written"
 
 # Start containers (suppress verbose Docker output)
@@ -164,7 +152,6 @@ docker compose up -d > /dev/null 2>&1
 # Build list of expected containers
 CONTAINERS="not-ify slskd watchtower"
 [ "$ENABLE_VPN" = "y" ] && CONTAINERS="$CONTAINERS gluetun"
-[ "$ENABLE_CLAMAV" = "y" ] && CONTAINERS="$CONTAINERS clamav"
 TOTAL=$(echo "$CONTAINERS" | wc -w)
 
 # Configure slskd API key (wait for slskd to be running, not a fixed sleep)
@@ -218,7 +205,6 @@ for container in $CONTAINERS; do
   else
     # Show helpful estimates for slow-starting services
     hint=""
-    [ "$container" = "clamav" ] && hint=" (usually 2-3 min)"
     [ "$container" = "slskd" ] && hint=" (usually 10-30s)"
     printf "\r\033[K  ${YELLOW}!${NC} %s\n" "${container} — may still be starting${hint}"
   fi

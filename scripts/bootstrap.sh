@@ -361,7 +361,6 @@ echo -e "  ${DIM}You can always add them later from Settings.${NC}"
 echo ""
 
 ENABLE_VPN="n"
-ENABLE_CLAMAV="n"
 VPN_PROVIDER=""
 VPN_USERNAME=""
 VPN_PASSWORD=""
@@ -436,18 +435,6 @@ else
 fi
 echo ""
 
-echo -e "  ${BOLD}ClamAV (Antivirus)${NC}"
-echo -e "  ${DIM}Scans downloaded files for malware before adding${NC}"
-echo -e "  ${DIM}to your library. Recommended for Soulseek downloads.${NC}"
-echo -e "  ${DIM}Note: Uses ~200MB RAM and takes 2-3 min to start.${NC}"
-if confirm "Enable ClamAV?"; then
-  ENABLE_CLAMAV="y"
-  success "ClamAV will be installed"
-else
-  info "Skipped — files are validated by format and ffprobe"
-fi
-echo ""
-
 # ── Step 6: Port & Install ───────────────────────────
 echo -e "  ${BOLD}Step 6/6 · Installing Not-ify${NC}"
 echo ""
@@ -498,7 +485,6 @@ docker run --rm \
   -e NOTIFY_PORT="$PORT" \
   -e NOTIFY_SLSKD_API_KEY="$SLSKD_API_KEY" \
   -e NOTIFY_ENABLE_VPN="$ENABLE_VPN" \
-  -e NOTIFY_ENABLE_CLAMAV="$ENABLE_CLAMAV" \
   -e NOTIFY_VPN_PROVIDER="$VPN_PROVIDER" \
   -e NOTIFY_VPN_USERNAME="$VPN_USERNAME" \
   -e NOTIFY_VPN_PASSWORD="$VPN_PASSWORD" \
@@ -508,8 +494,7 @@ docker run --rm \
     --music-dir="$MUSIC_DIR" \
     --port="$PORT" \
     --api-key="$SLSKD_API_KEY" \
-    --vpn="$ENABLE_VPN" \
-    --clamav="$ENABLE_CLAMAV"
+    --vpn="$ENABLE_VPN"
 
 # Check if containers started successfully
 echo ""
