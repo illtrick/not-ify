@@ -76,16 +76,17 @@ router.get('/library', (req, res) => {
       writable = false;
     }
 
-    // Try to get free space via statvfs-like approach (not available natively in Node)
-    // Use df-style — skip on platforms where it's unavailable
+    // Try to get free space via df — skip on platforms where it's unavailable
     try {
-      const { execSync } = require('child_process');
+      const { execFileSync } = require('child_process');
       if (process.platform === 'win32') {
         // Skip free space on Windows in this context
         freeSpace = null;
       } else {
-        const output = execSync(`df -k "${musicDir}" 2>/dev/null | tail -1`, { timeout: 2000 }).toString();
-        const parts = output.trim().split(/\s+/);
+        const output = execFileSync('df', ['-k', musicDir], { timeout: 2000 }).toString();
+        const lines = output.trim().split('\n').filter(l => l.length > 0);
+        const lastLine = lines[lines.length - 1];
+        const parts = lastLine.trim().split(/\s+/);
         if (parts.length >= 4) {
           freeSpace = parseInt(parts[3], 10) * 1024; // convert KB to bytes
         }
