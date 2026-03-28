@@ -2,6 +2,13 @@ import { useState, useRef } from 'react';
 import * as api from '@not-ify/shared';
 import { buildTrackPath } from '../utils';
 
+const YT_ALBUM_POLL_INTERVAL_MS = 2000;
+const BG_POLL_INTERVAL_MS = 3000;
+const JOB_QUEUE_POLL_INTERVAL_MS = 3000;
+const JOB_QUEUE_IDLE_CLEAR_MS = 4000;
+const DOWNLOAD_COMPLETE_CLEAR_MS = 2000;
+const BG_DONE_CLEAR_MS = 3000;
+
 export function useDownload({ playTrack, loadLibrary, library = [] } = {}) {
   const [downloading, setDownloading] = useState(null);
   const [downloadStatus, setDownloadStatus] = useState(null);
@@ -207,10 +214,10 @@ export function useDownload({ playTrack, loadLibrary, library = [] } = {}) {
           } else if (qData.queued.length === 0) {
             clearInterval(pollId);
             setDownloadStatus(prev => ({ ...prev, message: 'Album download complete!', percent: 100 }));
-            setTimeout(() => { setDownloading(null); loadLibrary?.(); }, 2000);
+            setTimeout(() => { setDownloading(null); loadLibrary?.(); }, DOWNLOAD_COMPLETE_CLEAR_MS);
           }
         } catch { clearInterval(pollId); }
-      }, 2000);
+      }, YT_ALBUM_POLL_INTERVAL_MS);
     } catch (err) {
       setDownloadStatus(prev => ({ ...prev, message: `Error: ${err.message}`, error: true }));
       setDownloading(null);
@@ -259,7 +266,7 @@ export function useDownload({ playTrack, loadLibrary, library = [] } = {}) {
             loadLibrary?.();
             clearInterval(bgPollRef.current);
             bgPollRef.current = null;
-            setTimeout(() => setBgDownloadStatus(null), 3000);
+            setTimeout(() => setBgDownloadStatus(null), BG_DONE_CLEAR_MS);
             api.dedupeLibrary().catch(() => {});
           }
         } else {
@@ -273,7 +280,7 @@ export function useDownload({ playTrack, loadLibrary, library = [] } = {}) {
         libRefreshCountRef.current++;
         if (libRefreshCountRef.current % 5 === 0) loadLibrary?.();
       } catch {}
-    }, 3000);
+    }, BG_POLL_INTERVAL_MS);
   }
 
   // -------------------------------------------------------------------------
@@ -344,10 +351,10 @@ export function useDownload({ playTrack, loadLibrary, library = [] } = {}) {
           clearInterval(jobQueuePollRef.current);
           jobQueuePollRef.current = null;
           loadLibrary?.();
-          setTimeout(() => setJobQueueStats(null), 4000);
+          setTimeout(() => setJobQueueStats(null), JOB_QUEUE_IDLE_CLEAR_MS);
         }
       } catch {}
-    }, 3000);
+    }, JOB_QUEUE_POLL_INTERVAL_MS);
   }
 
   function stopJobQueuePoll() {
