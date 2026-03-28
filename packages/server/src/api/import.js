@@ -3,6 +3,11 @@ const fs = require('fs');
 const path = require('path');
 const router = express.Router();
 
+const SEARCH_TIMEOUT_MS = 30000;
+const MIN_PLAY_DURATION_MS = 30000;
+const RATE_LIMIT_MS = 1500;
+const MB_RATE_LIMIT_MS = 1000;
+
 const CONFIG_DIR = process.env.CONFIG_DIR || '/app/config';
 const WANTED_PATH = path.join(CONFIG_DIR, 'wanted.json');
 
@@ -40,7 +45,7 @@ router.post('/import/spotify', express.json({ limit: '10mb' }), (req, res) => {
 
     if (!artist || !album || !track) continue;
     if (ts < cutoff) continue;
-    if (ms < 30000) continue; // skip < 30s plays (skips)
+    if (ms < MIN_PLAY_DURATION_MS) continue; // skip < 30s plays (skips)
 
     const key = `${artist.toLowerCase()}|||${album.toLowerCase()}`;
     if (!albumMap.has(key)) {
@@ -128,7 +133,7 @@ router.post('/import/wanted/:index/search', async (req, res) => {
     // Use the app's own search API internally
     const port = process.env.PORT || 3000;
     const searchRes = await fetch(`http://localhost:${port}/api/search?q=${encodeURIComponent(query)}`, {
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
     });
     const data = await searchRes.json();
 
@@ -183,7 +188,7 @@ router.post('/import/wanted/batch-search', async (req, res) => {
     try {
       const port = process.env.PORT || 3000;
       const searchRes = await fetch(`http://localhost:${port}/api/search?q=${encodeURIComponent(query)}`, {
-        signal: AbortSignal.timeout(30000),
+        signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
       });
       const data = await searchRes.json();
 
@@ -205,7 +210,7 @@ router.post('/import/wanted/batch-search', async (req, res) => {
     res.write(`data: ${JSON.stringify({ index: i, artist: item.artist, album: item.album, status: item.status, progress: searched, total: toSearch.length })}\n\n`);
 
     // Rate limit: 1.5 seconds between searches to be nice to APIs
-    if (searched < toSearch.length) await new Promise(r => setTimeout(r, 1500));
+    if (searched < toSearch.length) await new Promise(r => setTimeout(r, RATE_LIMIT_MS));
   }
 
   saveWanted(wanted);
@@ -397,7 +402,7 @@ async function processImportBatch(batch) {
 
     // Rate limit: 1000ms between MB lookups
     if (i < batch.length - 1) {
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise(r => setTimeout(r, MB_RATE_LIMIT_MS));
     }
   }
 
