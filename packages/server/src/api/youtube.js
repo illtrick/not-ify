@@ -436,11 +436,16 @@ async function ytDownloadOne(entry, abort) {
   // Clean up intermediate files for THIS track only (not all .webm in the directory —
   // with concurrency 2, another track may still be converting its .webm)
   try {
+    const files = fs.readdirSync(destDir);
     const baseName = sanitizePath(dlTitle);
-    const intermediateExts = ['.webm', '.part', '.temp', '.webm.part'];
-    for (const ext of intermediateExts) {
-      const f = path.join(destDir, baseName + ext);
-      try { fs.unlinkSync(f); } catch {}
+    const normalizedBase = baseName.toLowerCase().replace(/[^a-z0-9]/g, '');
+    for (const f of files) {
+      if (/\.(webm|part|webm\.part|temp)$/i.test(f)) {
+        const fBase = f.replace(/\.(webm|part|webm\.part|temp)$/i, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (fBase === normalizedBase || f.startsWith(baseName)) {
+          try { fs.unlinkSync(path.join(destDir, f)); } catch {}
+        }
+      }
     }
   } catch (cleanupErr) {
     console.warn('[yt-queue] Cleanup failed:', cleanupErr.message);
