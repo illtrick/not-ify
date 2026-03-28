@@ -21,7 +21,11 @@ FROM node:20-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg curl ca-certificates unrar-free python3 file bash whiptail jq tini \
     && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
-       -o /usr/local/bin/yt-dlp && chmod +x /usr/local/bin/yt-dlp \
+       -o /usr/local/bin/yt-dlp \
+    && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/SHA2-256SUMS \
+       -o /tmp/yt-dlp.sha256 \
+    && grep 'yt-dlp$' /tmp/yt-dlp.sha256 | (cd /usr/local/bin && sha256sum -c -) \
+    && chmod +x /usr/local/bin/yt-dlp && rm -f /tmp/yt-dlp.sha256 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Docker CLI + Compose plugin (for setup script to manage host containers)
