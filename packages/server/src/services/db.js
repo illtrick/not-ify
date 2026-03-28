@@ -788,12 +788,12 @@ function findAlbumByNormalizedName(artist, album) {
   const normArtist = (artist || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const normAlbum = (album || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   if (!normArtist || !normAlbum) return null;
-  // Search all albums for normalized match
-  const albums = _db.prepare('SELECT artist, album FROM albums').all();
-  for (const a of albums) {
-    const na = (a.artist || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    const nb = (a.album || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (na === normArtist && nb === normAlbum) return a;
+  // album_artist / title are the actual column names in the albums table
+  const rows = _db.prepare('SELECT album_artist, title FROM albums').all();
+  for (const a of rows) {
+    const na = (a.album_artist || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const nb = (a.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (na === normArtist && nb === normAlbum) return { artist: a.album_artist, album: a.title };
   }
   return null;
 }

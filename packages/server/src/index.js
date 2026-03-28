@@ -750,10 +750,10 @@ if (require.main === module) {
             // API key rejected — try to fix by writing slskd.yml via container exec
             log.info({ event: 'slskd.key_sync' }, 'slskd API key mismatch — attempting to sync config');
             try {
-              const { execSync } = require('child_process');
+              const { execFileSync } = require('child_process');
               const yml = `web:\n  authentication:\n    api_keys:\n      notify:\n        key: ${apiKey}\n        role: administrator`;
-              execSync(`docker exec slskd sh -c "cat > /app/slskd.yml << 'SLSKEOF'\n${yml}\nSLSKEOF"`, { timeout: 10000 });
-              execSync('docker restart slskd', { timeout: 30000 });
+              execFileSync('docker', ['exec', 'slskd', 'sh', '-c', 'printf "%s" "$1" > /app/slskd.yml', '_', yml], { timeout: 10000 });
+              execFileSync('docker', ['restart', 'slskd'], { timeout: 30000 });
               log.info({ event: 'slskd.key_synced' }, 'slskd API key synced and container restarted');
             } catch (e) {
               log.warn({ event: 'slskd.key_sync_failed', error: e.message }, 'Failed to sync slskd API key — manual fix may be needed');
