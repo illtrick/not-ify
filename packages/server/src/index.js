@@ -789,7 +789,7 @@ if (require.main === module) {
       },
       flushScrobbles: async () => {
         try {
-          const lastfm = require('./services/lastfm-client');
+          const lastfm = require('./services/lastfm');
           const allQueued = dbService.getAllUsersWithScrobbleQueue();
           for (const userId of allQueued) {
             const queue = dbService.getScrobbleQueue(userId);
