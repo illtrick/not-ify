@@ -45,7 +45,22 @@ router.post('/account', (req, res) => {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
 
-  db.createUser(userId, displayName.trim(), 'admin');
+  // Wrap insert in try-catch to handle race condition: two simultaneous requests
+  // can both pass the getUserCount() check above. The PRIMARY KEY constraint on
+  // the users table will reject the second insert — we surface that as 409.
+  try {
+    db.createUser(userId, displayName.trim(), 'admin');
+  } catch (err) {
+    // UNIQUE / PRIMARY KEY constraint violation means another request won the race
+    const isConstraintError =
+      err && (err.code === 'SQLITE_CONSTRAINT_PRIMARYKEY' ||
+              err.code === 'SQLITE_CONSTRAINT_UNIQUE' ||
+              (typeof err.message === 'string' && err.message.includes('UNIQUE constraint failed')));
+    if (isConstraintError) {
+      return res.status(409).json({ error: 'Account already exists. Setup can only create one admin.' });
+    }
+    throw err;
+  }
   setupMiddleware._resetCache();
 
   return res.status(201).json({ userId, displayName: displayName.trim(), isAdmin: true });
