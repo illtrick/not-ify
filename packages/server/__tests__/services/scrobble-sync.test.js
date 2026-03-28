@@ -107,4 +107,22 @@ describe('scrobble-sync', () => {
     const result = await sync.deltaSync('test-user-2', 'lfmuser-fallback');
     expect(result.fetched).toBe(1);
   });
+
+  test('fullSync handles null tracks without throwing (B10)', async () => {
+    const lastfm = require('../../src/services/lastfm');
+    lastfm.getRecentTracksPage
+      .mockResolvedValueOnce({ tracks: null, totalPages: 1, total: 0 });
+
+    await expect(sync.fullSync('test-user', 'lfmuser-null-tracks')).resolves.not.toThrow();
+  });
+
+  test('deltaSync handles null tracks without throwing (B10)', async () => {
+    const lastfm = require('../../src/services/lastfm');
+    // Give test-user-2 a prior sync state so deltaSync doesn't fall back to fullSync
+    db.setUserSetting('test-user-2', 'scrobbleSync', { state: 'complete', lastSyncedAt: 1000 });
+    lastfm.getRecentTracksPage
+      .mockResolvedValueOnce({ tracks: null, totalPages: 1, total: 0 });
+
+    await expect(sync.deltaSync('test-user-2', 'lfmuser-null-tracks-delta')).resolves.not.toThrow();
+  });
 });

@@ -34,7 +34,7 @@ async function fullSync(userId, lastfmUsername) {
       }
       totalPages = result.totalPages;
 
-      const scrobbles = result.tracks
+      const scrobbles = (result.tracks || [])
         .filter(t => t.date)
         .map(t => ({
           artist: t.artist?.['#text'] || t.artist?.name || '',
@@ -88,7 +88,7 @@ async function deltaSync(userId, lastfmUsername) {
       }
     }
     totalPages = result.totalPages;
-    const scrobbles = result.tracks
+    const scrobbles = (result.tracks || [])
       .filter(t => t.date)
       .map(t => ({
         artist: t.artist?.['#text'] || t.artist?.name || '',
