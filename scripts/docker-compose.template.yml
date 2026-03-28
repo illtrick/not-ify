@@ -108,25 +108,3 @@ services:
 #VPN#      - "8000:8000/tcp"
 #VPN#    labels:
 #VPN#      - com.centurylinklabs.watchtower.scope=not-ify
-<<<<<<< HEAD
-
-#CLAM#  clamav:
-#CLAM#    image: clamav/clamav:stable
-#CLAM#    container_name: clamav
-#CLAM#    restart: unless-stopped
-#CLAM#    network_mode: host
-#CLAM#    logging:
-#CLAM#      driver: json-file
-#CLAM#      options:
-#CLAM#        max-size: "5m"
-#CLAM#        max-file: "2"
-#CLAM#    healthcheck:
-#CLAM#      test: ["CMD", "clamdcheck"]
-#CLAM#      interval: 60s
-#CLAM#      timeout: 10s
-#CLAM#      retries: 3
-#CLAM#      start_period: 120s
-#CLAM#    labels:
-#CLAM#      - com.centurylinklabs.watchtower.scope=not-ify
-=======
->>>>>>> d6d760a (chore: remove ClamAV integration from server, Docker, scripts, and tests)
