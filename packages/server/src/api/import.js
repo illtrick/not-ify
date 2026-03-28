@@ -23,7 +23,7 @@ function saveWanted(list) {
 // ─── POST /api/import/spotify ─────────────────────────────────────────────
 // Accepts a Spotify Extended Streaming History JSON (array of records)
 // Extracts unique artist/album pairs from the last N days, sorted by time
-router.post('/import/spotify', express.json({ limit: '50mb' }), (req, res) => {
+router.post('/import/spotify', express.json({ limit: '10mb' }), (req, res) => {
   const { history, days = 120 } = req.body;
   if (!Array.isArray(history)) return res.status(400).json({ error: 'Expected { history: [...] } with Spotify streaming data' });
 
