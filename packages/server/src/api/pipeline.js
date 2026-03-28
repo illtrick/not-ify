@@ -81,7 +81,9 @@ router.post('/download', async (req, res) => {
     if (abort.signal.aborted) return;
     try {
       res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`);
-    } catch {}
+    } catch (err) {
+      console.warn(`[pipeline] SSE write failed: ${err.message}`);
+    }
   }
 
   function checkCancelled() {
@@ -294,7 +296,9 @@ router.post('/download', async (req, res) => {
     try {
       const warmUrl = `http://localhost:3000/api/cover/search?artist=${encodeURIComponent(destArtist)}&album=${encodeURIComponent(destAlbum)}`;
       fetch(warmUrl, { signal: AbortSignal.timeout(10000) }).catch(() => {});
-    } catch {}
+    } catch (err) {
+      console.warn(`[pipeline] Cover art pre-warm failed: ${err.message}`);
+    }
 
     activity.log('torrent', 'success', `Complete: ${destArtist}/${destAlbum} — ${downloadedFiles.length} tracks`, { artist: destArtist, album: destAlbum, fileCount: downloadedFiles.length });
     send('complete', {
@@ -429,11 +433,11 @@ router.post('/download/background', async (req, res) => {
 
       // Write metadata
       if (mbid || coverArt || year) {
-        try { fs.writeFileSync(path.join(destDir, '.metadata.json'), JSON.stringify({ mbid, coverArt, year, source: 'torrent' }, null, 2)); } catch {}
+        try { fs.writeFileSync(path.join(destDir, '.metadata.json'), JSON.stringify({ mbid, coverArt, year, source: 'torrent' }, null, 2)); } catch (err) { console.warn(`[bg-pipeline] Could not write .metadata.json: ${err.message}`); }
       }
 
       // Pre-warm cover art
-      try { fetch(`http://localhost:3000/api/cover/search?artist=${encodeURIComponent(destArtist)}&album=${encodeURIComponent(destAlbum)}`, { signal: AbortSignal.timeout(10000) }).catch(() => {}); } catch {}
+      try { fetch(`http://localhost:3000/api/cover/search?artist=${encodeURIComponent(destArtist)}&album=${encodeURIComponent(destAlbum)}`, { signal: AbortSignal.timeout(10000) }).catch(() => {}); } catch (err) { console.warn(`[bg-pipeline] Cover art pre-warm failed: ${err.message}`); }
 
       bgDownload.status = 'done';
       bgDownload.progress = 100;
