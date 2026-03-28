@@ -5,6 +5,28 @@ const db = require('../services/db');
 
 const router = express.Router();
 
+/**
+ * Validate a browse path — block sensitive system directories and null bytes.
+ * Returns { ok: true } or { ok: false, reason: string }.
+ */
+function validateBrowsePath(p) {
+  if (typeof p !== 'string') return { ok: false, reason: 'Path must be a string' };
+  if (p.includes('\0')) return { ok: false, reason: 'Path contains null bytes' };
+
+  // Normalise to forward slashes for consistent matching on all platforms
+  const resolved = path.resolve(p).replace(/\\/g, '/');
+  const normalised = p.replace(/\\/g, '/');
+  const BLOCKED = ['/proc', '/sys', '/dev', '/run', '/var/run', '/etc'];
+  for (const prefix of BLOCKED) {
+    // Check both the raw input and the resolved path
+    if (normalised === prefix || normalised.startsWith(prefix + '/') ||
+        resolved === prefix || resolved.startsWith(prefix + '/')) {
+      return { ok: false, reason: `Access denied: ${prefix} is a restricted path` };
+    }
+  }
+  return { ok: true };
+}
+
 function isDocker() {
   return fs.existsSync('/.dockerenv') || process.env.DOCKER === 'true';
 }
@@ -65,6 +87,12 @@ router.post('/', (req, res) => {
 // GET /api/library-config/browse — filesystem directory browser
 router.get('/browse', (req, res) => {
   const requestedPath = req.query.path || (process.platform === 'win32' ? 'C:\\' : '/');
+
+  const validation = validateBrowsePath(requestedPath);
+  if (!validation.ok) {
+    return res.status(403).json({ error: validation.reason });
+  }
+
   const fullPath = path.resolve(requestedPath);
 
   try {
@@ -86,6 +114,12 @@ router.get('/browse', (req, res) => {
 // GET /api/library-config/files-count — count music files and total size in current music dir
 router.get('/files-count', (req, res) => {
   const dirPath = req.query.path || getMusicDir().musicDir;
+
+  const validation = validateBrowsePath(dirPath);
+  if (!validation.ok) {
+    return res.status(403).json({ error: validation.reason });
+  }
+
   const resolved = path.resolve(dirPath);
 
   const musicExts = new Set(['.mp3', '.flac', '.ogg', '.m4a', '.wav', '.aac', '.opus', '.wma', '.alac']);
@@ -202,5 +236,7 @@ router.post('/migrate', (req, res) => {
   sendProgress();
   copyFiles();
 });
+
+router._test = { validateBrowsePath };
 
 module.exports = router;
