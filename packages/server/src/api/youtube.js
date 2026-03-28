@@ -19,8 +19,6 @@ function getMusicDir() {
     return process.env.MUSIC_DIR || '/app/music';
   }
 }
-const MUSIC_DIR = null; // DEPRECATED — use getMusicDir() instead
-
 function sanitizePath(s) {
   return (s || 'Unknown').replace(/[:]/g, '-').replace(/[<>"/\\|?*\x00-\x1f]/g, '_').trim() || 'Unknown';
 }
