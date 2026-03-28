@@ -26,7 +26,8 @@ function fileId(filepath) {
 const router = express.Router();
 const MUSIC_DIR = process.env.MUSIC_DIR || '/app/music';
 
-// Track the active download so it can be cancelled
+// Single active download at a time (by design — single-user home server).
+// Multi-user support would require a Map keyed by userId.
 let activeDownload = null; // { abort: AbortController, torrentId, name }
 
 // DELETE /api/download — Cancel the active download
@@ -321,6 +322,7 @@ router.post('/download', async (req, res) => {
 // ---------------------------------------------------------------------------
 // Background torrent download — non-SSE, returns immediately, processes async
 // ---------------------------------------------------------------------------
+// Single background download at a time (by design — single-user home server).
 let bgDownload = null; // { status, name, artist, album, progress, message, error, fileCount }
 
 router.get('/download/background/status', (req, res) => {
