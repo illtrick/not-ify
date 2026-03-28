@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 
 const AUDIO_EXT = new Set(['.mp3', '.flac', '.ogg', '.m4a', '.aac', '.wav', '.opus']);
 
@@ -10,8 +10,9 @@ const QUALITY_RANK = { flac: 6, '320': 5, v0: 4, '256': 3, '192': 2, '128': 1, u
 
 function detectFileQuality(filePath) {
   try {
-    const out = execSync(
-      `ffprobe -v quiet -print_format json -show_format "${filePath}"`,
+    const out = execFileSync(
+      'ffprobe',
+      ['-v', 'quiet', '-print_format', 'json', '-show_format', filePath],
       { timeout: 5000 }
     );
     const info = JSON.parse(out);
