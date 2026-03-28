@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const db = require('./db');
 
 const AUDIO_EXT = new Set(['.mp3', '.flac', '.ogg', '.m4a', '.aac', '.wav', '.opus']);
 
@@ -200,4 +201,35 @@ function excludedTrackCount(artist, album) {
   return 0;
 }
 
-module.exports = { albumExistsInLibrary, albumTrackCount, excludedTrackCount, normalize, QUALITY_RANK, getExistingQuality, isUpgrade };
+/**
+ * Resolve the destination directory for an album download.
+ * Uses layered identity: rgid (DB index) → normalized name (DB) → new folder.
+ * Never scans the filesystem — only indexed DB lookups.
+ */
+function resolveAlbumDir(rgid, artist, album) {
+  const musicDir = process.env.MUSIC_DIR || '/app/music';
+
+  // Layer 1: rgid lookup (O(1), indexed)
+  if (rgid) {
+    const existing = db.getAlbumByRgid(rgid);
+    if (existing) {
+      const dir = path.join(musicDir, existing.artist, existing.album);
+      if (fs.existsSync(dir)) return dir;
+    }
+  }
+
+  // Layer 2: normalized name DB query
+  if (artist && album) {
+    const match = db.findAlbumByNormalizedName(artist, album);
+    if (match) {
+      const dir = path.join(musicDir, match.artist, match.album);
+      if (fs.existsSync(dir)) return dir;
+    }
+  }
+
+  // Layer 3: new album — sanitized path
+  const sanitize = (s) => (s || 'Unknown').replace(/[:]/g, '-').replace(/[<>"/\\|?*]/g, '_').replace(/\s+/g, ' ').trim();
+  return path.join(musicDir, sanitize(artist), sanitize(album));
+}
+
+module.exports = { albumExistsInLibrary, albumTrackCount, excludedTrackCount, normalize, QUALITY_RANK, getExistingQuality, isUpgrade, resolveAlbumDir };
