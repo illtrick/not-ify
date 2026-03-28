@@ -65,7 +65,7 @@ function dockerApi(method, apiPath, body) {
  */
 async function restartContainer(name, timeout = 10) {
   // Whitelist of containers we're allowed to restart
-  const ALLOWED = ['slskd', 'gluetun', 'clamav', 'not-ify', 'watchtower'];
+  const ALLOWED = ['slskd', 'gluetun', 'not-ify', 'watchtower'];
   if (!ALLOWED.includes(name)) {
     throw new Error(`Container "${name}" is not in the allowed restart list`);
   }
@@ -96,7 +96,7 @@ async function restartContainer(name, timeout = 10) {
  * @returns {Promise<boolean>} true if recreated successfully
  */
 async function recreateContainer(name) {
-  const ALLOWED = ['slskd', 'gluetun', 'clamav'];
+  const ALLOWED = ['slskd', 'gluetun'];
   if (!ALLOWED.includes(name)) {
     throw new Error(`Container "${name}" is not in the allowed recreate list`);
   }
@@ -157,7 +157,7 @@ async function getContainerStatus(name) {
  * Get status of all known containers.
  */
 async function getAllContainerStatus() {
-  const names = ['not-ify', 'slskd', 'gluetun', 'clamav', 'watchtower'];
+  const names = ['not-ify', 'slskd', 'gluetun', 'watchtower'];
   const results = {};
   for (const name of names) {
     results[name] = await getContainerStatus(name);
@@ -199,9 +199,17 @@ function updateEnvFile(updates) {
 
   try {
     let content = fs.readFileSync(envPath, 'utf8');
-    const lines = content.split('\n');
 
-    for (const [key, value] of Object.entries(updates)) {
+    for (const [key, rawValue] of Object.entries(updates)) {
+      // Validate key: must be alphanumeric + underscore, starting with a letter or underscore
+      if (!/^[A-Z_][A-Z0-9_]*$/i.test(key)) {
+        throw new Error(`Invalid env key "${key}": only alphanumeric characters and underscores are allowed`);
+      }
+      // Sanitize value: strip newlines/carriage returns, escape dollar signs
+      const value = rawValue
+        .replace(/[\r\n]/g, '')
+        .replace(/\$/g, '\\$');
+
       const regex = new RegExp(`^${key}=.*$`, 'm');
       if (regex.test(content)) {
         // Update existing line
@@ -233,10 +241,10 @@ async function writeSlskdApiKeyConfig(apiKey) {
   const configYml = `web:\n  authentication:\n    api_keys:\n      notify:\n        key: ${apiKey}\n        role: administrator\n`;
 
   try {
-    // Write config inside the slskd container
-    const cmd = `cat > /app/slskd.yml << 'CFGEOF'\n${configYml}CFGEOF`;
+    // Write config inside the slskd container using a safe positional parameter
+    // to avoid heredoc injection if apiKey contains the delimiter string.
     const result = await dockerApi('POST', `/containers/slskd/exec`, {
-      Cmd: ['sh', '-c', cmd],
+      Cmd: ['sh', '-c', 'printf "%s" "$1" > /app/slskd.yml', '_', configYml],
       AttachStdout: true,
       AttachStderr: true,
     });

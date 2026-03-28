@@ -39,7 +39,11 @@ export function PlayerBar({
       {isMobile && has && (
         <div style={{ position: 'absolute', top: -2, left: 0, right: 0, height: 16, cursor: 'pointer', zIndex: 1 }}
           onClick={(e) => { const rect = e.currentTarget.getBoundingClientRect(); const pctClick = (e.clientX - rect.left) / rect.width;
-            if (audioRef.current && duration) audioRef.current.currentTime = pctClick * duration; }}>
+            if (duration) {
+              const seekTo = pctClick * duration;
+              if (cast?.isCasting && cast.castSeek) { cast.castSeek(Math.round(seekTo)); }
+              else if (audioRef.current) { audioRef.current.currentTime = seekTo; }
+            } }}>
           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: COLORS.border }}>
             <div style={{ height: '100%', width: `${pct}%`, background: COLORS.accent, transition: 'width 0.1s linear' }} />
           </div>

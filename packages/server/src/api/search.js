@@ -12,7 +12,12 @@ const COVERS_DIR = path.join(process.env.CONFIG_DIR || './config', 'covers');
 
 const { cleanSearchQuery, foldDiacritics } = require('../services/query-utils');
 
+const rateLimit = require('../middleware/rate-limit');
+
 const router = express.Router();
+
+// Rate limit search endpoints — 20 requests per 10s per user
+router.use('/search', rateLimit({ windowMs: 10000, max: 20 }));
 
 // Multi-strategy search: try progressively simpler queries if ApiBay returns 0
 async function searchMusicMultiStrategy(query) {
@@ -367,7 +372,9 @@ router.get('/search', async (req, res) => {
               finalMbArtists = [...finalMbArtists, ...altArtists.filter(a => !existingMbids.has(a.mbid))];
             }
           }
-        } catch {}
+        } catch (err) {
+          console.warn(`[search] Strategy A alt-token search failed: ${err.message}`);
+        }
       }
 
       // Strategy B: Lucene fuzzy search (~) — catches typos like "balmoreha" → "Balmorhea"
@@ -386,7 +393,9 @@ router.get('/search', async (req, res) => {
               finalMbArtists = [...finalMbArtists, ...fuzzyArtists.filter(a => !existingMbids.has(a.mbid))];
             }
           }
-        } catch {}
+        } catch (err) {
+          console.warn(`[search] Strategy B fuzzy search failed: ${err.message}`);
+        }
       }
 
       // ── Recording search (track-level) ──────────────────────────────────────
@@ -420,7 +429,9 @@ router.get('/search', async (req, res) => {
                 });
               }
             }
-          } catch {}
+          } catch (err) {
+            console.warn(`[search] Recording search failed: ${err.message}`);
+          }
         }
       }
     }
@@ -694,7 +705,7 @@ router.get('/search', async (req, res) => {
               } else {
                 fs.writeFileSync(missFile, '');
               }
-            } catch { fs.writeFileSync(missFile, ''); }
+            } catch (err) { console.warn(`[search] Cover art fetch failed for ${url}: ${err.message}`); fs.writeFileSync(missFile, ''); }
           }
         }
         Promise.all(Array.from({ length: Math.min(concurrency, coverUrls.length) }, fetchNext)).catch(() => {});

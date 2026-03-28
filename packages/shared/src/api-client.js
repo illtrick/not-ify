@@ -2,7 +2,7 @@
  * Configurable API client for Not-ify.
  *
  * Web (Docker-served): uses relative URLs — baseUrl = ''
- * Tauri desktop app: uses absolute server URL — baseUrl = 'http://<server-ip>:3000'
+ * Native/external clients: use absolute server URL — baseUrl = 'http://<server-ip>:3000'
  */
 
 const enc = encodeURIComponent;
@@ -219,16 +219,35 @@ export function getMbRgTracks(rgid, { artist, album, year } = {}) {
 // ---------------------------------------------------------------------------
 
 const prefetchCache = new Map();
+const PREFETCH_MAX = 200;
+const PREFETCH_TTL = 10 * 60 * 1000; // 10 minutes
 
 export function prefetchMbTracks(mbid, rgid) {
   const key = mbid || rgid;
-  if (!key || prefetchCache.has(key)) return;
+  if (!key) return;
+
+  // Check if existing entry is still valid
+  const existing = prefetchCache.get(key);
+  if (existing && Date.now() - existing.ts < PREFETCH_TTL) return;
+
+  // Evict oldest entry if at capacity
+  if (prefetchCache.size >= PREFETCH_MAX) {
+    const oldest = prefetchCache.keys().next().value;
+    prefetchCache.delete(oldest);
+  }
+
   const promise = mbid ? getMbReleaseTracks(mbid) : getMbRgTracks(rgid);
-  prefetchCache.set(key, promise);
+  prefetchCache.set(key, { data: promise, ts: Date.now() });
 }
 
 export function getCachedMbTracks(key) {
-  return prefetchCache.get(key) || null;
+  const entry = prefetchCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.ts >= PREFETCH_TTL) {
+    prefetchCache.delete(key);
+    return null;
+  }
+  return entry.data;
 }
 
 // ---------------------------------------------------------------------------

@@ -9,12 +9,12 @@ process.env.CONFIG_DIR = tmp;
 const streamAuth = require('../../src/services/stream-auth');
 
 describe('stream-auth', () => {
-  const BASE = 'http://10.0.0.1:3000';
+  const BASE = 'http://10.0.0.100:3000';
 
   describe('generateSignedUrl', () => {
     it('returns a URL with sig and exp query params', () => {
       const url = streamAuth.generateSignedUrl('abc123', BASE);
-      expect(url).toMatch(/^http:\/\/10\.0\.0\.1:3000\/api\/stream\/abc123\?sig=[0-9a-f]+&exp=\d+$/);
+      expect(url).toMatch(/^http:\/\/10\.0\.0\.100:3000\/api\/stream\/abc123\?sig=[0-9a-f]+&exp=\d+$/);
     });
 
     it('exp is in the future', () => {
@@ -57,6 +57,24 @@ describe('stream-auth', () => {
 
     it('rejects missing exp', () => {
       expect(streamAuth.verifySignature('track1', 'abc', null)).toBe(false);
+    });
+
+    // S10 — invalid hex must not throw
+    it('returns false (not throws) for non-hex sig', () => {
+      const exp = (Math.floor(Date.now() / 1000) + 3600).toString();
+      expect(() => streamAuth.verifySignature('track1', 'not-valid-hex!', exp)).not.toThrow();
+      expect(streamAuth.verifySignature('track1', 'not-valid-hex!', exp)).toBe(false);
+    });
+
+    it('returns false (not throws) for empty-string sig', () => {
+      const exp = (Math.floor(Date.now() / 1000) + 3600).toString();
+      expect(streamAuth.verifySignature('track1', '', exp)).toBe(false);
+    });
+
+    it('returns false for wrong-length valid-hex sig', () => {
+      const exp = (Math.floor(Date.now() / 1000) + 3600).toString();
+      // Valid hex but wrong length — timingSafeEqual would throw without the guard
+      expect(streamAuth.verifySignature('track1', 'deadbeef', exp)).toBe(false);
     });
   });
 });

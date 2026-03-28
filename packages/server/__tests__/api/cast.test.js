@@ -1,14 +1,6 @@
 'use strict';
 
 jest.mock('../../src/services/dlna');
-jest.mock('node-ssdp', () => ({
-  Client: jest.fn().mockImplementation(() => ({
-    on: jest.fn(), search: jest.fn(), stop: jest.fn(),
-  })),
-}));
-jest.mock('upnp-client-ts', () => ({
-  UpnpMediaRendererClient: jest.fn(),
-}));
 jest.mock('../../src/services/db', () => ({
   getDb: jest.fn(),
   isValidUser: jest.fn().mockReturnValue(true),
@@ -90,6 +82,21 @@ beforeEach(() => {
   dlna.on.mockImplementation(() => {});
   dlna.off.mockImplementation(() => {});
   castSession.clearSession('default');
+});
+
+// ── User middleware ────────────────────────────────────────────────────────────
+
+describe('invalid user falls back to default', () => {
+  const db = require('../../src/services/db');
+
+  test('returns devices when X-User-Id is invalid (falls back to default)', async () => {
+    db.isValidUser.mockReturnValueOnce(false);
+    const res = await request(app)
+      .get('/api/cast/devices')
+      .set('X-User-Id', 'nonexistent-user');
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+  });
 });
 
 // ── Devices ───────────────────────────────────────────────────────────────────

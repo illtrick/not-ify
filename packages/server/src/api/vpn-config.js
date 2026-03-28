@@ -171,8 +171,9 @@ router.post('/region', async (req, res) => {
     });
 
     if (!response.ok) {
-      const body = await response.text();
-      return res.json({ status: 'error', error: `Gluetun returned ${response.status}: ${body}` });
+      const rawBody = await response.text();
+      const safeBody = rawBody.replace(/<[^>]*>/g, '').replace(/[\r\n]+/g, ' ').trim().slice(0, 200);
+      return res.status(502).json({ error: `Gluetun returned ${response.status}: ${safeBody}` });
     }
 
     // Update saved config
@@ -182,7 +183,7 @@ router.post('/region', async (req, res) => {
 
     res.json({ status: 'ok', region, message: `VPN region changed to ${region}. Reconnecting...` });
   } catch (err) {
-    res.json({ status: 'error', error: err.message });
+    res.status(502).json({ error: err.message });
   }
 });
 

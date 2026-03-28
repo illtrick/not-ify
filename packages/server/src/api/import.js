@@ -3,6 +3,11 @@ const fs = require('fs');
 const path = require('path');
 const router = express.Router();
 
+const SEARCH_TIMEOUT_MS = 30000;
+const MIN_PLAY_DURATION_MS = 30000;
+const RATE_LIMIT_MS = 1500;
+const MB_RATE_LIMIT_MS = 1000;
+
 const CONFIG_DIR = process.env.CONFIG_DIR || '/app/config';
 const WANTED_PATH = path.join(CONFIG_DIR, 'wanted.json');
 
@@ -23,7 +28,7 @@ function saveWanted(list) {
 // ─── POST /api/import/spotify ─────────────────────────────────────────────
 // Accepts a Spotify Extended Streaming History JSON (array of records)
 // Extracts unique artist/album pairs from the last N days, sorted by time
-router.post('/import/spotify', express.json({ limit: '50mb' }), (req, res) => {
+router.post('/import/spotify', express.json({ limit: '10mb' }), (req, res) => {
   const { history, days = 120 } = req.body;
   if (!Array.isArray(history)) return res.status(400).json({ error: 'Expected { history: [...] } with Spotify streaming data' });
 
@@ -40,7 +45,7 @@ router.post('/import/spotify', express.json({ limit: '50mb' }), (req, res) => {
 
     if (!artist || !album || !track) continue;
     if (ts < cutoff) continue;
-    if (ms < 30000) continue; // skip < 30s plays (skips)
+    if (ms < MIN_PLAY_DURATION_MS) continue; // skip < 30s plays (skips)
 
     const key = `${artist.toLowerCase()}|||${album.toLowerCase()}`;
     if (!albumMap.has(key)) {
@@ -128,7 +133,7 @@ router.post('/import/wanted/:index/search', async (req, res) => {
     // Use the app's own search API internally
     const port = process.env.PORT || 3000;
     const searchRes = await fetch(`http://localhost:${port}/api/search?q=${encodeURIComponent(query)}`, {
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
     });
     const data = await searchRes.json();
 
@@ -183,7 +188,7 @@ router.post('/import/wanted/batch-search', async (req, res) => {
     try {
       const port = process.env.PORT || 3000;
       const searchRes = await fetch(`http://localhost:${port}/api/search?q=${encodeURIComponent(query)}`, {
-        signal: AbortSignal.timeout(30000),
+        signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
       });
       const data = await searchRes.json();
 
@@ -205,7 +210,7 @@ router.post('/import/wanted/batch-search', async (req, res) => {
     res.write(`data: ${JSON.stringify({ index: i, artist: item.artist, album: item.album, status: item.status, progress: searched, total: toSearch.length })}\n\n`);
 
     // Rate limit: 1.5 seconds between searches to be nice to APIs
-    if (searched < toSearch.length) await new Promise(r => setTimeout(r, 1500));
+    if (searched < toSearch.length) await new Promise(r => setTimeout(r, RATE_LIMIT_MS));
   }
 
   saveWanted(wanted);
@@ -319,37 +324,51 @@ async function processImportBatch(batch) {
   let skippedComplete = 0;
   let failed = 0;
 
+  // Batch-scoped cache to avoid duplicate MB API calls for same artist+album
+  const mbCache = new Map();
+
   activity.log('import', 'info', `Starting import batch: ${batch.length} albums to process`);
 
   for (let i = 0; i < batch.length; i++) {
     const { artist, album, dedupeKey } = batch[i];
 
     try {
-      // MusicBrainz lookup — search for the album, get tracks
-      const mbResults = await mb.searchReleases(`${artist} ${album}`);
+      // MusicBrainz lookup — search for the album, get tracks (with batch cache)
+      const cacheKey = `${artist.toLowerCase()}|${album.toLowerCase()}`;
       let tracks = null;
       let mbid = null;
       let rgid = null;
 
-      if (mbResults && mbResults.length > 0) {
-        const best = mbResults[0];
-        mbid = best.mbid;
-        rgid = best.rgid;
+      if (mbCache.has(cacheKey)) {
+        const cached = mbCache.get(cacheKey);
+        tracks = cached.tracks;
+        mbid = cached.mbid;
+        rgid = cached.rgid;
+      } else {
+        const mbResults = await mb.searchReleases(`${artist} ${album}`);
 
-        // Prefer release group tracks (canonical), fall back to release tracks
-        if (rgid) {
-          const rgData = await mb.getReleaseGroupTracks(rgid);
-          if (rgData && rgData.tracks && rgData.tracks.length > 0) {
-            tracks = rgData.tracks;
-            mbid = mbid || rgData.releaseMbid;
+        if (mbResults && mbResults.length > 0) {
+          const best = mbResults[0];
+          mbid = best.mbid;
+          rgid = best.rgid;
+
+          // Prefer release group tracks (canonical), fall back to release tracks
+          if (rgid) {
+            const rgData = await mb.getReleaseGroupTracks(rgid);
+            if (rgData && rgData.tracks && rgData.tracks.length > 0) {
+              tracks = rgData.tracks;
+              mbid = mbid || rgData.releaseMbid;
+            }
+          }
+          if (!tracks && mbid) {
+            const relTracks = await mb.getReleaseTracks(mbid);
+            if (relTracks && relTracks.length > 0) {
+              tracks = relTracks;
+            }
           }
         }
-        if (!tracks && mbid) {
-          const relTracks = await mb.getReleaseTracks(mbid);
-          if (relTracks && relTracks.length > 0) {
-            tracks = relTracks;
-          }
-        }
+
+        mbCache.set(cacheKey, { tracks, mbid, rgid });
       }
 
       // Smart dedup: if we have MB track count, check if library already has enough tracks
@@ -383,10 +402,11 @@ async function processImportBatch(batch) {
 
     // Rate limit: 1000ms between MB lookups
     if (i < batch.length - 1) {
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise(r => setTimeout(r, MB_RATE_LIMIT_MS));
     }
   }
 
+  mbCache.clear();
   activity.log('import', 'success', `Import batch complete: ${queued} queued, ${skippedComplete} complete, ${failed} failed`);
 }
 

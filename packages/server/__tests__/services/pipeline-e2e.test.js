@@ -78,7 +78,6 @@ function setupTestEnv() {
   process.env.CONFIG_DIR = configDir;
   process.env.STAGING_DIR = stagingDir;
   process.env.SLSKD_DOWNLOADS_DIR = slskdDownloadsDir;
-  process.env.CLAM_ENABLED = 'false';
   process.env.MIME_CHECK_ENABLED = 'false';
   process.env.PORT = '0';
 }
@@ -222,17 +221,14 @@ describe('Pipeline E2E: Torrent (RD) path', () => {
     const stagedFiles = fs.readdirSync(albumStagingDir);
     expect(stagedFiles).toHaveLength(3);
 
-    // 2. Simulate validation (size + ffprobe, no ClamAV)
+    // 2. Simulate validation (size + ffprobe)
     const fileValidator = require('../../src/services/file-validator');
     for (const track of TEST_TRACKS) {
       const filePath = path.join(albumStagingDir, track.filename);
-      const result = await fileValidator.validateFile(filePath, { deferClam: true });
+      const result = await fileValidator.validateFile(filePath, {});
       // Size check should pass (50KB < 500MB)
       const sizeCheck = result.checks.find(c => c.name === 'size');
       expect(sizeCheck.passed).toBe(true);
-      // ClamAV should be deferred
-      const clamCheck = result.checks.find(c => c.name === 'clam');
-      expect(clamCheck.skipped).toBe(true);
     }
 
     // 3. Move files to library directory (simulating replaceTracksIfBetter)
@@ -297,7 +293,7 @@ describe('Pipeline E2E: Torrent (RD) path', () => {
     fs.writeFileSync(badFile, Buffer.alloc(100)); // small, but we test the contract
 
     // Verify the validation pipeline doesn't crash on valid small files
-    const result = await fileValidator.validateFile(badFile, { deferClam: true });
+    const result = await fileValidator.validateFile(badFile, {});
     // Small file passes size check
     const sizeCheck = result.checks.find(c => c.name === 'size');
     expect(sizeCheck.passed).toBe(true);
@@ -308,23 +304,6 @@ describe('Pipeline E2E: Torrent (RD) path', () => {
     expect(result.checks.length).toBeGreaterThanOrEqual(2); // size + ffprobe at minimum
     expect(result.checks.map(c => c.name)).toContain('size');
     expect(result.checks.map(c => c.name)).toContain('ffprobe');
-  });
-
-  test('ClamAV deferred scan runs async and removes infected file', async () => {
-    // Create a file in the library
-    const quarantineDir = path.join(musicDir, 'Quarantine_Artist', 'Quarantine_Album');
-    fs.mkdirSync(quarantineDir, { recursive: true });
-    const filePath = path.join(quarantineDir, 'infected.flac');
-    createFakeAudioFile(filePath);
-    expect(fs.existsSync(filePath)).toBe(true);
-
-    // Simulate ClamAV scan returning infected
-    const fileValidator = require('../../src/services/file-validator');
-    // scanClamAV delegates to checkClamAV which is disabled in test env (CLAM_ENABLED=false)
-    // So we verify the scan returns skipped in test env
-    const result = await fileValidator.scanClamAV(filePath);
-    // In test env with CLAM_ENABLED=false, scan is skipped
-    expect(result.skipped).toBe(true);
   });
 
   test('upgrade replaces MP3 with FLAC in library', async () => {
@@ -419,7 +398,7 @@ describe('Pipeline E2E: Soulseek path', () => {
     for (const track of TEST_TRACKS) {
       const result = await fileValidator.validateFile(
         path.join(stagingAlbumDir, track.filename),
-        { deferClam: true }
+        {}
       );
       const sizeCheck = result.checks.find(c => c.name === 'size');
       expect(sizeCheck.passed).toBe(true);
@@ -493,7 +472,7 @@ describe('Pipeline E2E: Soulseek path', () => {
     fs.copyFileSync(path.join(slskdDir, 'malware.exe'), stagingPath);
 
     const fileValidator = require('../../src/services/file-validator');
-    const result = await fileValidator.validateFile(stagingPath, { deferClam: true });
+    const result = await fileValidator.validateFile(stagingPath, {});
 
     // ffprobe should fail on non-audio
     expect(result.passed).toBe(false);

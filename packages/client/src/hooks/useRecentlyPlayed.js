@@ -34,11 +34,21 @@ export function useRecentlyPlayed() {
                 }
               }
               read();
-            }).catch(() => scheduleReconnect());
+            }).catch(err => {
+              if (!abort.signal.aborted) {
+                console.warn(`[recently-played] SSE read error, reconnecting in 3s: ${err.message || 'unknown'}`);
+                scheduleReconnect();
+              }
+            });
           }
           read();
         })
-        .catch(() => { if (!abort.signal.aborted) scheduleReconnect(); });
+        .catch(err => {
+          if (!abort.signal.aborted) {
+            console.warn(`[recently-played] SSE connection lost, reconnecting in 3s: ${err.message || 'unknown'}`);
+            scheduleReconnect();
+          }
+        });
     }
 
     function scheduleReconnect() {

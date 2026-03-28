@@ -19,8 +19,6 @@ function getMusicDir() {
     return process.env.MUSIC_DIR || '/app/music';
   }
 }
-const MUSIC_DIR = null; // DEPRECATED — use getMusicDir() instead
-
 function sanitizePath(s) {
   return (s || 'Unknown').replace(/[:]/g, '-').replace(/[<>"/\\|?*\x00-\x1f]/g, '_').trim() || 'Unknown';
 }
@@ -210,7 +208,11 @@ async function ytDownloadOne(entry, abort) {
         activity.log('youtube', 'info', `Skipped (exists): ${dlTitle}`, { artist: dlArtist, album: dlAlbum, title: dlTitle });
         return path.join(destDir, match);
       }
-    } catch { /* dir doesn't exist yet */ }
+    } catch (err) {
+      if (err.code !== 'ENOENT') {
+        console.warn(`[youtube] Error checking existing tracks: ${err.message}`);
+      }
+    }
   }
 
   activity.log('youtube', 'info', `Downloading: ${dlTitle}`, { artist: dlArtist, album: dlAlbum, title: dlTitle });
@@ -291,9 +293,7 @@ async function ytDownloadOne(entry, abort) {
   entry.progress = 100;
 
   // Validate the downloaded file before accepting it into the library
-  // Skip ClamAV for YT downloads — YouTube CDN is a trusted source
-  // ClamAV scanning is reserved for untrusted sources (torrents, Soulseek)
-  const validation = await validateFile(downloadedFile, { deferClam: true });
+  const validation = await validateFile(downloadedFile);
   if (!validation.passed) {
     console.warn('[yt-queue] File failed validation, deleting:', downloadedFile, validation.checks);
     try { fs.unlinkSync(downloadedFile); } catch (e) { /* ignore */ }

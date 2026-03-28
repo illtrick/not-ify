@@ -42,8 +42,8 @@ export function useSession({
     try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch {}
   }, 500)).current;
 
-  const deps = sessionData ? Object.values(sessionData) : [];
-  useEffect(() => { saveSession(); }, deps); // eslint-disable-line react-hooks/exhaustive-deps
+  const sessionKey = sessionData ? JSON.stringify(sessionData) : '';
+  useEffect(() => { saveSession(); }, [sessionKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Synchronous progress save on unload (localStorage only)
   useEffect(() => {

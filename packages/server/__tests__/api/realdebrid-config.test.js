@@ -80,8 +80,7 @@ describe('Real-Debrid config API', () => {
       text: () => Promise.resolve('Invalid token'),
     });
     try {
-      const res = await request(app).post('/api/realdebrid/test').expect(200);
-      expect(res.body.status).toBe('error');
+      const res = await request(app).post('/api/realdebrid/test').expect(502);
       expect(res.body.error).toContain('401');
     } finally {
       global.fetch = originalFetch;
@@ -90,8 +89,7 @@ describe('Real-Debrid config API', () => {
 
   test('POST /test returns error when no token configured', async () => {
     db.setGlobalSetting('realDebridToken', null);
-    const res = await request(app).post('/api/realdebrid/test').expect(200);
-    expect(res.body.status).toBe('error');
+    const res = await request(app).post('/api/realdebrid/test').expect(400);
     expect(res.body.error).toContain('No API token');
     // Restore token for other tests
     db.setGlobalSetting('realDebridToken', 'test-token-123');

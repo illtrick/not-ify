@@ -182,7 +182,11 @@ export function usePlayer({
         traceRef.current?.emit('audio_src_set', { streamUrl: src, isYtPreview: !!track.isYtPreview });
       } catch {}
 
-      audioRef.current.play().catch(() => {});
+      audioRef.current.play().catch(err => {
+        if (err.name !== 'AbortError') {
+          console.warn(`[player] play() failed: ${err.name} — ${err.message}`);
+        }
+      });
     }
     recentlyPlayedAddedRef.current = false;
     const artist = track.artist || albumInfo?.artist || '';
@@ -199,7 +203,11 @@ export function usePlayer({
       setIsPlaying(false);
       isPlayingRef.current = false;
     } else {
-      audioRef.current.play().catch(() => {});
+      audioRef.current.play().catch(err => {
+        if (err.name !== 'AbortError') {
+          console.warn(`[player] play() failed: ${err.name} — ${err.message}`);
+        }
+      });
       setIsPlaying(true);
       isPlayingRef.current = true;
     }
@@ -336,7 +344,11 @@ export function usePlayer({
       nextAudioRef.current.load();
     }
     nextAudioRef.current.volume = 0;
-    nextAudioRef.current.play().catch(() => {});
+    nextAudioRef.current.play().catch(err => {
+      if (err.name !== 'AbortError') {
+        console.warn(`[player] play() failed: ${err.name} — ${err.message}`);
+      }
+    });
     const startTime = performance.now();
     const fadeMs = fadeDuration * 1000;
     const startVol = volumeRef.current;
@@ -362,7 +374,11 @@ export function usePlayer({
           audioRef.current.addEventListener('loadedmetadata', () => {
             if (audioRef.current) {
               audioRef.current.currentTime = resumeTime;
-              audioRef.current.play().catch(() => {});
+              audioRef.current.play().catch(err => {
+                if (err.name !== 'AbortError') {
+                  console.warn(`[player] play() failed: ${err.name} — ${err.message}`);
+                }
+              });
             }
           }, { once: true });
           audioRef.current.load();
@@ -529,7 +545,11 @@ export function usePlayer({
         if (audioRef.current) {
           audioRef.current.src = nextSrc;
           audioRef.current.volume = volumeRef.current;
-          audioRef.current.play().catch(() => {});
+          audioRef.current.play().catch(err => {
+            if (err.name !== 'AbortError') {
+              console.warn(`[player] play() failed: ${err.name} — ${err.message}`);
+            }
+          });
         }
         _applyTrackState(nextTrack);
       } else {

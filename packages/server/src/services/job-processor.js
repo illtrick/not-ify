@@ -359,7 +359,6 @@ async function processDownload(job, payload) {
       }
 
       // Validate + replace each file immediately
-      // ClamAV runs sync for torrent/RD downloads (untrusted source)
       for (const filePath of filesToProcess) {
         const validation = await fileValidator.validateFile(filePath);
         if (!validation.passed) {
@@ -670,7 +669,7 @@ async function processSoulseekDownload(job, payload) {
         const stagingPath = path.join(stagingDir, safeName);
         fs.copyFileSync(foundPath, stagingPath);
 
-        // Validate (MIME + ffprobe + ClamAV — Soulseek is untrusted source)
+        // Validate (MIME + ffprobe)
         const fileVal = await fileValidator.validateFile(stagingPath);
         if (!fileVal.passed) {
           const failedChecks = fileVal.checks.filter(c => !c.passed && !c.skipped).map(c => c.name).join(', ');
@@ -843,7 +842,16 @@ async function processSoulseekDownload(job, payload) {
  * Registered with job-worker via setProcessor().
  */
 async function process(job) {
-  const payload = typeof job.payload === 'string' ? JSON.parse(job.payload) : job.payload;
+  let payload;
+  if (typeof job.payload === 'string') {
+    try {
+      payload = JSON.parse(job.payload);
+    } catch (parseErr) {
+      throw new Error(`Job ${job.id} has invalid JSON payload: ${parseErr.message}`);
+    }
+  } else {
+    payload = job.payload;
+  }
 
   switch (job.type) {
     case 'download':

@@ -18,7 +18,7 @@ ask() {
   local prompt="$1" default="$2"
   echo -ne "  ${BOLD}${prompt}${NC} " >&2
   [ -n "$default" ] && echo -ne "${DIM}[${default}]${NC} " >&2
-  read -r answer < /dev/tty
+  read -t 60 -r answer < /dev/tty
   if [ "$answer" = "q" ] || [ "$answer" = "Q" ]; then
     echo "" >&2
     info "Setup cancelled." >&2
@@ -198,11 +198,10 @@ detect_ip() {
 # Cleanup on Ctrl+C
 INSTALL_DIR=""
 cleanup() {
-  echo ""
-  warn "Setup interrupted."
-  if [ -n "$INSTALL_DIR" ] && [ -d "$INSTALL_DIR" ] && [ ! -f "$INSTALL_DIR/docker-compose.yml" ]; then
-    warn "Cleaning up partial install at $INSTALL_DIR..."
-    rm -rf "$INSTALL_DIR"
+  if [ -n "$INSTALL_DIR" ] && [ -d "$INSTALL_DIR" ]; then
+    echo ""
+    warn "Setup interrupted. Partial install at: $INSTALL_DIR"
+    warn "To clean up: rm -rf $INSTALL_DIR"
   fi
   exit 1
 }
@@ -361,7 +360,6 @@ echo -e "  ${DIM}You can always add them later from Settings.${NC}"
 echo ""
 
 ENABLE_VPN="n"
-ENABLE_CLAMAV="n"
 VPN_PROVIDER=""
 VPN_USERNAME=""
 VPN_PASSWORD=""
@@ -404,7 +402,7 @@ if confirm "Enable VPN?"; then
   fi
   if [ -n "$VPN_PROVIDER" ]; then
     echo -ne "  VPN password: "
-    read -rs VPN_PASSWORD < /dev/tty
+    read -t 60 -rs VPN_PASSWORD < /dev/tty
     echo ""
     if [ -z "$VPN_PASSWORD" ]; then
       echo -e "  ${RED}✗ Password is required. VPN will be skipped.${NC}"
@@ -433,18 +431,6 @@ if confirm "Enable VPN?"; then
   fi
 else
   info "Skipped — you can enable VPN in Settings later"
-fi
-echo ""
-
-echo -e "  ${BOLD}ClamAV (Antivirus)${NC}"
-echo -e "  ${DIM}Scans downloaded files for malware before adding${NC}"
-echo -e "  ${DIM}to your library. Recommended for Soulseek downloads.${NC}"
-echo -e "  ${DIM}Note: Uses ~200MB RAM and takes 2-3 min to start.${NC}"
-if confirm "Enable ClamAV?"; then
-  ENABLE_CLAMAV="y"
-  success "ClamAV will be installed"
-else
-  info "Skipped — files are validated by format and ffprobe"
 fi
 echo ""
 
@@ -498,7 +484,6 @@ docker run --rm \
   -e NOTIFY_PORT="$PORT" \
   -e NOTIFY_SLSKD_API_KEY="$SLSKD_API_KEY" \
   -e NOTIFY_ENABLE_VPN="$ENABLE_VPN" \
-  -e NOTIFY_ENABLE_CLAMAV="$ENABLE_CLAMAV" \
   -e NOTIFY_VPN_PROVIDER="$VPN_PROVIDER" \
   -e NOTIFY_VPN_USERNAME="$VPN_USERNAME" \
   -e NOTIFY_VPN_PASSWORD="$VPN_PASSWORD" \
@@ -508,8 +493,7 @@ docker run --rm \
     --music-dir="$MUSIC_DIR" \
     --port="$PORT" \
     --api-key="$SLSKD_API_KEY" \
-    --vpn="$ENABLE_VPN" \
-    --clamav="$ENABLE_CLAMAV"
+    --vpn="$ENABLE_VPN"
 
 # Check if containers started successfully
 echo ""

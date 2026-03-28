@@ -99,7 +99,7 @@ router.post('/test', async (req, res) => {
       signal: AbortSignal.timeout(8000),
     });
     if (!response.ok) {
-      return res.json({ status: 'error', error: `slskd returned HTTP ${response.status}` });
+      return res.status(502).json({ error: `slskd returned HTTP ${response.status}` });
     }
     const data = await response.json();
     res.json({
@@ -117,7 +117,7 @@ router.post('/test', async (req, res) => {
     } else if (msg.includes('timeout') || msg.includes('AbortError')) {
       userMessage = 'Soulseek service is not responding — it may still be initializing';
     }
-    res.json({ status: 'error', error: userMessage });
+    res.status(502).json({ error: userMessage });
   }
 });
 
