@@ -777,6 +777,20 @@ function getAlbumByMbid(mbid) {
   return timedGet('SELECT * FROM albums WHERE mbid = ?', mbid);
 }
 
+function findAlbumByNormalizedName(artist, album) {
+  const normArtist = (artist || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const normAlbum = (album || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!normArtist || !normAlbum) return null;
+  // Search all albums for normalized match
+  const albums = _db.prepare('SELECT artist, album FROM albums').all();
+  for (const a of albums) {
+    const na = (a.artist || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const nb = (a.album || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (na === normArtist && nb === normAlbum) return a;
+  }
+  return null;
+}
+
 // --- Album Tracks ---
 
 function upsertAlbumTrack({ id, albumId, title, artist, trackNumber, discNumber, duration, mbid }) {
@@ -1182,6 +1196,7 @@ module.exports = {
   getAlbumByArtistAndTitle,
   getAlbumByRgid,
   getAlbumByMbid,
+  findAlbumByNormalizedName,
   // Album Tracks (v2 metadata)
   upsertAlbumTrack,
   getAlbumTracks,
