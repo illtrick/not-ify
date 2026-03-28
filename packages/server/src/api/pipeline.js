@@ -4,6 +4,7 @@ const { parseArtistAlbum, sanitizePath, isAudioFile, isArchive, extractArchive, 
 const { validateFile } = require('../services/file-validator');
 const { generateTrackId, titleFromFilename } = require('../services/track-id');
 const activity = require('../services/activity-log');
+const { resolveAlbumDir } = require('../services/library-check');
 const path = require('path');
 const fs = require('fs');
 
@@ -48,7 +49,7 @@ router.delete('/download', (req, res) => {
 
 // POST /api/download — Full pipeline with SSE progress streaming
 router.post('/download', async (req, res) => {
-  const { magnetLink, name, mbid, coverArt, year, artist: metaArtist, albumName: metaAlbum } = req.body;
+  const { magnetLink, name, mbid, coverArt, year, artist: metaArtist, albumName: metaAlbum, rgid } = req.body;
 
   if (!magnetLink) {
     return res.status(400).json({ error: 'Missing magnetLink in request body' });
@@ -165,13 +166,13 @@ router.post('/download', async (req, res) => {
     if (metaArtist && metaAlbum) {
       destArtist = sanitizePath(metaArtist);
       destAlbum = sanitizePath(metaAlbum);
-      destDir = path.join(MUSIC_DIR, destArtist, destAlbum);
+      destDir = resolveAlbumDir(rgid || null, metaArtist, metaAlbum);
     } else {
       const parsed = parseArtistAlbum(torrentName);
       if (parsed) {
         destArtist = parsed.artist;
         destAlbum = parsed.album;
-        destDir = path.join(MUSIC_DIR, parsed.artist, parsed.album);
+        destDir = resolveAlbumDir(rgid || null, parsed.artist, parsed.album);
       } else {
         destArtist = '_unsorted';
         destAlbum = sanitizePath(torrentName);
@@ -283,8 +284,8 @@ router.post('/download', async (req, res) => {
     }
 
     // Write .metadata.json if we have MusicBrainz info
-    if (mbid || coverArt || year) {
-      const metadata = { mbid: mbid || null, coverArt: coverArt || null, year: year || null };
+    if (mbid || coverArt || year || rgid) {
+      const metadata = { mbid: mbid || null, rgid: rgid || null, coverArt: coverArt || null, year: year || null };
       try {
         fs.writeFileSync(path.join(destDir, '.metadata.json'), JSON.stringify(metadata, null, 2));
       } catch (metaErr) {
@@ -335,7 +336,7 @@ router.get('/download/background/status', (req, res) => {
 });
 
 router.post('/download/background', async (req, res) => {
-  const { magnetLink, name, mbid, coverArt, year, artist: metaArtist, albumName: metaAlbum } = req.body;
+  const { magnetLink, name, mbid, coverArt, year, artist: metaArtist, albumName: metaAlbum, rgid } = req.body;
   if (!magnetLink) return res.status(400).json({ error: 'Missing magnetLink' });
 
   // If a foreground download is active, reject
@@ -350,7 +351,7 @@ router.post('/download/background', async (req, res) => {
   const dedupeKey = metaArtist && metaAlbum
     ? `download:${metaArtist}|${metaAlbum}`
     : `download:${magnetLink.slice(0, 60)}`;
-  getJobQueue().enqueue('download', { magnetLink, name, mbid, coverArt, year, artist: metaArtist, album: metaAlbum }, { dedupeKey });
+  getJobQueue().enqueue('download', { magnetLink, name, mbid, coverArt, year, artist: metaArtist, album: metaAlbum, rgid: rgid || null }, { dedupeKey });
 
   res.json({ started: true });
 
@@ -389,11 +390,11 @@ router.post('/download/background', async (req, res) => {
       if (metaArtist && metaAlbum) {
         destArtist = sanitizePath(metaArtist);
         destAlbum = sanitizePath(metaAlbum);
-        destDir = path.join(MUSIC_DIR, destArtist, destAlbum);
+        destDir = resolveAlbumDir(rgid || null, metaArtist, metaAlbum);
       } else {
         const torrentName = torrentInfo.filename || 'Unknown';
         const parsed = parseArtistAlbum(torrentName);
-        if (parsed) { destArtist = parsed.artist; destAlbum = parsed.album; destDir = path.join(MUSIC_DIR, parsed.artist, parsed.album); }
+        if (parsed) { destArtist = parsed.artist; destAlbum = parsed.album; destDir = resolveAlbumDir(rgid || null, parsed.artist, parsed.album); }
         else { destArtist = '_unsorted'; destAlbum = sanitizePath(torrentName); destDir = path.join(MUSIC_DIR, '_unsorted', destAlbum); }
       }
       fs.mkdirSync(destDir, { recursive: true });
@@ -432,8 +433,8 @@ router.post('/download/background', async (req, res) => {
       }
 
       // Write metadata
-      if (mbid || coverArt || year) {
-        try { fs.writeFileSync(path.join(destDir, '.metadata.json'), JSON.stringify({ mbid, coverArt, year, source: 'torrent' }, null, 2)); } catch (err) { console.warn(`[bg-pipeline] Could not write .metadata.json: ${err.message}`); }
+      if (mbid || coverArt || year || rgid) {
+        try { fs.writeFileSync(path.join(destDir, '.metadata.json'), JSON.stringify({ mbid, rgid: rgid || null, coverArt, year, source: 'torrent' }, null, 2)); } catch (err) { console.warn(`[bg-pipeline] Could not write .metadata.json: ${err.message}`); }
       }
 
       // Pre-warm cover art
