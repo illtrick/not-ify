@@ -156,12 +156,12 @@ export function Sidebar({
             <div style={{ textAlign: 'center', color: COLORS.textSecondary, fontSize: 13, padding: '24px 12px' }}>
               {libraryFilter ? 'No matches' : 'No music yet. Search and add some!'}
             </div>
-          ) : sidebarAlbums().map(({ artist, album, tracks, coverArt, mbid, rgid }) => {
+          ) : sidebarAlbums().map(({ albumId, artist, album, tracks, coverArt, mbid, rgid }) => {
             const isActive = view === 'album' && selectedAlbum && !selectedAlbum.fromSearch
               && selectedAlbum.artist === artist && selectedAlbum.album === album;
             const isPlaying_ = currentAlbumInfo?.artist === artist && currentAlbumInfo?.album === album;
             return (
-              <div key={`${artist}::${album}`} onClick={() => openAlbumFromLibrary(artist, album, tracks, coverArt, mbid, rgid)}
+              <div key={`${artist}::${album}`} onClick={() => openAlbumFromLibrary(albumId, { artist, albumName: album, tracks, coverArt, mbid, rgid })}
                 style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 8px', borderRadius: 6, cursor: 'pointer', background: isActive ? COLORS.hover : 'transparent' }}
                 onMouseEnter={e => e.currentTarget.style.background = COLORS.hover}
                 onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}

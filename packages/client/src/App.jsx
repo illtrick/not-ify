@@ -625,19 +625,43 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
     setView('album');
   }
 
-  function openAlbumFromLibrary(artist, albumName, tracks, coverArt, mbid, rgid) {
-    try { telemetry.emit('nav_album', { source: 'library', artist, album: albumName }); } catch {}
-    // Refresh library to get latest format info (badges may be stale after upgrades)
-    loadLibrary();
-    const pl = tracks.map(t => ({ ...t, path: buildTrackPath(t.id), coverArt }));
-    // Year: try track metadata first, then recently played cache, then previous search result
-    const year = tracks.find(t => t.year)?.year
-      || recentlyPlayed.find(r => r.artist === artist && r.album === albumName)?.year
-      || '';
-    // BUG-D02: include rgid for consistent cover art URLs
-    setSelectedAlbum({ artist, album: albumName, year, tracks: pl, coverArt, mbid, rgid, sources: [], fromSearch: false });
+  async function openAlbumFromLibrary(albumId, fallback) {
+    try { telemetry.emit('nav_album', { source: 'library', albumId }); } catch {}
     prevViewRef.current = view;
     setView('album');
+
+    try {
+      const album = await api.getAlbum(albumId);
+      const tracks = (album.tracks || []).map(t => ({
+        ...t,
+        path: buildTrackPath(t.id),
+        coverArt: album.coverArt,
+        format: t.file?.format,
+        filepath: t.file?.filepath,
+        fileSize: t.file?.fileSize,
+      }));
+      setSelectedAlbum({
+        artist: album.artist,
+        album: album.album,
+        year: album.year || '',
+        tracks,
+        coverArt: album.coverArt,
+        mbid: album.mbid,
+        rgid: album.rgid,
+        sources: [],
+        fromSearch: false,
+        inLibrary: album.inLibrary,
+      });
+      loadLibrary();
+    } catch (err) {
+      console.warn('[openAlbumFromLibrary] Canonical fetch failed, using fallback:', err.message);
+      if (fallback) {
+        const { artist, albumName, tracks, coverArt, mbid, rgid } = fallback;
+        const pl = tracks.map(t => ({ ...t, path: buildTrackPath(t.id), coverArt }));
+        const year = tracks.find(t => t.year)?.year || '';
+        setSelectedAlbum({ artist, album: albumName, year, tracks: pl, coverArt, mbid, rgid, sources: [], fromSearch: false });
+      }
+    }
   }
 
   // Navigate to currently-playing album in library
@@ -651,7 +675,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
       const match = albums.find(a => a.artist === currentAlbumInfo.artist && a.album === currentAlbumInfo.album);
       if (match && match.tracks.length > 1) {
         // Library album has multiple tracks — open from library (complete album)
-        openAlbumFromLibrary(match.artist, match.album, match.tracks, match.coverArt, match.mbid, match.rgid);
+        openAlbumFromLibrary(match.albumId, { artist: match.artist, albumName: match.album, tracks: match.tracks, coverArt: match.coverArt, mbid: match.mbid, rgid: match.rgid });
         return;
       }
       // Library album has only 1 track (likely auto-downloaded single) and we have MB metadata
@@ -669,7 +693,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
       }
       // Library album with 1 track and no MB metadata — open from library as fallback
       if (match) {
-        openAlbumFromLibrary(match.artist, match.album, match.tracks, match.coverArt, match.mbid, match.rgid);
+        openAlbumFromLibrary(match.albumId, { artist: match.artist, albumName: match.album, tracks: match.tracks, coverArt: match.coverArt, mbid: match.mbid, rgid: match.rgid });
         return;
       }
     }
@@ -686,7 +710,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
         a.tracks.some(t => normArtist(t.title) === nt)
       );
       if (trackMatch) {
-        openAlbumFromLibrary(trackMatch.artist, trackMatch.album, trackMatch.tracks, trackMatch.coverArt, trackMatch.mbid, trackMatch.rgid);
+        openAlbumFromLibrary(trackMatch.albumId, { artist: trackMatch.artist, albumName: trackMatch.album, tracks: trackMatch.tracks, coverArt: trackMatch.coverArt, mbid: trackMatch.mbid, rgid: trackMatch.rgid });
         return;
       }
     }
