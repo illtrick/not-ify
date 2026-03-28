@@ -23,7 +23,7 @@ const fileValidator = require('./file-validator');
 const downloadValidator = require('./download-validator');
 const activityLog = require('./activity-log');
 const { enqueueDownload, pollDownloads } = require('./soulseek');
-const { probeFile, isUpgrade, QUALITY_RANK } = require('./library-check');
+const { probeFile, isUpgrade, QUALITY_RANK, resolveAlbumDir } = require('./library-check');
 
 // Read lazily so tests can set process.env before each test case
 // Use globalThis.process to avoid shadowing by the module's own process() function
@@ -315,7 +315,7 @@ async function processDownload(job, payload) {
     // Each file is validated and moved to library immediately after download.
     // This prevents losing work if later files fail.
     fs.mkdirSync(stagingDir, { recursive: true });
-    const destDir = path.join(getMusicDir(), downloader.sanitizePath(artist), downloader.sanitizePath(album));
+    const destDir = resolveAlbumDir(payload.rgid || null, artist, album);
     fs.mkdirSync(destDir, { recursive: true });
     const links = cached.links || [];
     const upgraded = [];
@@ -465,6 +465,16 @@ async function processDownload(job, payload) {
       console.warn('[pipeline] Failed to sync album schema:', err.message);
     }
 
+    // Populate cover_art_url from rgid if available
+    try {
+      const db = require('./db');
+      const metaForCover = JSON.parse(fs.readFileSync(path.join(destDir, '.metadata.json'), 'utf8'));
+      const effectiveRgid = metaForCover.rgid || payload.rgid;
+      if (effectiveRgid) {
+        db.updateAlbumCoverArt(artist, album, `/api/cover/rg/${effectiveRgid}`);
+      }
+    } catch { /* no metadata or DB error — non-critical */ }
+
     return {
       success: true,
       artist,
@@ -487,7 +497,7 @@ async function processDownload(job, payload) {
  * Process an upgrade job: search for a better quality source, then enqueue a download job.
  */
 async function processUpgrade(job, payload) {
-  const { artist, album } = payload;
+  const { artist, album, rgid } = payload;
 
   // Detect current library quality to find any upgrade, not just FLAC
   const { getExistingQuality } = require('./library-check');
@@ -540,6 +550,7 @@ async function processUpgrade(job, payload) {
       magnetLink: result.magnetLink,
       artist,
       album,
+      rgid: rgid || null,
       isDiscography: result.isDiscography || false,
       source_meta: { quality: result.detectedQuality || 'unknown', name: result.name, seeders: result.seeders, score: result.score },
     },
@@ -605,7 +616,7 @@ async function processSoulseekDownload(job, payload) {
     const deadline = Date.now() + getSlskDownloadTimeout();
     const getBasename = (f) => f.split(/[\\/]/).pop();
     const processedBasenames = new Set();
-    const destDir = path.join(getMusicDir(), downloader.sanitizePath(artist), downloader.sanitizePath(album));
+    const destDir = resolveAlbumDir(payload.rgid || null, artist, album);
     fs.mkdirSync(destDir, { recursive: true });
     fs.mkdirSync(stagingDir, { recursive: true });
 
@@ -720,6 +731,7 @@ async function processSoulseekDownload(job, payload) {
     try {
       fs.writeFileSync(metadataPath, JSON.stringify({
         mbid: mbid || null,
+        rgid: rgid || null,
         source: 'soulseek',
         soulseekUser,
         importedAt: new Date().toISOString(),
@@ -812,6 +824,16 @@ async function processSoulseekDownload(job, payload) {
     } catch (err) {
       console.warn('[pipeline] Failed to sync album schema:', err.message);
     }
+
+    // Populate cover_art_url from rgid if available
+    try {
+      const db = require('./db');
+      const slskMetaForCover = JSON.parse(fs.readFileSync(path.join(destDir, '.metadata.json'), 'utf8'));
+      const effectiveRgid = slskMetaForCover.rgid || rgid;
+      if (effectiveRgid) {
+        db.updateAlbumCoverArt(artist, album, `/api/cover/rg/${effectiveRgid}`);
+      }
+    } catch { /* no metadata or DB error — non-critical */ }
 
     return {
       success: true,

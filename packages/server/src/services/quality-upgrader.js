@@ -217,11 +217,11 @@ class QualityUpgrader {
    * @param {string} album
    * @returns {Promise<number>} Enqueued job ID
    */
-  async upgradeAlbum(artist, album) {
+  async upgradeAlbum(artist, album, rgid) {
     const dedupeKey = `upgrade:${artist}|${album}`;
     const jobId = this.jobQueue.enqueue(
       'upgrade',
-      { artist, album },
+      { artist, album, rgid: rgid || null },
       { dedupeKey, priority: 10 }
     );
     return jobId;

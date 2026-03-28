@@ -136,4 +136,44 @@ describe('library-check', () => {
     }));
     expect(excludedTrackCount('Heilung', 'Ofnir')).toBe(1);
   });
+
+  // ─── resolveAlbumDir ─────────────────────────────────────────────────
+
+  describe('resolveAlbumDir', () => {
+    test('returns existing dir when rgid matches DB album', () => {
+      jest.doMock('../../src/services/db', () => ({
+        getAlbumByRgid: jest.fn((rgid) =>
+          rgid === 'rgid123' ? { artist: 'Tool', album: 'Fear Inoculum' } : undefined
+        ),
+        findAlbumByNormalizedName: jest.fn(() => null),
+      }));
+      const { resolveAlbumDir } = require('../../src/services/library-check');
+      const existingDir = path.join(tmpDir, 'Tool', 'Fear Inoculum');
+      fs.mkdirSync(existingDir, { recursive: true });
+      const result = resolveAlbumDir('rgid123', 'Tool', 'Fear Inoculum (Deluxe)');
+      expect(result).toBe(existingDir);
+    });
+
+    test('returns existing dir on normalized name match', () => {
+      jest.doMock('../../src/services/db', () => ({
+        getAlbumByRgid: jest.fn(() => undefined),
+        findAlbumByNormalizedName: jest.fn(() => ({ artist: 'Tool', album: 'Fear Inoculum' })),
+      }));
+      const { resolveAlbumDir } = require('../../src/services/library-check');
+      const existingDir = path.join(tmpDir, 'Tool', 'Fear Inoculum');
+      fs.mkdirSync(existingDir, { recursive: true });
+      const result = resolveAlbumDir(null, 'TOOL', 'fear inoculum');
+      expect(result).toBe(existingDir);
+    });
+
+    test('returns new sanitized path when no match', () => {
+      jest.doMock('../../src/services/db', () => ({
+        getAlbumByRgid: jest.fn(() => undefined),
+        findAlbumByNormalizedName: jest.fn(() => null),
+      }));
+      const { resolveAlbumDir } = require('../../src/services/library-check');
+      const result = resolveAlbumDir(null, 'New Artist', 'New Album');
+      expect(result).toBe(path.join(tmpDir, 'New Artist', 'New Album'));
+    });
+  });
 });

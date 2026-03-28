@@ -9,6 +9,7 @@ const streamAuth = require('../services/stream-auth');
 const { validateFile } = require('../services/file-validator');
 const activity = require('../services/activity-log');
 const downloader = require('../services/downloader');
+const { resolveAlbumDir } = require('../services/library-check');
 
 // Read music dir from DB (set via Settings UI), fall back to env var
 function getMusicDir() {
@@ -180,7 +181,7 @@ async function ytDownloadOne(entry, abort) {
   const dlArtist = sanitizePath(entry.artist || 'Unknown Artist');
   const dlAlbum = sanitizePath(entry.album || 'Singles');
 
-  const destDir = path.join(getMusicDir(), dlArtist, dlAlbum);
+  const destDir = resolveAlbumDir(entry.rgid || null, entry.artist || 'Unknown Artist', entry.album || 'Singles');
   fs.mkdirSync(destDir, { recursive: true });
 
   // Skip if track already exists — match by number OR by normalized title
@@ -388,6 +389,18 @@ async function ytDownloadOne(entry, abort) {
     console.warn('[yt-queue] Failed to write track_files:', err.message);
   }
 
+  // Populate cover_art_url from rgid if available
+  try {
+    const db = require('../services/db');
+    const ytMetaPath = path.join(destDir, '.metadata.json');
+    let ytMeta = {};
+    try { ytMeta = JSON.parse(fs.readFileSync(ytMetaPath, 'utf8')); } catch {}
+    const effectiveRgid = ytMeta.rgid || entry.rgid;
+    if (effectiveRgid) {
+      db.updateAlbumCoverArt(entry.artist || 'Unknown Artist', entry.album || 'Singles', `/api/cover/rg/${effectiveRgid}`);
+    }
+  } catch { /* non-critical */ }
+
   // Pre-warm cover art cache
   try {
     fetch(`http://localhost:3000/api/cover/search?artist=${encodeURIComponent(dlArtist)}&album=${encodeURIComponent(dlAlbum)}`, { signal: AbortSignal.timeout(10000) }).catch(() => {});
@@ -593,6 +606,7 @@ async function ytQueueAlbum({ artist, album, tracks, mbid, rgid, coverArt, year 
         title: `${paddedPos}-${sanitizePath(trackTitle)}`,
         artist: safeArtist,
         album: safeAlbum,
+        rgid: rgid || null,
         coverArt: coverArt || null,
       });
       queued.push({ id: entry.id, track: trackTitle, position, ytTitle: best.title });
@@ -647,6 +661,7 @@ async function ytQueueAlbum({ artist, album, tracks, mbid, rgid, coverArt, year 
           title: `${paddedPos}-${sanitizePath(err.track)}`,
           artist: safeArtist,
           album: safeAlbum,
+          rgid: rgid || null,
           coverArt: coverArt || null,
         });
         queued.push({ id: entry.id, track: err.track, position, ytTitle: best.title, retry: true });
@@ -657,7 +672,7 @@ async function ytQueueAlbum({ artist, album, tracks, mbid, rgid, coverArt, year 
 
   // Write album-level metadata
   if (queued.length > 0) {
-    const destDir = path.join(getMusicDir(), safeArtist, safeAlbum);
+    const destDir = resolveAlbumDir(rgid || null, artist, album);
     fs.mkdirSync(destDir, { recursive: true });
     const metaPath = path.join(destDir, '.metadata.json');
     const metadata = {

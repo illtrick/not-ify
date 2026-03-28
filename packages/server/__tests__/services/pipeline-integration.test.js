@@ -51,6 +51,14 @@ jest.mock('../../src/api/pipeline', () => ({
   isDownloadActive: jest.fn().mockReturnValue(false),
 }));
 
+jest.mock('../../src/services/library-check', () => ({
+  ...jest.requireActual('../../src/services/library-check'),
+  resolveAlbumDir: (rgid, artist, album) => {
+    const sanitize = (s) => (s || 'Unknown').replace(/[<>:"/\\|?*]/g, '_').trim();
+    return `/music/${sanitize(artist)}/${sanitize(album)}`;
+  },
+}));
+
 // Use requireActual as base to preserve native module fs access (needed by better-sqlite3 bindings).
 // Only override specific methods needed by job-processor.
 jest.mock('fs', () => ({

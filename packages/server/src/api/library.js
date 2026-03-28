@@ -229,6 +229,26 @@ function scanAndSync() {
   const validPaths = new Set(scanned.map(t => t.filepath));
   db.pruneDeletedTracks(validPaths);
 
+  // Backfill cover_art_url from .metadata.json rgid for all album directories
+  const albumDirsForBackfill = new Set();
+  for (const t of scanned) {
+    albumDirsForBackfill.add(path.dirname(t.filepath));
+  }
+  for (const dir of albumDirsForBackfill) {
+    try {
+      const meta = readDirMeta(dir);
+      if (meta?.rgid) {
+        const rel = path.relative(MUSIC_DIR, dir);
+        const parts = rel.split(path.sep);
+        if (parts.length >= 2) {
+          const bfArtist = cleanFolderName(parts[0]) || parts[0];
+          const bfAlbum = cleanFolderName(parts[1]) || parts[1];
+          db.updateAlbumCoverArt(meta.artist || bfArtist, meta.album || bfAlbum, `/api/cover/rg/${meta.rgid}`);
+        }
+      }
+    } catch { /* non-critical */ }
+  }
+
   invalidateCache();
   const elapsed = Date.now() - start;
   console.log(`[library] Scanned ${scanned.length} tracks in ${elapsed}ms`);
@@ -284,6 +304,14 @@ function syncAlbum(artist, album) {
       year: t.year || meta?.year || null,
     }))
   );
+
+  // Backfill rgid and cover_art_url from .metadata.json into albums table
+  if (meta?.rgid) {
+    try {
+      db.updateAlbumCoverArt(mbArtist, mbAlbum, `/api/cover/rg/${meta.rgid}`);
+    } catch { /* non-critical */ }
+  }
+
   invalidateCache();
 }
 

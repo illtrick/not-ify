@@ -92,6 +92,17 @@ jest.mock('../../src/services/realdebrid', () => ({
 }));
 
 // ---------------------------------------------------------------------------
+// library-check mock — resolveAlbumDir returns a simple path
+// ---------------------------------------------------------------------------
+jest.mock('../../src/services/library-check', () => ({
+  ...jest.requireActual('../../src/services/library-check'),
+  resolveAlbumDir: (rgid, artist, album) => {
+    const sanitize = (s) => (s || 'Unknown').replace(/[:]/g, '-').replace(/[<>"/\\|?*]/g, '_').trim();
+    return `/music/${sanitize(artist)}/${sanitize(album)}`;
+  },
+}));
+
+// ---------------------------------------------------------------------------
 // downloader mock — fake downloadFile that writes nothing to disk
 // ---------------------------------------------------------------------------
 jest.mock('../../src/services/downloader', () => {

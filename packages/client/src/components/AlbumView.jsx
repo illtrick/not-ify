@@ -374,7 +374,7 @@ export function AlbumView({
                     if (upgradeState === 'triggering' || upgradeState === 'queued') return;
                     setUpgradeState('triggering');
                     try {
-                      await api.triggerAlbumUpgrade(artist, album);
+                      await api.triggerAlbumUpgrade(artist, album, selectedAlbum.rgid);
                       setUpgradeState('queued');
                       onUpgradeTriggered?.();
                       setTimeout(() => setUpgradeState(null), 5000);
