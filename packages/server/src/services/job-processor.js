@@ -465,6 +465,16 @@ async function processDownload(job, payload) {
       console.warn('[pipeline] Failed to sync album schema:', err.message);
     }
 
+    // Populate cover_art_url from rgid if available
+    try {
+      const db = require('./db');
+      const metaForCover = JSON.parse(fs.readFileSync(path.join(destDir, '.metadata.json'), 'utf8'));
+      const effectiveRgid = metaForCover.rgid || payload.rgid;
+      if (effectiveRgid) {
+        db.updateAlbumCoverArt(artist, album, `/api/cover/rg/${effectiveRgid}`);
+      }
+    } catch { /* no metadata or DB error — non-critical */ }
+
     return {
       success: true,
       artist,
@@ -487,7 +497,7 @@ async function processDownload(job, payload) {
  * Process an upgrade job: search for a better quality source, then enqueue a download job.
  */
 async function processUpgrade(job, payload) {
-  const { artist, album } = payload;
+  const { artist, album, rgid } = payload;
 
   // Detect current library quality to find any upgrade, not just FLAC
   const { getExistingQuality } = require('./library-check');
@@ -540,6 +550,7 @@ async function processUpgrade(job, payload) {
       magnetLink: result.magnetLink,
       artist,
       album,
+      rgid: rgid || null,
       isDiscography: result.isDiscography || false,
       source_meta: { quality: result.detectedQuality || 'unknown', name: result.name, seeders: result.seeders, score: result.score },
     },
@@ -813,6 +824,16 @@ async function processSoulseekDownload(job, payload) {
     } catch (err) {
       console.warn('[pipeline] Failed to sync album schema:', err.message);
     }
+
+    // Populate cover_art_url from rgid if available
+    try {
+      const db = require('./db');
+      const slskMetaForCover = JSON.parse(fs.readFileSync(path.join(destDir, '.metadata.json'), 'utf8'));
+      const effectiveRgid = slskMetaForCover.rgid || rgid;
+      if (effectiveRgid) {
+        db.updateAlbumCoverArt(artist, album, `/api/cover/rg/${effectiveRgid}`);
+      }
+    } catch { /* no metadata or DB error — non-critical */ }
 
     return {
       success: true,

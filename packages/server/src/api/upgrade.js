@@ -56,13 +56,13 @@ router.get('/upgrade/album-history', (req, res) => {
 // body: { artist, album }
 // ---------------------------------------------------------------------------
 router.post('/upgrade/album', async (req, res) => {
-  const { artist, album } = req.body || {};
+  const { artist, album, rgid } = req.body || {};
   if (!artist || !album) {
     return res.status(400).json({ error: 'Missing artist and album in request body' });
   }
 
   const upgrader = getUpgrader();
-  const jobId = await upgrader.upgradeAlbum(artist, album);
+  const jobId = await upgrader.upgradeAlbum(artist, album, rgid);
   res.json({ queued: true, jobId });
 });
 
