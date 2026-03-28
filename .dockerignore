@@ -1,0 +1,10 @@
+node_modules
+packages/*/node_modules
+packages/client/dist
+packages/desktop/src-tauri/target
+music
+config
+*.md
+.git
+.github
+e2e

@@ -1,0 +1,59 @@
+name: Release Desktop
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci --workspaces
+      - run: npm run build -w @not-ify/client
+      - name: Build Tauri app
+        working-directory: packages/desktop
+        run: npx tauri build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: packages/desktop/src-tauri/target/release/bundle/
+
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci --workspaces
+      - run: npm run build -w @not-ify/client
+      - name: Build Tauri app
+        working-directory: packages/desktop
+        run: npx tauri build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-installer
+          path: packages/desktop/src-tauri/target/release/bundle/
+
+  create-release:
+    needs: [build-windows, build-mac]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            windows-installer/**/*.msi
+            windows-installer/**/*.exe
+            mac-installer/**/*.dmg
+          generate_release_notes: true

@@ -1,0 +1,14 @@
+# =============================================================================
+# Not-ify — Production overrides (NAS deployment)
+# =============================================================================
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# With VPN: docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile vpn up -d
+
+services:
+  not-ify:
+    image: ghcr.io/${GITHUB_USER:-user}/not-ify:${VERSION:-latest}
+    environment:
+      - NODE_ENV=production
+      - LOG_LEVEL=warn
+      - VPN_ENABLED=${VPN_ENABLED:-false}
+      - VPN_PROXY=http://gluetun:8888

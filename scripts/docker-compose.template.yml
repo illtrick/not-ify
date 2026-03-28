@@ -1,0 +1,132 @@
+services:
+  not-ify:
+    image: ghcr.io/illtrick/not-ify:latest
+    container_name: not-ify
+    restart: unless-stopped
+    network_mode: host
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+    volumes:
+      - ${CONFIG_DIR}:/app/config
+      - ${MUSIC_DIR}:/app/music
+      - ${SLSKD_DOWNLOADS_DIR:-./slskd-downloads}:/app/slskd-downloads
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - PORT=${PORT:-3000}
+      - CONFIG_DIR=/app/config
+      - MUSIC_DIR=/app/music
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - DLNA_ENABLED=${DLNA_ENABLED:-true}
+      - SLSKD_URL=http://localhost:5030
+      - SLSKD_API_KEY=${SLSKD_API_KEY}
+      - SLSKD_DOWNLOADS_DIR=/app/slskd-downloads
+      - VPN_PROXY=${VPN_PROXY:-}
+      - GLUETUN_CONTROL_URL=${GLUETUN_CONTROL_URL:-}
+      - CLAM_ENABLED=${CLAM_ENABLED:-false}
+      - CLAM_HOST=${CLAM_HOST:-}
+      - CLAM_PORT=${CLAM_PORT:-3310}
+      - INSTALL_DIR=${INSTALL_DIR:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-3000}/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    labels:
+      - com.centurylinklabs.watchtower.scope=not-ify
+
+  slskd:
+    image: slskd/slskd:latest
+    container_name: slskd
+    restart: unless-stopped
+    network_mode: host
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+    volumes:
+      - ./slskd:/app
+      - ${SLSKD_DOWNLOADS_DIR:-./slskd-downloads}:/app/downloads
+      - ${MUSIC_DIR}:/music:ro
+    environment:
+      - SLSKD_HTTP_PORT=5030
+      - SLSKD_SLSK_USERNAME=${SLSKD_SLSK_USERNAME:-}
+      - SLSKD_SLSK_PASSWORD=${SLSKD_SLSK_PASSWORD:-}
+      - SLSKD_SLSK_LISTEN_PORT=50300
+      # API key configured via config file (slskd doesn't support API keys via env vars)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5030/api/v0/application"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    labels:
+      - com.centurylinklabs.watchtower.scope=not-ify
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "2m"
+        max-file: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=300
+      - WATCHTOWER_SCOPE=not-ify
+    labels:
+      - com.centurylinklabs.watchtower.scope=not-ify
+    command: --scope not-ify
+
+#VPN#  gluetun:
+#VPN#    image: qmcgaw/gluetun
+#VPN#    container_name: gluetun
+#VPN#    restart: on-failure:3
+#VPN#    cap_add:
+#VPN#      - NET_ADMIN
+#VPN#    logging:
+#VPN#      driver: json-file
+#VPN#      options:
+#VPN#        max-size: "5m"
+#VPN#        max-file: "2"
+#VPN#    environment:
+#VPN#      - VPN_SERVICE_PROVIDER=${VPN_PROVIDER:-private internet access}
+#VPN#      - OPENVPN_USER=${VPN_USERNAME:-}
+#VPN#      - OPENVPN_PASSWORD=${VPN_PASSWORD:-}
+#VPN#      - SERVER_REGIONS=${VPN_REGION:-US East}
+#VPN#      - HTTPPROXY=on
+#VPN#      - HTTPPROXY_LOG=off
+#VPN#      - DOT=on
+#VPN#    ports:
+#VPN#      - "8888:8888"
+#VPN#      - "8000:8000/tcp"
+#VPN#    labels:
+#VPN#      - com.centurylinklabs.watchtower.scope=not-ify
+
+#CLAM#  clamav:
+#CLAM#    image: clamav/clamav:stable
+#CLAM#    container_name: clamav
+#CLAM#    restart: unless-stopped
+#CLAM#    network_mode: host
+#CLAM#    logging:
+#CLAM#      driver: json-file
+#CLAM#      options:
+#CLAM#        max-size: "5m"
+#CLAM#        max-file: "2"
+#CLAM#    healthcheck:
+#CLAM#      test: ["CMD", "clamdcheck"]
+#CLAM#      interval: 60s
+#CLAM#      timeout: 10s
+#CLAM#      retries: 3
+#CLAM#      start_period: 120s
+#CLAM#    labels:
+#CLAM#      - com.centurylinklabs.watchtower.scope=not-ify

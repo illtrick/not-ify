@@ -1,0 +1,54 @@
+node_modules/
+dist/
+music/
+
+# Config — runtime data, not versioned
+config/settings.json
+config/lastfm-queue.json
+config/lastfm-config.json
+config/recently-played.json
+config/covers/
+config/llm-cache.json
+config/notify.db
+config/notify.db-shm
+config/notify.db-wal
+config/stream.key
+*.migrated
+*.log
+
+# Tauri build artifacts
+packages/desktop/src-tauri/target/
+packages/desktop/src-tauri/gen/
+packages/desktop/src-tauri/Cargo.lock
+
+# Temp/scratch files
+tmp_*.json
+spot-check*.json
+spot-check*.js
+lastfm-data.json
+
+# Dev mockups and diagrams (local only)
+dev-*.html
+SYSTEM_DIAGRAM.*
+SYSTEM_DIAGRAM_VIEW.html
+
+# Streaming history (personal data)
+Spotify Extended Streaming History/
+
+# Environment files (real credentials/paths)
+.env
+.env.dev
+.env.local
+.env.production
+
+# Claude local settings
+.claude/settings.local.json
+.claude/.claude/
+.claude/plan.md
+
+# Superpowers brainstorm artifacts
+.superpowers/
+
+# Git worktrees
+.worktrees/
+deploy/
