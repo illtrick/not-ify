@@ -500,6 +500,52 @@ router.get('/library', (req, res) => {
   }
 });
 
+// GET /api/album/:id — canonical album detail endpoint
+// Resolves by album PK, rgid, or mbid. Returns album metadata + tracks with file status.
+router.get('/album/:id', (req, res) => {
+  try {
+    const resolved = db.getAlbumByAnyId(req.params.id);
+    if (!resolved) return res.status(404).json({ error: 'not_found' });
+
+    const albumData = db.getAlbumWithTracks(resolved.id);
+    if (!albumData) return res.status(404).json({ error: 'not_found' });
+
+    const tracks = (albumData.tracks || []).map(t => ({
+      id: t.id,
+      title: t.title,
+      artist: t.artist,
+      trackNumber: t.track_number,
+      discNumber: t.disc_number || 1,
+      duration: t.duration,
+      mbid: t.mbid || null,
+      file: t.file ? {
+        format: t.file.format,
+        bitrate: t.file.bitrate || null,
+        fileSize: t.file.file_size || null,
+        filepath: t.file.filepath,
+      } : null,
+    }));
+
+    res.json({
+      id: albumData.id,
+      artist: albumData.album_artist,
+      album: albumData.title,
+      year: albumData.year || null,
+      rgid: albumData.rgid || null,
+      mbid: albumData.mbid || null,
+      coverArt: albumData.cover_art_url || (albumData.rgid ? `/api/cover/rg/${albumData.rgid}` : null),
+      trackCount: tracks.length,
+      duration: tracks.reduce((s, t) => s + (t.duration || 0), 0),
+      inLibrary: tracks.some(t => t.file !== null),
+      compilation: !!albumData.compilation,
+      tracks,
+    });
+  } catch (err) {
+    console.error('[album] Error fetching album:', err.message);
+    res.status(500).json({ error: 'internal' });
+  }
+});
+
 // GET /api/stream/:id — serve audio with range request support
 // Accepts either normal authenticated requests or HMAC-signed URLs (for DLNA devices)
 router.get('/stream/:id', (req, res) => {
