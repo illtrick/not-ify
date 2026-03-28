@@ -319,37 +319,51 @@ async function processImportBatch(batch) {
   let skippedComplete = 0;
   let failed = 0;
 
+  // Batch-scoped cache to avoid duplicate MB API calls for same artist+album
+  const mbCache = new Map();
+
   activity.log('import', 'info', `Starting import batch: ${batch.length} albums to process`);
 
   for (let i = 0; i < batch.length; i++) {
     const { artist, album, dedupeKey } = batch[i];
 
     try {
-      // MusicBrainz lookup — search for the album, get tracks
-      const mbResults = await mb.searchReleases(`${artist} ${album}`);
+      // MusicBrainz lookup — search for the album, get tracks (with batch cache)
+      const cacheKey = `${artist.toLowerCase()}|${album.toLowerCase()}`;
       let tracks = null;
       let mbid = null;
       let rgid = null;
 
-      if (mbResults && mbResults.length > 0) {
-        const best = mbResults[0];
-        mbid = best.mbid;
-        rgid = best.rgid;
+      if (mbCache.has(cacheKey)) {
+        const cached = mbCache.get(cacheKey);
+        tracks = cached.tracks;
+        mbid = cached.mbid;
+        rgid = cached.rgid;
+      } else {
+        const mbResults = await mb.searchReleases(`${artist} ${album}`);
 
-        // Prefer release group tracks (canonical), fall back to release tracks
-        if (rgid) {
-          const rgData = await mb.getReleaseGroupTracks(rgid);
-          if (rgData && rgData.tracks && rgData.tracks.length > 0) {
-            tracks = rgData.tracks;
-            mbid = mbid || rgData.releaseMbid;
+        if (mbResults && mbResults.length > 0) {
+          const best = mbResults[0];
+          mbid = best.mbid;
+          rgid = best.rgid;
+
+          // Prefer release group tracks (canonical), fall back to release tracks
+          if (rgid) {
+            const rgData = await mb.getReleaseGroupTracks(rgid);
+            if (rgData && rgData.tracks && rgData.tracks.length > 0) {
+              tracks = rgData.tracks;
+              mbid = mbid || rgData.releaseMbid;
+            }
+          }
+          if (!tracks && mbid) {
+            const relTracks = await mb.getReleaseTracks(mbid);
+            if (relTracks && relTracks.length > 0) {
+              tracks = relTracks;
+            }
           }
         }
-        if (!tracks && mbid) {
-          const relTracks = await mb.getReleaseTracks(mbid);
-          if (relTracks && relTracks.length > 0) {
-            tracks = relTracks;
-          }
-        }
+
+        mbCache.set(cacheKey, { tracks, mbid, rgid });
       }
 
       // Smart dedup: if we have MB track count, check if library already has enough tracks
@@ -387,6 +401,7 @@ async function processImportBatch(batch) {
     }
   }
 
+  mbCache.clear();
   activity.log('import', 'success', `Import batch complete: ${queued} queued, ${skippedComplete} complete, ${failed} failed`);
 }
 
