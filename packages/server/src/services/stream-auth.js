@@ -40,8 +40,15 @@ function generateSignedYtUrl(videoId, baseUrl, ttlSeconds = 3600) {
 function verifySignature(id, sig, exp) {
   const now = Math.floor(Date.now() / 1000);
   if (!sig || !exp || parseInt(exp, 10) < now) return false;
+  // Pre-validate hex format to prevent Buffer.from(sig, 'hex') from throwing or
+  // silently producing a wrong-length buffer on malformed input (S10).
+  if (!/^[0-9a-f]+$/i.test(sig)) return false;
   const expected = sign(id, exp);
-  return crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(expected, 'hex'));
+  try {
+    return crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(expected, 'hex'));
+  } catch {
+    return false;
+  }
 }
 
 module.exports = { generateSignedUrl, generateSignedYtUrl, verifySignature };

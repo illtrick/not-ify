@@ -58,5 +58,23 @@ describe('stream-auth', () => {
     it('rejects missing exp', () => {
       expect(streamAuth.verifySignature('track1', 'abc', null)).toBe(false);
     });
+
+    // S10 — invalid hex must not throw
+    it('returns false (not throws) for non-hex sig', () => {
+      const exp = (Math.floor(Date.now() / 1000) + 3600).toString();
+      expect(() => streamAuth.verifySignature('track1', 'not-valid-hex!', exp)).not.toThrow();
+      expect(streamAuth.verifySignature('track1', 'not-valid-hex!', exp)).toBe(false);
+    });
+
+    it('returns false (not throws) for empty-string sig', () => {
+      const exp = (Math.floor(Date.now() / 1000) + 3600).toString();
+      expect(streamAuth.verifySignature('track1', '', exp)).toBe(false);
+    });
+
+    it('returns false for wrong-length valid-hex sig', () => {
+      const exp = (Math.floor(Date.now() / 1000) + 3600).toString();
+      // Valid hex but wrong length — timingSafeEqual would throw without the guard
+      expect(streamAuth.verifySignature('track1', 'deadbeef', exp)).toBe(false);
+    });
   });
 });
