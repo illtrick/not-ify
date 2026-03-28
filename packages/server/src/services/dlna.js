@@ -100,8 +100,13 @@ async function _soapCall(controlUrl, serviceType, action, args = {}) {
   return text;
 }
 
+const _regexCache = new Map();
+const _valRegexCache = new Map();
 function _extractXmlValue(xml, tag) {
-  const m = xml.match(new RegExp(`<${tag}>([^<]*)</${tag}>`));
+  if (!_regexCache.has(tag)) {
+    _regexCache.set(tag, new RegExp(`<${tag}>([^<]*)</${tag}>`));
+  }
+  const m = xml.match(_regexCache.get(tag));
   return m ? m[1] : '';
 }
 
@@ -638,7 +643,8 @@ function _parseLastChange(xml) {
 
   const result = {};
   const valMatch = (tag) => {
-    const m = lc.match(new RegExp(`<${tag}\\s+val="([^"]*)"`, 'i'));
+    if (!_valRegexCache.has(tag)) _valRegexCache.set(tag, new RegExp(`<${tag}\\s+val="([^"]*)"`, 'i'));
+    const m = lc.match(_valRegexCache.get(tag));
     return m ? m[1] : undefined;
   };
 
