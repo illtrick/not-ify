@@ -108,8 +108,7 @@ describe('Soulseek config API', () => {
 
   test('POST /test returns friendly error on network failure', async () => {
     global.fetch.mockRejectedValue(new Error('connect ECONNREFUSED'));
-    const res = await request(app).post('/api/soulseek/test').expect(200);
-    expect(res.body.status).toBe('error');
+    const res = await request(app).post('/api/soulseek/test').expect(502);
     expect(res.body.error).toContain('still starting');
   });
 });

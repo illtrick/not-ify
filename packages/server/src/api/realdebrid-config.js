@@ -26,14 +26,14 @@ router.post('/config', (req, res) => {
 router.post('/test', async (req, res) => {
   try {
     const token = db.getGlobalSetting('realDebridToken');
-    if (!token) return res.json({ status: 'error', error: 'No API token configured' });
+    if (!token) return res.status(400).json({ error: 'No API token configured' });
     const r = await fetch('https://api.real-debrid.com/rest/1.0/user', {
       headers: { 'Authorization': `Bearer ${token}` },
       signal: AbortSignal.timeout(10000),
     });
     if (!r.ok) {
       const body = await r.text();
-      return res.json({ status: 'error', error: `API returned ${r.status}: ${body}` });
+      return res.status(502).json({ error: `API returned ${r.status}: ${body}` });
     }
     const user = await r.json();
     res.json({
@@ -44,7 +44,7 @@ router.post('/test', async (req, res) => {
       },
     });
   } catch (err) {
-    res.json({ status: 'error', error: err.message });
+    res.status(502).json({ error: err.message });
   }
 });
 
