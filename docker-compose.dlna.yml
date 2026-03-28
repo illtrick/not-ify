@@ -3,7 +3,7 @@
 #
 # Usage: docker compose -f docker-compose.yml -f docker-compose.dlna.yml up -d
 #
-# Required for Sonos / WiiM casting. NOT needed for browser or Tauri playback.
+# Required for Sonos / WiiM casting. NOT needed for browser playback.
 # SSDP requires UDP multicast (239.255.255.250:1900) — only works with host mode.
 # =============================================================================
 

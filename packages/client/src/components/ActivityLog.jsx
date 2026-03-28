@@ -83,7 +83,7 @@ function getServiceRows(services) {
     const f = services.fileValidator;
     const t = f.tools;
     const fmt = (v) => v === true ? 'ok' : v === false ? 'missing' : '?';
-    rows.push({ name: 'file-validator', color: f.toolsProbed ? green : yellow, detail: `file: ${fmt(t.file)} | ffprobe: ${fmt(t.ffprobe)} | clam: ${fmt(t.clamdscan)}` });
+    rows.push({ name: 'file-validator', color: f.toolsProbed ? green : yellow, detail: `file: ${fmt(t.file)} | ffprobe: ${fmt(t.ffprobe)}` });
   }
   if (services.realdebrid) {
     const r = services.realdebrid;
