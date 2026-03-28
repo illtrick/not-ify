@@ -389,6 +389,18 @@ async function ytDownloadOne(entry, abort) {
     console.warn('[yt-queue] Failed to write track_files:', err.message);
   }
 
+  // Populate cover_art_url from rgid if available
+  try {
+    const db = require('../services/db');
+    const ytMetaPath = path.join(destDir, '.metadata.json');
+    let ytMeta = {};
+    try { ytMeta = JSON.parse(fs.readFileSync(ytMetaPath, 'utf8')); } catch {}
+    const effectiveRgid = ytMeta.rgid || entry.rgid;
+    if (effectiveRgid) {
+      db.updateAlbumCoverArt(entry.artist || 'Unknown Artist', entry.album || 'Singles', `/api/cover/rg/${effectiveRgid}`);
+    }
+  } catch { /* non-critical */ }
+
   // Pre-warm cover art cache
   try {
     fetch(`http://localhost:3000/api/cover/search?artist=${encodeURIComponent(dlArtist)}&album=${encodeURIComponent(dlAlbum)}`, { signal: AbortSignal.timeout(10000) }).catch(() => {});

@@ -293,6 +293,14 @@ router.post('/download', async (req, res) => {
       }
     }
 
+    // Populate cover_art_url from rgid if available
+    if (rgid) {
+      try {
+        const db = require('../services/db');
+        db.updateAlbumCoverArt(destArtist, destAlbum, `/api/cover/rg/${rgid}`);
+      } catch { /* non-critical */ }
+    }
+
     // Pre-warm album art cache
     try {
       const warmUrl = `http://localhost:3000/api/cover/search?artist=${encodeURIComponent(destArtist)}&album=${encodeURIComponent(destAlbum)}`;
@@ -435,6 +443,11 @@ router.post('/download/background', async (req, res) => {
       // Write metadata
       if (mbid || coverArt || year || rgid) {
         try { fs.writeFileSync(path.join(destDir, '.metadata.json'), JSON.stringify({ mbid, rgid: rgid || null, coverArt, year, source: 'torrent' }, null, 2)); } catch (err) { console.warn(`[bg-pipeline] Could not write .metadata.json: ${err.message}`); }
+      }
+
+      // Populate cover_art_url from rgid if available
+      if (rgid) {
+        try { const db = require('../services/db'); db.updateAlbumCoverArt(destArtist, destAlbum, `/api/cover/rg/${rgid}`); } catch { /* non-critical */ }
       }
 
       // Pre-warm cover art
