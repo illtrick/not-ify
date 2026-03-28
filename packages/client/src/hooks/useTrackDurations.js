@@ -9,7 +9,7 @@ export function useTrackDurations(selectedAlbum) {
     const tracks = selectedAlbum.tracks || [];
     if (!tracks.length) return;
     let cancelled = false;
-    let activeAudio = null;
+    const pendingAudios = new Set();
     const seen = new Set();
     const loadNext = (idx) => {
       if (cancelled || idx >= tracks.length) return;
@@ -18,14 +18,14 @@ export function useTrackDurations(selectedAlbum) {
       if (!id || seen.has(id)) { loadNext(idx + 1); return; }
       seen.add(id);
       const audio = new Audio();
-      activeAudio = audio;
+      pendingAudios.add(audio);
       audio.preload = 'metadata';
       audio.onloadedmetadata = () => {
         const dur = audio.duration;
         audio.onloadedmetadata = null;
         audio.onerror = null;
         audio.src = '';
-        activeAudio = null;
+        pendingAudios.delete(audio);
         if (!cancelled && dur && isFinite(dur)) {
           setTrackDurations(prev => prev[id] !== undefined ? prev : { ...prev, [id]: dur });
         }
@@ -35,7 +35,7 @@ export function useTrackDurations(selectedAlbum) {
         audio.onloadedmetadata = null;
         audio.onerror = null;
         audio.src = '';
-        activeAudio = null;
+        pendingAudios.delete(audio);
         setTimeout(() => loadNext(idx + 1), 60);
       };
       audio.src = track.path || buildTrackPath(id);
@@ -43,12 +43,13 @@ export function useTrackDurations(selectedAlbum) {
     loadNext(0);
     return () => {
       cancelled = true;
-      if (activeAudio) {
-        activeAudio.onloadedmetadata = null;
-        activeAudio.onerror = null;
-        activeAudio.src = '';
-        activeAudio = null;
+      // Abort any pending Audio element requests
+      for (const audio of pendingAudios) {
+        audio.onloadedmetadata = null;
+        audio.onerror = null;
+        audio.src = '';
       }
+      pendingAudios.clear();
     };
   }, [selectedAlbum]);
 
