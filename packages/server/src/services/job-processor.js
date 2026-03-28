@@ -185,19 +185,24 @@ function replaceTracksIfBetter({ incomingFiles, destDir, jobId }) {
       continue;
     }
 
-    // Match cascade: track number + title → track number alone → title alone → duration
+    // Match cascade: track number + title → title alone → duration (number-only never accepted)
     let matched = null;
 
-    // 1. Track number match — prefer match where title also agrees
+    // 1. Track number match — only accept when title also agrees (disc-aware)
     if (incomingTrackNum) {
       const trackNumMatches = existingTracks.filter(t => t.trackNum && t.trackNum === incomingTrackNum);
       if (trackNumMatches.length === 1) {
-        matched = trackNumMatches[0];
+        // Single number match — verify title is similar before accepting
+        const numMatch = trackNumMatches[0];
+        if (numMatch.normalizedTitle === incomingTitle || !incomingTitle) {
+          matched = numMatch;
+        }
+        // If titles don't match, this is likely a different disc — treat as new track
       } else if (trackNumMatches.length > 1 && incomingTitle) {
         // Multiple files with same track number (compilation/merged albums)
         // Use title to disambiguate
         const withTitle = trackNumMatches.find(t => t.normalizedTitle === incomingTitle);
-        matched = withTitle || trackNumMatches[0]; // fall back to first if no title match
+        matched = withTitle; // null if no title match = new track
       }
     }
 

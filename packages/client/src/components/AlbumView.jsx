@@ -240,9 +240,14 @@ export function AlbumView({
     // Prefer album-level duration from DB (already populated by MB data)
     if (selectedAlbum.duration) return selectedAlbum.duration;
     let totalSec = 0;
-    if (isLib && trackDurations) {
+    if (isLib && pl.length > 0) {
       for (const t of pl) {
-        if (trackDurations[t.id]) totalSec += trackDurations[t.id];
+        // Canonical endpoint provides duration in seconds directly on the track
+        if (t.duration) {
+          totalSec += t.duration;
+        } else if (trackDurations && trackDurations[t.id]) {
+          totalSec += trackDurations[t.id];
+        }
       }
     } else if (mbTracks.length > 0) {
       for (const t of mbTracks) {

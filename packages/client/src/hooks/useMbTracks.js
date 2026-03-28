@@ -7,7 +7,7 @@ export function useMbTracks(selectedAlbum, setSelectedAlbum) {
   const [editions, setEditions] = useState([]);
 
   useEffect(() => {
-    if (selectedAlbum?.fromSearch && (selectedAlbum?.mbid || selectedAlbum?.rgid)) {
+    if (selectedAlbum?.mbid || selectedAlbum?.rgid) {
       setTracks([]);
       setEditions([]);
       const cacheKey = selectedAlbum.mbid || selectedAlbum.rgid;
@@ -32,7 +32,7 @@ export function useMbTracks(selectedAlbum, setSelectedAlbum) {
       setTracks([]);
       setEditions([]);
     }
-  }, [selectedAlbum?.mbid, selectedAlbum?.rgid, selectedAlbum?.fromSearch]);
+  }, [selectedAlbum?.mbid, selectedAlbum?.rgid]);
 
   const switchEdition = useCallback(async (mbid) => {
     try {

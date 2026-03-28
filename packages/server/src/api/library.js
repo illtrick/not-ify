@@ -4,7 +4,7 @@ const path = require('path');
 const db = require('../services/db');
 const streamAuth = require('../services/stream-auth');
 const { log } = require('../services/activity-log');
-const { generateTrackId, extractTrackNumber, titleFromFilename } = require('../services/track-id');
+const { generateTrackId, generateAlbumId, normalize, extractTrackNumber, titleFromFilename } = require('../services/track-id');
 
 // Clean folder-derived names: decode HTML entities and strip torrent artifacts
 function cleanFolderName(s) {
@@ -304,6 +304,77 @@ function syncAlbum(artist, album) {
       year: t.year || meta?.year || null,
     }))
   );
+
+  // --- Sync new schema tables (albums, album_tracks, track_files) ---
+  try {
+    const albumId = generateAlbumId(mbArtist, mbAlbum, meta?.rgid);
+    db.upsertAlbum({
+      id: albumId,
+      title: mbAlbum,
+      albumArtist: mbArtist,
+      year: meta?.year ? parseInt(meta.year, 10) : (scanned[0]?.year || null),
+      trackCount: meta?.mbTracks ? meta.mbTracks.length : scanned.length,
+      duration: meta?.mbTracks ? Math.round(meta.mbTracks.reduce((s, t) => s + (t.lengthMs || 0), 0) / 1000) : null,
+      mbid: meta?.mbid || null,
+      rgid: meta?.rgid || null,
+      coverArtUrl: meta?.rgid ? `/api/cover/rg/${meta.rgid}` : null,
+      genres: null,
+      compilation: 0,
+    });
+
+    // Upsert album_tracks from MB data if available, else from scanned files
+    if (meta?.mbTracks && Array.isArray(meta.mbTracks)) {
+      for (const mbt of meta.mbTracks) {
+        const trackId = generateTrackId(mbArtist, mbAlbum, mbt.title, 0);
+        db.upsertAlbumTrack({
+          id: trackId,
+          albumId,
+          title: mbt.title,
+          artist: mbArtist,
+          trackNumber: mbt.position || 0,
+          discNumber: 1,
+          duration: mbt.lengthMs ? Math.round(mbt.lengthMs / 1000) : null,
+          mbid: null,
+        });
+      }
+    } else {
+      for (const t of scanned) {
+        db.upsertAlbumTrack({
+          id: t.id,
+          albumId,
+          title: t.title,
+          artist: mbArtist,
+          trackNumber: t.trackNumber || 0,
+          discNumber: 1,
+          duration: null,
+          mbid: null,
+        });
+      }
+    }
+
+    // Upsert track_files for each scanned file
+    const albumTracks = db.getAlbumTracks(albumId);
+    for (const t of scanned) {
+      if (!t.filepath) continue;
+      const fileNum = t.trackNumber;
+      const matchingTrack = (fileNum && albumTracks.find(at => at.track_number === fileNum))
+        || albumTracks.find(at => normalize(at.title) === normalize(t.title));
+
+      if (matchingTrack) {
+        db.upsertTrackFile({
+          trackId: matchingTrack.id,
+          filepath: t.filepath,
+          format: t.format || 'mp3',
+          bitrate: null,
+          fileSize: t.fileSize || null,
+          fileDuration: null,
+          scanStatus: 'clean',
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('[syncAlbum] Failed to sync new schema tables:', err.message);
+  }
 
   // Backfill rgid and cover_art_url from .metadata.json into albums table
   if (meta?.rgid) {
