@@ -1,17 +1,5 @@
 'use strict';
 
-// Mock node-ssdp and upnp-client-ts so tests don't touch the network
-jest.mock('node-ssdp', () => ({
-  Client: jest.fn().mockImplementation(() => ({
-    on: jest.fn(),
-    search: jest.fn(),
-    stop: jest.fn(),
-  })),
-}));
-
-jest.mock('upnp-client-ts', () => ({
-  UpnpMediaRendererClient: jest.fn(),
-}));
 
 const dlna = require('../../src/services/dlna');
 

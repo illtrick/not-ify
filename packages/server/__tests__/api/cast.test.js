@@ -1,14 +1,6 @@
 'use strict';
 
 jest.mock('../../src/services/dlna');
-jest.mock('node-ssdp', () => ({
-  Client: jest.fn().mockImplementation(() => ({
-    on: jest.fn(), search: jest.fn(), stop: jest.fn(),
-  })),
-}));
-jest.mock('upnp-client-ts', () => ({
-  UpnpMediaRendererClient: jest.fn(),
-}));
 jest.mock('../../src/services/db', () => ({
   getDb: jest.fn(),
   isValidUser: jest.fn().mockReturnValue(true),
