@@ -35,6 +35,7 @@ function getToken() {
 
 function setToken(token) {
   _cachedToken = token;
+  db.setGlobalSetting('realDebridToken', token);
 }
 
 async function rdFetch(endpoint, options = {}) {
