@@ -348,6 +348,27 @@ router.get('/cast/status/stream', async (req, res) => {
   dlna.on('volumeChanged', onVolumeChanged);
   dlna.on('trackChanged', onTrackChanged);
 
+  // Cleanup all listeners, polling, and SSE connection
+  let cleaned = false;
+  function cleanup() {
+    if (cleaned) return;
+    cleaned = true;
+    clearTimeout(safetyTimeout);
+    clearInterval(poll);
+    dlna.removeListener('deviceLost', onDeviceLost);
+    dlna.removeListener('transportStateChanged', onTransportState);
+    dlna.removeListener('volumeChanged', onVolumeChanged);
+    dlna.removeListener('trackChanged', onTrackChanged);
+    dlna.unsubscribe(deviceUsn).catch(() => {});
+    if (!res.writableEnded) res.end();
+  }
+
+  // Safety: clean up after 30 minutes of inactivity
+  const safetyTimeout = setTimeout(() => {
+    log(`SSE: safety timeout reached for ${deviceUsn}, cleaning up`);
+    cleanup();
+  }, 30 * 60 * 1000);
+
   // Position-only polling (1 SOAP call/sec instead of 3)
   // Falls back to full polling if event subscription failed
   const poll = setInterval(async () => {
@@ -384,14 +405,7 @@ router.get('/cast/status/stream', async (req, res) => {
     }
   }, 1000);
 
-  req.on('close', () => {
-    clearInterval(poll);
-    dlna.off('deviceLost', onDeviceLost);
-    dlna.off('transportStateChanged', onTransportState);
-    dlna.off('volumeChanged', onVolumeChanged);
-    dlna.off('trackChanged', onTrackChanged);
-    dlna.unsubscribe(deviceUsn).catch(() => {});
-  });
+  req.on('close', cleanup);
 });
 
 // ── POST /api/cast/next ───────────────────────────────────────────────────────
