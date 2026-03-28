@@ -10,13 +10,14 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v5
+      - uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde8c81c89c3166c0 # v5
         with:
-          node-version: 22
+          node-version: '22.12.0'
           cache: npm
       - run: npm ci --workspaces
       - name: Server tests (excluding flaky search tests)
+        # search.test.js skipped in CI — depends on external MusicBrainz API (flaky)
         run: cd packages/server && npx jest --testPathIgnorePatterns='search.test'
       - run: npm run test -w @not-ify/client
 
@@ -24,7 +25,7 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v5
       - name: Build production Docker image
         run: docker build -f docker/Dockerfile -t not-ify:ci .
       - name: Start container
@@ -37,9 +38,11 @@ jobs:
       - name: Wait for server
         run: |
           for i in $(seq 1 30); do
-            curl -sf http://localhost:3000/api/health && break
+            curl -sf http://localhost:3000/api/health && exit 0
             sleep 1
           done
+          echo "Server failed to start within 30s"
+          exit 1
       - name: Create test user (first-run setup)
         run: |
           curl -sf http://localhost:3000/api/setup/status
@@ -47,9 +50,9 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{"displayName":"CI Test"}'
           curl -sf -X POST http://localhost:3000/api/setup/complete
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde8c81c89c3166c0 # v5
         with:
-          node-version: 22
+          node-version: '22.12.0'
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
@@ -66,8 +69,8 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v5
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v5
+      - uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -92,7 +95,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v5
         with:
           fetch-depth: 0
       - name: Generate release notes
@@ -110,7 +113,7 @@ jobs:
             echo "EOF" >> $GITHUB_OUTPUT
           fi
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2 # TODO: pin to commit SHA
         with:
           generate_release_notes: true
           body: |
