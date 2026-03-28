@@ -23,7 +23,7 @@ const fileValidator = require('./file-validator');
 const downloadValidator = require('./download-validator');
 const activityLog = require('./activity-log');
 const { enqueueDownload, pollDownloads } = require('./soulseek');
-const { probeFile, isUpgrade, QUALITY_RANK } = require('./library-check');
+const { probeFile, isUpgrade, QUALITY_RANK, resolveAlbumDir } = require('./library-check');
 
 // Read lazily so tests can set process.env before each test case
 // Use globalThis.process to avoid shadowing by the module's own process() function
@@ -315,7 +315,7 @@ async function processDownload(job, payload) {
     // Each file is validated and moved to library immediately after download.
     // This prevents losing work if later files fail.
     fs.mkdirSync(stagingDir, { recursive: true });
-    const destDir = path.join(getMusicDir(), downloader.sanitizePath(artist), downloader.sanitizePath(album));
+    const destDir = resolveAlbumDir(payload.rgid || null, artist, album);
     fs.mkdirSync(destDir, { recursive: true });
     const links = cached.links || [];
     const upgraded = [];
@@ -605,7 +605,7 @@ async function processSoulseekDownload(job, payload) {
     const deadline = Date.now() + getSlskDownloadTimeout();
     const getBasename = (f) => f.split(/[\\/]/).pop();
     const processedBasenames = new Set();
-    const destDir = path.join(getMusicDir(), downloader.sanitizePath(artist), downloader.sanitizePath(album));
+    const destDir = resolveAlbumDir(payload.rgid || null, artist, album);
     fs.mkdirSync(destDir, { recursive: true });
     fs.mkdirSync(stagingDir, { recursive: true });
 
@@ -720,6 +720,7 @@ async function processSoulseekDownload(job, payload) {
     try {
       fs.writeFileSync(metadataPath, JSON.stringify({
         mbid: mbid || null,
+        rgid: rgid || null,
         source: 'soulseek',
         soulseekUser,
         importedAt: new Date().toISOString(),

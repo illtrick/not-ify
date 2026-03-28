@@ -55,11 +55,16 @@ jest.mock('../../src/services/search', () => ({
 
 const mockProbeFile = jest.fn();
 const mockGetExistingQuality = jest.fn();
+const mockResolveAlbumDir = jest.fn((rgid, artist, album) => {
+  const sanitize = (s) => (s || 'Unknown').replace(/[<>:"/\\|?*]/g, '_').trim();
+  return `/test/music/${sanitize(artist)}/${sanitize(album)}`;
+});
 jest.mock('../../src/services/library-check', () => ({
   probeFile: (...a) => mockProbeFile(...a),
   isUpgrade: jest.requireActual('../../src/services/library-check').isUpgrade,
   QUALITY_RANK: jest.requireActual('../../src/services/library-check').QUALITY_RANK,
   getExistingQuality: (...a) => mockGetExistingQuality(...a),
+  resolveAlbumDir: (...a) => mockResolveAlbumDir(...a),
 }));
 
 const mockJobQueueEnqueue = jest.fn().mockReturnValue(42);
