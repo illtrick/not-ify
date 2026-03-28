@@ -26,9 +26,6 @@ services:
       - SLSKD_DOWNLOADS_DIR=/app/slskd-downloads
       - VPN_PROXY=${VPN_PROXY:-}
       - GLUETUN_CONTROL_URL=${GLUETUN_CONTROL_URL:-}
-      - CLAM_ENABLED=${CLAM_ENABLED:-false}
-      - CLAM_HOST=${CLAM_HOST:-}
-      - CLAM_PORT=${CLAM_PORT:-3310}
       - INSTALL_DIR=${INSTALL_DIR:-}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${PORT:-3000}/api/health"]
@@ -111,6 +108,7 @@ services:
 #VPN#      - "8000:8000/tcp"
 #VPN#    labels:
 #VPN#      - com.centurylinklabs.watchtower.scope=not-ify
+<<<<<<< HEAD
 
 #CLAM#  clamav:
 #CLAM#    image: clamav/clamav:stable
@@ -130,3 +128,5 @@ services:
 #CLAM#      start_period: 120s
 #CLAM#    labels:
 #CLAM#      - com.centurylinklabs.watchtower.scope=not-ify
+=======
+>>>>>>> d6d760a (chore: remove ClamAV integration from server, Docker, scripts, and tests)

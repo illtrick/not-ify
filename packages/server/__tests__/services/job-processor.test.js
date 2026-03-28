@@ -29,7 +29,6 @@ jest.mock('../../src/services/downloader', () => ({
 const mockValidateFile = jest.fn();
 jest.mock('../../src/services/file-validator', () => ({
   validateFile: (...a) => mockValidateFile(...a),
-  scanClamAV: jest.fn().mockResolvedValue({ name: 'clam', passed: true, detail: 'clean' }),
 }));
 
 const mockDownloadValidate = jest.fn();
