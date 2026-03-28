@@ -56,6 +56,7 @@ router.get('/status', async (req, res) => {
         cliConfigured: true,
         containerRunning,
         username: envUsername,
+        hasPassword: !!process.env.VPN_PASSWORD,
         region: process.env.VPN_REGION || 'US East',
         provider: process.env.VPN_PROVIDER || 'private internet access',
       });
@@ -66,25 +67,30 @@ router.get('/status', async (req, res) => {
       message: containerRunning ? undefined : 'VPN credentials not configured — Gluetun container will not start until you configure VPN in Settings',
     });
   }
-  const { username, region, provider } = config;
-  res.json({ configured: true, containerRunning, username, region, provider: provider || 'private internet access' });
+  const { username, region, provider, password } = config;
+  res.json({ configured: true, containerRunning, username, hasPassword: !!password, region, provider: provider || 'private internet access' });
 });
 
 router.post('/config', async (req, res) => {
   const { username, password, region, provider } = req.body;
-  if (!username || !password) return res.status(400).json({ error: 'Missing username or password' });
+  if (!username) return res.status(400).json({ error: 'Missing username' });
+
+  // Allow omitting password when one is already saved (e.g. region-only change)
+  const existing = db.getGlobalSetting('vpnConfig') || {};
+  const effectivePassword = password || existing.password;
+  if (!effectivePassword) return res.status(400).json({ error: 'Missing password' });
 
   const vpnProvider = provider || 'private internet access';
   const vpnRegion = region || 'US East';
 
   // Save to DB
-  db.setGlobalSetting('vpnConfig', { username, password, region: vpnRegion, provider: vpnProvider });
+  db.setGlobalSetting('vpnConfig', { username, password: effectivePassword, region: vpnRegion, provider: vpnProvider });
 
   // Persist to .env so gluetun picks up creds on restart
   const envUpdated = containerManager.updateEnvFile({
     VPN_PROVIDER: vpnProvider,
     VPN_USERNAME: username,
-    VPN_PASSWORD: password,
+    VPN_PASSWORD: effectivePassword,
     VPN_REGION: vpnRegion,
   });
 
