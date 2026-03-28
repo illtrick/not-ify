@@ -183,19 +183,25 @@ async function browseArtistReleases(artistMbid, artistName) {
     const url = `${MB_BASE}/release-group?artist=${artistMbid}&type=album%7Cep&fmt=json&limit=25`;
     const data = await mbFetch(url);
 
-    const releases = (data['release-groups'] || []).map(rg => {
-      const sortedReleases = (rg.releases || []).slice().sort((a, b) => scoreRelease(b) - scoreRelease(a));
-      const release = sortedReleases[0];
-      return {
-        mbid: release?.id || null,
-        rgid: rg.id,
-        artist: artistName,
-        album: rg.title || 'Unknown Album',
-        year: rg['first-release-date'] ? rg['first-release-date'].slice(0, 4) : '',
-        trackCount: release?.['track-count'] || null,
-        primaryType: rg['primary-type'] || null,
-      };
-    });
+    const EXCLUDED_SECONDARY = new Set(['live', 'bootleg']);
+    const releases = (data['release-groups'] || [])
+      .filter(rg => {
+        const secondaries = (rg['secondary-types'] || []).map(s => s.toLowerCase());
+        return !secondaries.some(s => EXCLUDED_SECONDARY.has(s));
+      })
+      .map(rg => {
+        const sortedReleases = (rg.releases || []).slice().sort((a, b) => scoreRelease(b) - scoreRelease(a));
+        const release = sortedReleases[0];
+        return {
+          mbid: release?.id || null,
+          rgid: rg.id,
+          artist: artistName,
+          album: rg.title || 'Unknown Album',
+          year: rg['first-release-date'] ? rg['first-release-date'].slice(0, 4) : '',
+          trackCount: release?.['track-count'] || null,
+          primaryType: rg['primary-type'] || null,
+        };
+      });
 
     const ttl = releases.length > 0 ? CACHE_TTL_POSITIVE : CACHE_TTL_NEGATIVE;
     db.mbCacheSet(key, releases, ttl);
@@ -472,8 +478,8 @@ async function searchRecordings(query) {
   if (cached) return cached;
 
   try {
-    // Add status:official to filter out bootleg recordings that dominate results for popular artists
-    const filteredQuery = `${query} AND status:official`;
+    // Add status:official and exclude live/bootleg secondary types
+    const filteredQuery = `${query} AND status:official NOT secondarytype:Live NOT secondarytype:Bootleg`;
     const url = `${MB_BASE}/recording/?query=${encodeURIComponent(filteredQuery)}&fmt=json&limit=15`;
     const data = await mbFetch(url);
 
