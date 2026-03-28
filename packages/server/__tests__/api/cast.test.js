@@ -92,6 +92,21 @@ beforeEach(() => {
   castSession.clearSession('default');
 });
 
+// ── User middleware ────────────────────────────────────────────────────────────
+
+describe('invalid user falls back to default', () => {
+  const db = require('../../src/services/db');
+
+  test('returns devices when X-User-Id is invalid (falls back to default)', async () => {
+    db.isValidUser.mockReturnValueOnce(false);
+    const res = await request(app)
+      .get('/api/cast/devices')
+      .set('X-User-Id', 'nonexistent-user');
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+  });
+});
+
 // ── Devices ───────────────────────────────────────────────────────────────────
 
 describe('GET /api/cast/devices', () => {
