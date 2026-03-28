@@ -187,7 +187,7 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
   } = download;
 
   // Album page hooks
-  const mbTracks = useMbTracks(selectedAlbum, setSelectedAlbum);
+  const { tracks: mbTracks, editions: mbEditions, switchEdition } = useMbTracks(selectedAlbum, setSelectedAlbum);
   const albumColor = useAlbumColor(selectedAlbum);
   const moreByArtist = useMoreByArtist(selectedAlbum, view, searchArtistResults);
   const { trackDurations, setTrackDurations } = useTrackDurations(selectedAlbum);
@@ -939,6 +939,8 @@ function MainApp({ currentUser, isAdmin, setIsAdmin, switchUser }) {
                   <AlbumView
                     selectedAlbum={selectedAlbum}
                     mbTracks={mbTracks}
+                    mbEditions={mbEditions}
+                    switchEdition={switchEdition}
                     library={library}
                     albumColor={albumColor}
                     mainContentRef={mainContentRef}

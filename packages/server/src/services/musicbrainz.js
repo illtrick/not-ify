@@ -77,7 +77,7 @@ function parseReleaseGroups(data) {
   return (data['release-groups'] || [])
     .filter(rg => ALLOWED_PRIMARY.has(rg['primary-type'] || ''))
     .map(rg => {
-      const sortedReleases = (rg.releases || []).slice().sort((a, b) => (b['track-count'] || 0) - (a['track-count'] || 0));
+      const sortedReleases = (rg.releases || []).slice().sort((a, b) => scoreRelease(b) - scoreRelease(a));
       const release = sortedReleases[0];
       return {
         mbid: release?.id || null,
@@ -184,7 +184,7 @@ async function browseArtistReleases(artistMbid, artistName) {
     const data = await mbFetch(url);
 
     const releases = (data['release-groups'] || []).map(rg => {
-      const sortedReleases = (rg.releases || []).slice().sort((a, b) => (b['track-count'] || 0) - (a['track-count'] || 0));
+      const sortedReleases = (rg.releases || []).slice().sort((a, b) => scoreRelease(b) - scoreRelease(a));
       const release = sortedReleases[0];
       return {
         mbid: release?.id || null,
@@ -233,6 +233,7 @@ async function getReleaseTracks(mbid) {
       const trackArtistMbid = ac?.[0]?.artist?.id || null;
       const entry = {
         position: track.position,
+        discNumber: medium.position || 1,
         title: track.title || track.recording?.title || 'Unknown',
         lengthMs: track.length || track.recording?.length || null,
       };
@@ -250,7 +251,7 @@ async function getReleaseTracks(mbid) {
 }
 
 // Get tracks for a release-group (resolves to best release, then gets tracks)
-// Returns: { releaseMbid, tracks: [{ position, title, lengthMs, artist?, artistMbid? }] }
+// Returns: { releaseMbid, tracks: [{ position, discNumber, title, lengthMs, artist?, artistMbid? }], editions }
 async function getReleaseGroupTracks(rgid) {
   const key = `rg-tracks:${rgid}`;
   const cached = db.mbCacheGet(key);
@@ -261,14 +262,10 @@ async function getReleaseGroupTracks(rgid) {
   const data = await mbFetch(url);
 
   const releases = (data.releases || []);
-  if (releases.length === 0) return { releaseMbid: null, tracks: [] };
+  if (releases.length === 0) return { releaseMbid: null, tracks: [], editions: [] };
 
-  // Pick the release with the most tracks
-  const best = releases.sort((a, b) => {
-    const aCount = (a.media || []).reduce((s, m) => s + (m['track-count'] || 0), 0);
-    const bCount = (b.media || []).reduce((s, m) => s + (m['track-count'] || 0), 0);
-    return bCount - aCount;
-  })[0];
+  // Pick the best edition using score-based heuristic
+  const best = releases.slice().sort((a, b) => scoreRelease(b) - scoreRelease(a))[0];
 
   const releaseArtist = best['artist-credit']?.[0]?.artist?.name || '';
   const isVA = /various artists/i.test(releaseArtist);
@@ -281,6 +278,7 @@ async function getReleaseGroupTracks(rgid) {
       const trackArtistMbid = ac?.[0]?.artist?.id || null;
       const entry = {
         position: track.position,
+        discNumber: medium.position || 1,
         title: track.title || track.recording?.title || 'Unknown',
         lengthMs: track.length || track.recording?.length || null,
       };
@@ -292,7 +290,21 @@ async function getReleaseGroupTracks(rgid) {
     }
   }
 
-  const result = { releaseMbid: best.id, tracks };
+  const editions = releases
+    .filter(r => r.status === 'Official')
+    .map(r => ({
+      mbid: r.id,
+      title: r.title,
+      disambiguation: r.disambiguation || '',
+      date: r.date || '',
+      format: r.media?.[0]?.format || '',
+      discCount: (r.media || []).length,
+      trackCount: (r.media || []).reduce((s, m) => s + (m['track-count'] || 0), 0),
+      selected: r.id === best.id,
+    }))
+    .sort((a, b) => a.trackCount - b.trackCount);  // fewest tracks first
+
+  const result = { releaseMbid: best.id, tracks, editions };
   db.mbCacheSet(key, result, CACHE_TTL_TRACKS);
   return result;
 }
@@ -371,6 +383,46 @@ async function searchArtistsFuzzy(query) {
     console.error(`MusicBrainz fuzzy artist search failed: ${err.message}`);
     return [];
   }
+}
+
+// ── Release Scoring (within a release-group) ────────────────────────────────
+/**
+ * Score a release within a release-group to pick the best edition.
+ * Higher score = more preferred. Based on MusicBrainz canonical heuristic.
+ */
+function scoreRelease(release) {
+  let score = 0;
+  const media = release.media || [];
+  const mediaCount = media.length;
+  const format = media[0]?.format || '';
+  const disambiguation = (release.disambiguation || '').toLowerCase();
+  const title = (release.title || '').toLowerCase();
+
+  // Prefer Official status
+  if (release.status === 'Official') score += 100;
+
+  // Prefer CD and Digital Media over vinyl/cassette
+  if (/^(cd|digital media)$/i.test(format)) score += 50;
+  else if (/vinyl|cassette|12" vinyl/i.test(format)) score -= 20;
+
+  // Prefer fewer discs (standard over box sets)
+  if (mediaCount === 1) score += 30;
+  else if (mediaCount === 2) score += 10;
+
+  // Prefer earlier release date (original over reissue)
+  if (release.date) {
+    const year = parseInt(release.date);
+    if (!isNaN(year)) {
+      score += Math.max(0, 50 - (new Date().getFullYear() - year));
+    }
+  }
+
+  // Penalize deluxe/expanded/special editions
+  if (/deluxe|expanded|anniversary|collector|limited|bonus|special/i.test(disambiguation + ' ' + title)) {
+    score -= 40;
+  }
+
+  return score;
 }
 
 // ── Release Ranking (for recording search) ──────────────────────────────────
@@ -613,5 +665,5 @@ module.exports = {
   getCoverArtUrl, getReleaseTracks, getReleaseGroupTracks,
   searchReleasesFuzzy, searchArtistsFuzzy, searchRecordings,
   normalizeQuery, getArtistDetails, preWarmCache,
-  _test: { acquireToken, resetBucket },
+  _test: { acquireToken, resetBucket, scoreRelease },
 };

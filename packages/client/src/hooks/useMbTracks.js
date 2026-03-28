@@ -1,24 +1,27 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import * as api from '@not-ify/shared';
 import { getCachedMbTracks } from '@not-ify/shared';
 
 export function useMbTracks(selectedAlbum, setSelectedAlbum) {
-  const [mbTracks, setMbTracks] = useState([]);
+  const [tracks, setTracks] = useState([]);
+  const [editions, setEditions] = useState([]);
 
   useEffect(() => {
     if (selectedAlbum?.fromSearch && (selectedAlbum?.mbid || selectedAlbum?.rgid)) {
-      setMbTracks([]);
+      setTracks([]);
+      setEditions([]);
       const cacheKey = selectedAlbum.mbid || selectedAlbum.rgid;
       const cached = getCachedMbTracks(cacheKey);
       const meta = { artist: selectedAlbum.artist, album: selectedAlbum.album, year: selectedAlbum.year };
       if (selectedAlbum.mbid) {
         (cached || api.getMbReleaseTracks(selectedAlbum.mbid, { ...meta, rgid: selectedAlbum.rgid }))
-          .then(d => setMbTracks(d.tracks || []))
+          .then(d => setTracks(d.tracks || []))
           .catch(() => {});
       } else if (selectedAlbum.rgid) {
         (cached || api.getMbRgTracks(selectedAlbum.rgid, meta))
           .then(d => {
-            setMbTracks(d.tracks || []);
+            setTracks(d.tracks || []);
+            setEditions(d.editions || []);
             if (d.releaseMbid && !selectedAlbum.mbid) {
               setSelectedAlbum(prev => prev ? { ...prev, mbid: d.releaseMbid } : prev);
             }
@@ -26,9 +29,25 @@ export function useMbTracks(selectedAlbum, setSelectedAlbum) {
           .catch(() => {});
       }
     } else {
-      setMbTracks([]);
+      setTracks([]);
+      setEditions([]);
     }
   }, [selectedAlbum?.mbid, selectedAlbum?.rgid, selectedAlbum?.fromSearch]);
 
-  return mbTracks;
+  const switchEdition = useCallback(async (mbid) => {
+    try {
+      const data = await api.getMbReleaseTracks(mbid);
+      setTracks(data.tracks || []);
+      setEditions(prev => prev.map(e => ({ ...e, selected: e.mbid === mbid })));
+      setSelectedAlbum(prev => ({
+        ...prev,
+        mbid,
+        coverArt: `/api/cover/${mbid}`,
+      }));
+    } catch (err) {
+      console.warn('[useMbTracks] Failed to switch edition:', err.message);
+    }
+  }, [setSelectedAlbum]);
+
+  return { tracks, editions, switchEdition };
 }
