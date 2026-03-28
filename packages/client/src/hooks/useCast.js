@@ -13,6 +13,12 @@ export function useCast() {
   const [castLog, setCastLog] = useState([]); // { id, message, timestamp }
   const sseRef = useRef(null);
   const pollRef = useRef(null);
+  const isCastingRef = useRef(false);
+
+  const setIsCastingTracked = useCallback((val) => {
+    isCastingRef.current = val;
+    setIsCasting(val);
+  }, []);
 
   const addLog = useCallback((message) => {
     const entry = { id: Date.now(), message, timestamp: new Date().toLocaleTimeString() };
@@ -51,7 +57,7 @@ export function useCast() {
         const data = JSON.parse(e.data);
         if (data.event === 'deviceLost') {
           addLog('Device lost');
-          setIsCasting(false);
+          setIsCastingTracked(false);
           return;
         }
         if (data.event === 'error') return;
@@ -61,13 +67,13 @@ export function useCast() {
         const dur = data.duration ?? 0;
 
         // Detect external play (someone started playback from Sonos/WiiM app)
-        if (!isCasting && (newState === 'PLAYING' || newState === 'TRANSITIONING') && dur > 0) {
-          setIsCasting(true);
+        if (!isCastingRef.current && (newState === 'PLAYING' || newState === 'TRANSITIONING') && dur > 0) {
+          setIsCastingTracked(true);
           autoAdvancing = false;
         }
 
         // Detect track ended naturally (was PLAYING, now STOPPED, position was near end)
-        if (isCasting && newState === 'STOPPED' && prevState === 'PLAYING' && !autoAdvancing) {
+        if (isCastingRef.current && newState === 'STOPPED' && prevState === 'PLAYING' && !autoAdvancing) {
           const nearEnd = dur > 0 && prevPosition > 0 && (dur - prevPosition) < 5;
           if (nearEnd) {
             // Auto-advance to next track in queue
@@ -77,19 +83,19 @@ export function useCast() {
               autoAdvancing = false;
             }).catch(() => {
               autoAdvancing = false;
-              setIsCasting(false);
+              setIsCastingTracked(false);
               addLog('No more tracks in queue');
             });
           } else {
             // Stopped externally (not at end of track)
-            setIsCasting(false);
+            setIsCastingTracked(false);
             addLog('Playback stopped');
           }
         }
 
         // Two consecutive STOPPED with no auto-advance = truly stopped
-        if (isCasting && newState === 'STOPPED' && prevState === 'STOPPED' && !autoAdvancing) {
-          setIsCasting(false);
+        if (isCastingRef.current && newState === 'STOPPED' && prevState === 'STOPPED' && !autoAdvancing) {
+          setIsCastingTracked(false);
         }
 
         prevState = newState;
@@ -141,7 +147,7 @@ export function useCast() {
         queue: (queue || [track]).map(t => ({ id: t.id, title: t.title, artist: t.artist })),
         startPosition: startPosition || undefined,
       });
-      setIsCasting(true);
+      setIsCastingTracked(true);
       addLog(`Casting "${track.title}" to ${devices.find(d => d.usn === device)?.friendlyName || 'device'}`);
     } catch (err) {
       addLog(`Cast failed: ${err.message}`);
@@ -153,7 +159,7 @@ export function useCast() {
     if (!device) return;
     try {
       await api.castPlayYt({ deviceUsn: device, videoId, title, artist, album, coverArt });
-      setIsCasting(true);
+      setIsCastingTracked(true);
       addLog(`Casting "${title}" (YT) to ${devices.find(d => d.usn === device)?.friendlyName || 'device'}`);
     } catch (err) {
       addLog(`Cast failed: ${err.message}`);
@@ -178,7 +184,7 @@ export function useCast() {
     } catch (err) {
       addLog(`Stop failed: ${err.message}`);
     }
-    setIsCasting(false);
+    setIsCastingTracked(false);
     setCastState({ position: 0, duration: 0, state: 'STOPPED', volume: castState.volume });
   }, [activeDevice, castState.volume, addLog]);
 
