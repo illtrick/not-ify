@@ -532,8 +532,8 @@ export function getJobQueue() {
   return get('/api/upgrade/status');
 }
 
-export function triggerAlbumUpgrade(artist, album) {
-  return post('/api/upgrade/album', { artist, album });
+export function triggerAlbumUpgrade(artist, album, rgid) {
+  return post('/api/upgrade/album', { artist, album, rgid });
 }
 
 export function getAlbumUpgradeHistory(artist, album) {
