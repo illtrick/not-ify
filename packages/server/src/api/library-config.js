@@ -85,7 +85,7 @@ router.post('/', (req, res) => {
 });
 
 // GET /api/library-config/browse — filesystem directory browser
-router.get('/browse', (req, res) => {
+router.get('/browse', async (req, res) => {
   const requestedPath = req.query.path || (process.platform === 'win32' ? 'C:\\' : '/');
 
   const validation = validateBrowsePath(requestedPath);
@@ -96,7 +96,7 @@ router.get('/browse', (req, res) => {
   const fullPath = path.resolve(requestedPath);
 
   try {
-    const entries = fs.readdirSync(fullPath, { withFileTypes: true });
+    const entries = await fs.promises.readdir(fullPath, { withFileTypes: true });
     const dirs = entries
       .filter(e => e.isDirectory() && !e.name.startsWith('.'))
       .map(e => ({
