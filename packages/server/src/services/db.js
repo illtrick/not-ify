@@ -1071,8 +1071,18 @@ function migrateToAlbumSchema() {
       compilation: isCompilation ? 1 : 0,
     });
 
-    // Create album_tracks — prefer MB data if available
-    if (meta?.mbTracks && meta.mbTracks.length > 0) {
+    // Create album_tracks — prefer MB data if it roughly matches the filesystem tracks
+    const mbTracksValid = meta?.mbTracks && meta.mbTracks.length > 0 && (() => {
+      // Validate: at least 50% of filesystem track titles should match an mbTrack title.
+      // This prevents ghost tracks when .metadata.json has MB data from a wrong release
+      // (e.g. a compilation or box set that includes tracks from other albums).
+      const fsNormalized = groupTracks.map(t => normalize(t.title));
+      const mbNormalized = new Set(meta.mbTracks.map(t => normalize(t.title)));
+      const matched = fsNormalized.filter(t => mbNormalized.has(t)).length;
+      return fsNormalized.length === 0 || matched / fsNormalized.length >= 0.5;
+    })();
+
+    if (mbTracksValid) {
       for (const mbTrack of meta.mbTracks) {
         const trackId = generateTrackId(albumArtist, album, mbTrack.title, 0);
         upsertAlbumTrack({
@@ -1081,7 +1091,7 @@ function migrateToAlbumSchema() {
           title: mbTrack.title,
           artist: albumArtist, // per-track artist defaults to album artist
           trackNumber: mbTrack.position || 0,
-          discNumber: 1,
+          discNumber: mbTrack.discNumber || 1,
           duration: mbTrack.lengthMs ? Math.round(mbTrack.lengthMs / 1000) : null,
           mbid: null,
         });

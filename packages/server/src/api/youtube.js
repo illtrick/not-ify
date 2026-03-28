@@ -354,7 +354,7 @@ async function ytDownloadOne(entry, abort) {
             title: t.title,
             artist: meta.artist || albumArtist,
             trackNumber: t.position || 0,
-            discNumber: 1,
+            discNumber: t.discNumber || 1,
             duration: t.lengthMs ? Math.round(t.lengthMs / 1000) : null,
             mbid: null,
           });
