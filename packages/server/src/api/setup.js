@@ -106,7 +106,8 @@ router.get('/library', (req, res) => {
           freeSpace = parseInt(parts[3], 10) * 1024; // convert KB to bytes
         }
       }
-    } catch {
+    } catch (err) {
+      console.warn(`[setup] Could not determine free space for ${musicDir}: ${err.message}`);
       freeSpace = null;
     }
   }
