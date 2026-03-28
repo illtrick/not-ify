@@ -2,7 +2,7 @@
  * Configurable API client for Not-ify.
  *
  * Web (Docker-served): uses relative URLs — baseUrl = ''
- * Tauri desktop app: uses absolute server URL — baseUrl = 'http://<server-ip>:3000'
+ * Native/external clients: use absolute server URL — baseUrl = 'http://<server-ip>:3000'
  */
 
 const enc = encodeURIComponent;

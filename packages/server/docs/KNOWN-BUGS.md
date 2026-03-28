@@ -13,7 +13,6 @@ Open bugs organized by area. Each entry has enough context to start implementati
 |----|-------------|---------|----------------|
 | BUG-001 | Session state persists across clean reinstall | v1.7.3 + v1.7.4 | **Needs retest** — v1.7.3 fix failed, v1.7.4 added localStorage.clear() |
 | BUG-002 | YT stream used even when track in library | v1.7.0 | Verified |
-| BUG-003 | ClamAV blocks streaming on initial downloads | v1.7.0 | Verified |
 | BUG-005 | Recently played opens search instead of album | v1.7.0 | Verified |
 | BUG-006 | Previous button never goes to previous track | v1.7.0 | Verified |
 | BUG-007 | Gluetun VPN status message | v1.7.3 | Partial — bootstrap now collects creds |

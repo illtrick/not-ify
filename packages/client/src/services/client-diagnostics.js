@@ -111,7 +111,7 @@ export function formatDiagnostics(serverData, appState) {
     const f = s.fileValidator;
     const t = f.tools;
     const fmt = (v) => v === true ? 'ok' : v === false ? 'missing' : 'untested';
-    lines.push(`file-validator: file ${fmt(t.file)} | ffprobe ${fmt(t.ffprobe)} | clamdscan ${fmt(t.clamdscan)}`);
+    lines.push(`file-validator: file ${fmt(t.file)} | ffprobe ${fmt(t.ffprobe)}`);
   }
   if (s.realdebrid) {
     const r = s.realdebrid;
