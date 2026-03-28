@@ -18,7 +18,7 @@ ask() {
   local prompt="$1" default="$2"
   echo -ne "  ${BOLD}${prompt}${NC} " >&2
   [ -n "$default" ] && echo -ne "${DIM}[${default}]${NC} " >&2
-  read -r answer
+  read -t 60 -r answer
   if [ "$answer" = "q" ] || [ "$answer" = "Q" ]; then
     echo "" >&2
     info "Setup cancelled." >&2
@@ -198,11 +198,10 @@ detect_ip() {
 # Cleanup on Ctrl+C
 INSTALL_DIR=""
 cleanup() {
-  echo ""
-  warn "Setup interrupted."
-  if [ -n "$INSTALL_DIR" ] && [ -d "$INSTALL_DIR" ] && [ ! -f "$INSTALL_DIR/docker-compose.yml" ]; then
-    warn "Cleaning up partial install at $INSTALL_DIR..."
-    rm -rf "$INSTALL_DIR"
+  if [ -n "$INSTALL_DIR" ] && [ -d "$INSTALL_DIR" ]; then
+    echo ""
+    warn "Setup interrupted. Partial install at: $INSTALL_DIR"
+    warn "To clean up: rm -rf $INSTALL_DIR"
   fi
   exit 1
 }
@@ -403,7 +402,7 @@ if confirm "Enable VPN?"; then
   fi
   if [ -n "$VPN_PROVIDER" ]; then
     echo -ne "  VPN password: "
-    read -rs VPN_PASSWORD
+    read -t 60 -rs VPN_PASSWORD
     echo ""
     if [ -z "$VPN_PASSWORD" ]; then
       echo -e "  ${RED}✗ Password is required. VPN will be skipped.${NC}"
