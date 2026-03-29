@@ -13,7 +13,8 @@ export function useMbTracks(selectedAlbum, setSelectedAlbum) {
       const cacheKey = selectedAlbum.mbid || selectedAlbum.rgid;
       const cached = getCachedMbTracks(cacheKey);
       const meta = { artist: selectedAlbum.artist, album: selectedAlbum.album, year: selectedAlbum.year };
-      if (selectedAlbum.mbid) {
+      if (selectedAlbum.mbid && !selectedAlbum.rgid) {
+        // mbid only (no rgid) — fetch tracks for specific release, no editions available
         (cached || api.getMbReleaseTracks(selectedAlbum.mbid, { ...meta, rgid: selectedAlbum.rgid }))
           .then(d => setTracks(d.tracks || []))
           .catch(() => {});
