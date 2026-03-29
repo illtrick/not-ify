@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Not-ify — Edition Picker Mockup</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0e0e0e; color: #e0e0e0; font-family: Inter, system-ui, sans-serif; padding: 40px; display: flex; gap: 40px; flex-wrap: wrap; }
+
+  .mock { width: 540px; border: 1px solid #333; border-radius: 12px; overflow: hidden; background: #1a1a1a; }
+  .mock-label { background: #ff4466; color: #fff; text-align: center; padding: 8px; font-size: 12px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; }
+  .mock-label.after { background: #22c55e; }
+  .mock-label.lib { background: #6366f1; }
+  .mock-label.search { background: #f59e0b; }
+
+  .header { display: flex; gap: 20px; padding: 24px; }
+  .cover { width: 140px; height: 140px; border-radius: 8px; background: #2a2a3a; overflow: hidden; flex-shrink: 0; }
+  .cover img { width: 100%; height: 100%; object-fit: cover; }
+  .meta { flex: 1; min-width: 0; }
+  .meta-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .meta h2 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+  .meta-info { font-size: 13px; color: #999; margin-bottom: 8px; }
+  .meta-info span { color: #ff4466; cursor: pointer; }
+  .library-badge { font-size: 12px; color: #22c55e; margin-bottom: 8px; }
+  .btn-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .btn-play { width: 40px; height: 40px; border-radius: 50%; background: #ff4466; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  .btn-play svg { fill: #fff; width: 16px; height: 16px; }
+  .btn-upgrade { font-size: 12px; padding: 6px 14px; border-radius: 16px; border: 1px solid #555; background: transparent; color: #ddd; cursor: pointer; }
+  .btn-upgrade:hover { border-color: #ff4466; color: #ff4466; }
+
+  /* Edition Picker */
+  .edition-picker { margin-top: 6px; position: relative; }
+  .edition-current { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #aaa; background: #222; border: 1px solid #333; border-radius: 16px; padding: 4px 12px; cursor: pointer; transition: all 0.15s; }
+  .edition-current:hover { border-color: #555; color: #ddd; }
+  .edition-arrow { font-size: 10px; }
+  .edition-dropdown { position: absolute; top: 32px; left: 0; background: #222; border: 1px solid #444; border-radius: 8px; padding: 6px 0; min-width: 320px; z-index: 10; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+  .edition-option { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; font-size: 12px; cursor: pointer; }
+  .edition-option:hover { background: #2a2a2a; }
+  .edition-option.selected { color: #ff4466; }
+  .edition-check { color: #ff4466; margin-right: 8px; width: 14px; display: inline-block; }
+  .edition-detail { color: #555; font-size: 11px; }
+
+  /* Track List */
+  .track-header { display: flex; padding: 8px 24px; border-bottom: 1px solid #2a2a2a; font-size: 12px; color: #555; }
+  .track-num { width: 32px; text-align: center; flex-shrink: 0; }
+  .track-title-col { flex: 1; }
+  .track-status-col { width: 60px; text-align: center; }
+  .track-dur { width: 50px; text-align: right; flex-shrink: 0; }
+
+  .track { display: flex; align-items: center; padding: 10px 24px; font-size: 14px; border-bottom: 1px solid #1f1f1f; }
+  .track:hover { background: #222; }
+  .track.playing { color: #ff4466; }
+  .track.missing { opacity: 0.45; }
+  .track .track-num { color: #555; font-size: 13px; }
+  .track .track-name { flex: 1; min-width: 0; }
+  .track .track-artist { font-size: 12px; color: #666; }
+  .track .track-badge { font-size: 10px; padding: 2px 6px; border-radius: 3px; margin-right: 8px; font-weight: 600; }
+  .track .track-badge.mp3 { background: #ff4466; color: #fff; }
+  .track .track-badge.flac { background: #22c55e; color: #fff; }
+  .track .track-badge.missing-badge { background: #333; color: #666; font-style: italic; }
+  .track .track-dur { color: #555; font-size: 13px; }
+
+  .disc-header { padding: 14px 24px 6px; font-size: 11px; color: #555; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px; border-top: 1px solid #2a2a2a; margin-top: 2px; }
+
+  .note { padding: 14px 24px; font-size: 12px; color: #999; background: #151515; border-top: 1px solid #222; line-height: 1.5; }
+  .note strong { color: #ddd; }
+  .note.bad { color: #ff4466; background: #1a1015; border-top-color: #331520; }
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- BEFORE: Current behavior                                       -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<div class="mock">
+  <div class="mock-label">❌ Before — Current behavior</div>
+  <div class="header">
+    <div class="cover"><img src="https://coverartarchive.org/release-group/76203bd0-466b-4802-a7ca-9b0097a3f862/front-250" alt=""></div>
+    <div class="meta">
+      <div class="meta-label">Album</div>
+      <h2>Fear Inoculum</h2>
+      <div class="meta-info"><span>Tool</span> · 2019 · 17 songs · 165 min</div>
+      <div class="library-badge">● In Your Library</div>
+    </div>
+  </div>
+  <div class="note bad">⚠ Picks 2-disc Deluxe (most tracks). Duplicate songs, restarting numbers. No Upgrade button. No way to see other editions. No indication of what's on disk vs missing.</div>
+  <div class="track-header"><div class="track-num">#</div><div class="track-title-col">Title</div><div class="track-dur"></div></div>
+  <div class="track playing"><div class="track-num">●</div><div class="track-name">Fear Inoculum<br><span class="track-artist">Tool</span></div><div class="track-dur">10:21</div></div>
+  <div class="track"><div class="track-num">2</div><div class="track-name">Pneuma<br><span class="track-artist">Tool</span></div><div class="track-dur">11:52</div></div>
+  <div class="track"><div class="track-num">3</div><div class="track-name">Invincible<br><span class="track-artist">Tool</span></div><div class="track-dur">12:44</div></div>
+  <div class="track"><div class="track-num">4</div><div class="track-name">Descending<br><span class="track-artist">Tool</span></div><div class="track-dur">13:37</div></div>
+  <div class="track"><div class="track-num">5</div><div class="track-name">Culling Voices<br><span class="track-artist">Tool</span></div><div class="track-dur">10:05</div></div>
+  <div class="track"><div class="track-num">6</div><div class="track-name">Chocolate Chip Trip<br><span class="track-artist">Tool</span></div><div class="track-dur">4:48</div></div>
+  <div class="track"><div class="track-num">7</div><div class="track-name">7empest<br><span class="track-artist">Tool</span></div><div class="track-dur">15:44</div></div>
+  <div class="track" style="opacity:.5"><div class="track-num">1</div><div class="track-name">Fear Inoculum<br><span class="track-artist">Tool</span></div><div class="track-dur">10:22</div></div>
+  <div class="track" style="opacity:.5"><div class="track-num">2</div><div class="track-name">Pneuma<br><span class="track-artist">Tool</span></div><div class="track-dur">11:53</div></div>
+  <div class="track"><div class="track-num">3</div><div class="track-name">Litanie contre la peur<br><span class="track-artist">Tool</span></div><div class="track-dur">2:14</div></div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- AFTER: Library view — Standard CD (what user downloaded)       -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<div class="mock">
+  <div class="mock-label lib">Library View — CD Standard (7 tracks on disk)</div>
+  <div class="header">
+    <div class="cover"><img src="https://coverartarchive.org/release-group/76203bd0-466b-4802-a7ca-9b0097a3f862/front-250" alt=""></div>
+    <div class="meta">
+      <div class="meta-label">Album</div>
+      <h2>Fear Inoculum</h2>
+      <div class="meta-info"><span>Tool</span> · 2019 · 7 songs · 79 min</div>
+      <div class="library-badge">● In Your Library</div>
+      <div class="btn-row">
+        <div class="btn-play"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
+        <button class="btn-upgrade">Upgrade</button>
+      </div>
+      <div class="edition-picker">
+        <div class="edition-current">CD · Limited Edition <span class="edition-arrow">▾</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><strong>MB tracklist with file status.</strong> Shows what MusicBrainz says this edition has. Each track shows whether you have it on disk and at what quality. Upgrade button visible.</div>
+  <div class="track-header"><div class="track-num">#</div><div class="track-title-col">Title</div><div class="track-dur"></div></div>
+  <div class="track playing"><div class="track-num">●</div><div class="track-name">Fear Inoculum<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">10:21</div></div>
+  <div class="track"><div class="track-num">2</div><div class="track-name">Pneuma<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">11:52</div></div>
+  <div class="track"><div class="track-num">3</div><div class="track-name">Invincible<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">12:44</div></div>
+  <div class="track"><div class="track-num">4</div><div class="track-name">Descending<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">13:37</div></div>
+  <div class="track"><div class="track-num">5</div><div class="track-name">Culling Voices<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">10:05</div></div>
+  <div class="track"><div class="track-num">6</div><div class="track-name">Chocolate Chip Trip<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">4:48</div></div>
+  <div class="track"><div class="track-num">7</div><div class="track-name">7empest<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">15:44</div></div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- AFTER: Switched to Digital Media — shows missing tracks        -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<div class="mock">
+  <div class="mock-label lib">Library View — Switched to Digital Media (3 missing)</div>
+  <div class="header">
+    <div class="cover"><img src="https://coverartarchive.org/release-group/76203bd0-466b-4802-a7ca-9b0097a3f862/front-250" alt=""></div>
+    <div class="meta">
+      <div class="meta-label">Album</div>
+      <h2>Fear Inoculum</h2>
+      <div class="meta-info"><span>Tool</span> · 2019 · 10 songs · 86 min</div>
+      <div class="library-badge">● 7 of 10 tracks in library</div>
+      <div class="btn-row">
+        <div class="btn-play"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
+        <button class="btn-upgrade">Upgrade</button>
+      </div>
+      <div class="edition-picker">
+        <div class="edition-current">Digital Media <span class="edition-arrow">▾</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><strong>Edition switch shows what you're missing.</strong> You have 7 of 10 tracks. The 3 interludes are marked as missing. Download/Upgrade would add only the missing tracks.</div>
+  <div class="track-header"><div class="track-num">#</div><div class="track-title-col">Title</div><div class="track-dur"></div></div>
+  <div class="track playing"><div class="track-num">●</div><div class="track-name">Fear Inoculum<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">10:22</div></div>
+  <div class="track"><div class="track-num">2</div><div class="track-name">Pneuma<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">11:53</div></div>
+  <div class="track missing"><div class="track-num">3</div><div class="track-name">Litanie contre la peur<br><span class="track-artist">Tool</span></div><span class="track-badge missing-badge">—</span><div class="track-dur">2:14</div></div>
+  <div class="track"><div class="track-num">4</div><div class="track-name">Invincible<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">12:44</div></div>
+  <div class="track missing"><div class="track-num">5</div><div class="track-name">Legion Inoculant<br><span class="track-artist">Tool</span></div><span class="track-badge missing-badge">—</span><div class="track-dur">3:09</div></div>
+  <div class="track"><div class="track-num">6</div><div class="track-name">Descending<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">13:37</div></div>
+  <div class="track"><div class="track-num">7</div><div class="track-name">Culling Voices<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">10:05</div></div>
+  <div class="track"><div class="track-num">8</div><div class="track-name">Chocolate Chip Trip<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">4:48</div></div>
+  <div class="track"><div class="track-num">9</div><div class="track-name">7empest<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">15:43</div></div>
+  <div class="track missing"><div class="track-num">10</div><div class="track-name">Mockingbeat<br><span class="track-artist">Tool</span></div><span class="track-badge missing-badge">—</span><div class="track-dur">2:05</div></div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- AFTER: Edition picker expanded                                  -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<div class="mock">
+  <div class="mock-label after">Edition Picker — Expanded</div>
+  <div class="header">
+    <div class="cover"><img src="https://coverartarchive.org/release-group/76203bd0-466b-4802-a7ca-9b0097a3f862/front-250" alt=""></div>
+    <div class="meta">
+      <div class="meta-label">Album</div>
+      <h2>Fear Inoculum</h2>
+      <div class="meta-info"><span>Tool</span> · 2019 · 7 songs · 79 min</div>
+      <div class="library-badge">● In Your Library</div>
+      <div class="btn-row">
+        <div class="btn-play"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
+        <button class="btn-upgrade">Upgrade</button>
+      </div>
+      <div class="edition-picker">
+        <div class="edition-current">CD · Limited Edition <span class="edition-arrow">▴</span></div>
+        <div class="edition-dropdown">
+          <div class="edition-option selected">
+            <div><span class="edition-check">✓</span>CD · Limited Edition</div>
+            <div class="edition-detail">7 tracks · 1 disc · 2019</div>
+          </div>
+          <div class="edition-option">
+            <div><span class="edition-check">&nbsp;</span>CD · Expanded Book Edition</div>
+            <div class="edition-detail">7 tracks · 1 disc · 2019</div>
+          </div>
+          <div class="edition-option">
+            <div><span class="edition-check">&nbsp;</span>Digital Media</div>
+            <div class="edition-detail">10 tracks · 1 disc · 2019</div>
+          </div>
+          <div class="edition-option">
+            <div><span class="edition-check">&nbsp;</span>2×CD · Limited Edition</div>
+            <div class="edition-detail">17 tracks · 2 discs · 2019</div>
+          </div>
+          <div class="edition-option">
+            <div><span class="edition-check">&nbsp;</span>5×Vinyl</div>
+            <div class="edition-detail">9 tracks · 5 discs · 2022</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><strong>All official editions listed.</strong> Bootlegs filtered out. User can switch freely — tracks update, file status badges update. Searching "fear inoculum deluxe" would pre-select the 2×CD edition.</div>
+  <div class="track-header"><div class="track-num">#</div><div class="track-title-col">Title</div><div class="track-dur"></div></div>
+  <div class="track"><div class="track-num">1</div><div class="track-name">Fear Inoculum<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">10:21</div></div>
+  <div class="track"><div class="track-num">2</div><div class="track-name">Pneuma<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">11:52</div></div>
+  <div class="track"><div class="track-num">3</div><div class="track-name">Invincible<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">12:44</div></div>
+  <div class="track"><div class="track-num">4</div><div class="track-name">Descending<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">13:37</div></div>
+  <div class="track"><div class="track-num">5</div><div class="track-name">Culling Voices<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">10:05</div></div>
+  <div class="track"><div class="track-num">6</div><div class="track-name">Chocolate Chip Trip<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">4:48</div></div>
+  <div class="track"><div class="track-num">7</div><div class="track-name">7empest<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">15:44</div></div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- AFTER: 2-disc Deluxe with disc headers + file status           -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<div class="mock">
+  <div class="mock-label lib">Library View — 2×CD Deluxe (disc headers + file status)</div>
+  <div class="header">
+    <div class="cover"><img src="https://coverartarchive.org/release-group/76203bd0-466b-4802-a7ca-9b0097a3f862/front-250" alt=""></div>
+    <div class="meta">
+      <div class="meta-label">Album</div>
+      <h2>Fear Inoculum</h2>
+      <div class="meta-info"><span>Tool</span> · 2019 · 17 songs · 165 min</div>
+      <div class="library-badge">● 7 of 17 tracks in library</div>
+      <div class="btn-row">
+        <div class="btn-play"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
+        <button class="btn-upgrade">Upgrade</button>
+      </div>
+      <div class="edition-picker">
+        <div class="edition-current">2×CD · Limited Edition <span class="edition-arrow">▾</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><strong>Multi-disc with proper headers.</strong> Disc 1 tracks match what's on disk (FLAC). Disc 2 tracks mostly missing — downloading would add only missing tracks.</div>
+  <div class="track-header"><div class="track-num">#</div><div class="track-title-col">Title</div><div class="track-dur"></div></div>
+
+  <div class="disc-header">Disc 1</div>
+  <div class="track"><div class="track-num">1</div><div class="track-name">Fear Inoculum<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">10:21</div></div>
+  <div class="track"><div class="track-num">2</div><div class="track-name">Pneuma<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">11:52</div></div>
+  <div class="track"><div class="track-num">3</div><div class="track-name">Invincible<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">12:44</div></div>
+  <div class="track"><div class="track-num">4</div><div class="track-name">Descending<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">13:37</div></div>
+  <div class="track"><div class="track-num">5</div><div class="track-name">Culling Voices<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">10:05</div></div>
+  <div class="track"><div class="track-num">6</div><div class="track-name">Chocolate Chip Trip<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">4:48</div></div>
+  <div class="track"><div class="track-num">7</div><div class="track-name">7empest<br><span class="track-artist">Tool</span></div><span class="track-badge flac">FLAC</span><div class="track-dur">15:44</div></div>
+
+  <div class="disc-header">Disc 2</div>
+  <div class="track missing"><div class="track-num">1</div><div class="track-name">Fear Inoculum<br><span class="track-artist">Tool</span></div><span class="track-badge missing-badge">—</span><div class="track-dur">10:22</div></div>
+  <div class="track missing"><div class="track-num">2</div><div class="track-name">Pneuma<br><span class="track-artist">Tool</span></div><span class="track-badge missing-badge">—</span><div class="track-dur">11:53</div></div>
+  <div class="track missing"><div class="track-num">3</div><div class="track-name">Litanie contre la peur<br><span class="track-artist">Tool</span></div><span class="track-badge missing-badge">—</span><div class="track-dur">2:14</div></div>
+  <div class="track missing"><div class="track-num">4</div><div class="track-name">Invincible<br><span class="track-artist">Tool</span></div><span class="track-badge missing-badge">—</span><div class="track-dur">12:44</div></div>
+  <div class="track missing"><div class="track-num">5</div><div class="track-name">Legion Inoculant<br><span class="track-artist">Tool</span></div><span class="track-badge missing-badge">—</span><div class="track-dur">3:09</div></div>
+  <div class="track missing"><div class="track-num">6</div><div class="track-name">Descending<br><span class="track-artist">Tool</span></div><span class="track-badge missing-badge">—</span><div class="track-dur">13:37</div></div>
+  <div class="track missing"><div class="track-num">7</div><div class="track-name">Culling Voices<br><span class="track-artist">Tool</span></div><span class="track-badge missing-badge">—</span><div class="track-dur">10:05</div></div>
+  <div class="track missing"><div class="track-num">8</div><div class="track-name">Chocolate Chip Trip<br><span class="track-artist">Tool</span></div><span class="track-badge missing-badge">—</span><div class="track-dur">4:48</div></div>
+  <div class="track missing"><div class="track-num">9</div><div class="track-name">7empest<br><span class="track-artist">Tool</span></div><span class="track-badge missing-badge">—</span><div class="track-dur">15:43</div></div>
+  <div class="track missing"><div class="track-num">10</div><div class="track-name">Mockingbeat<br><span class="track-artist">Tool</span></div><span class="track-badge missing-badge">—</span><div class="track-dur">2:05</div></div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- SEARCH: "fear inoculum deluxe" → pre-selects deluxe edition    -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<div class="mock">
+  <div class="mock-label search">Search "fear inoculum deluxe" → pre-selects Deluxe</div>
+  <div class="header">
+    <div class="cover"><img src="https://coverartarchive.org/release-group/76203bd0-466b-4802-a7ca-9b0097a3f862/front-250" alt=""></div>
+    <div class="meta">
+      <div class="meta-label">Album</div>
+      <h2>Fear Inoculum</h2>
+      <div class="meta-info"><span>Tool</span> · 2019 · 17 songs · 165 min</div>
+      <div class="btn-row">
+        <div class="btn-play"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
+      </div>
+      <div class="edition-picker">
+        <div class="edition-current">2×CD · Limited Edition <span class="edition-arrow">▾</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><strong>Search query matching.</strong> "deluxe" in the search query fuzzy-matches the 2×CD edition's disambiguation. Pre-selects it automatically so user lands on the right version.</div>
+  <div class="track-header"><div class="track-num">#</div><div class="track-title-col">Title</div><div class="track-dur"></div></div>
+  <div class="disc-header">Disc 1</div>
+  <div class="track"><div class="track-num">1</div><div class="track-name">Fear Inoculum<br><span class="track-artist">Tool</span></div><div class="track-dur">10:21</div></div>
+  <div class="track"><div class="track-num">2</div><div class="track-name">Pneuma<br><span class="track-artist">Tool</span></div><div class="track-dur">11:52</div></div>
+  <div class="track"><div class="track-num">3</div><div class="track-name">Invincible<br><span class="track-artist">Tool</span></div><div class="track-dur">12:44</div></div>
+  <div class="track"><div class="track-num">4</div><div class="track-name">Descending<br><span class="track-artist">Tool</span></div><div class="track-dur">13:37</div></div>
+  <div class="track"><div class="track-num">5</div><div class="track-name">Culling Voices<br><span class="track-artist">Tool</span></div><div class="track-dur">10:05</div></div>
+  <div class="track"><div class="track-num">6</div><div class="track-name">Chocolate Chip Trip<br><span class="track-artist">Tool</span></div><div class="track-dur">4:48</div></div>
+  <div class="track"><div class="track-num">7</div><div class="track-name">7empest<br><span class="track-artist">Tool</span></div><div class="track-dur">15:44</div></div>
+  <div class="disc-header">Disc 2</div>
+  <div class="track"><div class="track-num">1</div><div class="track-name">Fear Inoculum<br><span class="track-artist">Tool</span></div><div class="track-dur">10:22</div></div>
+  <div class="track"><div class="track-num">2</div><div class="track-name">Pneuma<br><span class="track-artist">Tool</span></div><div class="track-dur">11:53</div></div>
+  <div class="track"><div class="track-num">3</div><div class="track-name">Litanie contre la peur<br><span class="track-artist">Tool</span></div><div class="track-dur">2:14</div></div>
+</div>
+
+</body>
+</html>

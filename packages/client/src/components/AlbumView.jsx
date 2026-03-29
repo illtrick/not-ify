@@ -45,8 +45,6 @@ export function AlbumView({
   upgradeOutcome,
   updatePlaylist,
   trackError,
-  mbEditions,
-  switchEdition,
 }) {
   const telemetry = useTelemetry();
   const renderStartRef = useRef(null);
@@ -54,8 +52,6 @@ export function AlbumView({
   const [showStickyHeader, setShowStickyHeader] = useState(false);
   const [upgradeState, setUpgradeState] = useState(null); // null | 'triggering' | 'queued' | 'not_available' | 'error'
   const [lastUpgrade, setLastUpgrade] = useState(null); // { outcome, reason, quality, timestamp }
-  const [showEditionPicker, setShowEditionPicker] = useState(false);
-  const editionPickerRef = useRef(null);
 
   const lossyFormats = ['mp3', 'aac', 'm4a', 'ogg', 'opus'];
   const hasLossyTracks = useCallback(
@@ -144,22 +140,6 @@ export function AlbumView({
     } catch {}
   }, [selectedAlbum]);
 
-  // Close edition picker on click outside
-  useEffect(() => {
-    if (!showEditionPicker) return;
-    const handleClickOutside = (e) => {
-      if (editionPickerRef.current && !editionPickerRef.current.contains(e.target)) {
-        setShowEditionPicker(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showEditionPicker]);
-
-  // Reset edition picker when album changes
-  useEffect(() => {
-    setShowEditionPicker(false);
-  }, [selectedAlbum]);
 
   if (!selectedAlbum) return null;
   const { artist, album, year, coverArt: rawCoverArt, tracks, sources, fromSearch, trackCount, rgid } = selectedAlbum;
@@ -353,84 +333,14 @@ export function AlbumView({
               {durationStr ? <><Dot /><span>{durationStr}</span></> : null}
             </div>
 
-            {/* Edition picker pill */}
-            {mbEditions?.length > 1 && (() => {
-              const selected = mbEditions.find(e => e.selected);
-              const formatLabel = (ed) => {
-                const discPrefix = ed.discCount > 1 ? `${ed.discCount}\u00d7` : '';
-                const fmt = ed.format || '';
-                const disambig = ed.disambiguation ? ` \u00b7 ${ed.disambiguation}` : '';
-                return `${discPrefix}${fmt}${disambig}`;
-              };
-              const pillLabel = selected ? formatLabel(selected) : 'Select edition\u2026';
-              return (
-                <div ref={editionPickerRef} style={{ position: 'relative', marginTop: 8, marginBottom: 4 }}>
-                  <button
-                    onClick={() => setShowEditionPicker(prev => !prev)}
-                    style={{
-                      background: 'transparent', border: `1px solid ${COLORS.border}`, borderRadius: 16,
-                      padding: '4px 12px', fontSize: 12, color: COLORS.textSecondary, cursor: 'pointer',
-                      display: 'inline-flex', alignItems: 'center', gap: 4,
-                      transition: 'border-color 0.15s, color 0.15s',
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.borderColor = COLORS.textSecondary; e.currentTarget.style.color = COLORS.textPrimary; }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = COLORS.border; e.currentTarget.style.color = COLORS.textSecondary; }}
-                  >
-                    {pillLabel} <span style={{ fontSize: 10, marginLeft: 2 }}>{showEditionPicker ? '\u25b4' : '\u25be'}</span>
-                  </button>
-                  {showEditionPicker && (
-                    <div style={{
-                      position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 20,
-                      background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 8,
-                      boxShadow: '0 8px 32px rgba(0,0,0,0.5)', minWidth: 320, maxHeight: 300, overflowY: 'auto',
-                      padding: '4px 0',
-                    }}>
-                      {mbEditions.map((ed) => {
-                        const label = formatLabel(ed);
-                        const meta = [
-                          ed.trackCount ? `${ed.trackCount} tracks` : null,
-                          ed.discCount ? `${ed.discCount} disc${ed.discCount > 1 ? 's' : ''}` : null,
-                          ed.date ? ed.date.slice(0, 4) : null,
-                        ].filter(Boolean).join(' \u00b7 ');
-                        return (
-                          <div
-                            key={ed.mbid}
-                            onClick={() => { switchEdition(ed.mbid); setShowEditionPicker(false); }}
-                            style={{
-                              display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
-                              cursor: 'pointer', transition: 'background 0.1s',
-                              background: ed.selected ? 'rgba(233,69,96,0.1)' : 'transparent',
-                            }}
-                            onMouseEnter={e => e.currentTarget.style.background = ed.selected ? 'rgba(233,69,96,0.15)' : COLORS.hover}
-                            onMouseLeave={e => e.currentTarget.style.background = ed.selected ? 'rgba(233,69,96,0.1)' : 'transparent'}
-                          >
-                            <span style={{ width: 18, fontSize: 13, color: ed.selected ? COLORS.accent : 'transparent', flexShrink: 0 }}>
-                              {ed.selected ? '\u2713' : ''}
-                            </span>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontSize: 13, fontWeight: ed.selected ? 600 : 400, color: ed.selected ? COLORS.accent : COLORS.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                {label || 'Unknown format'}
-                              </div>
-                              {meta && <div style={{ fontSize: 11, color: COLORS.textSecondary, marginTop: 1 }}>{meta}</div>}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
+            {/* Edition picker removed — scoreRelease() picks the right standard edition.
+               Editions data stays in API for future use when availability can be guaranteed. */}
 
             {(selectedAlbum.inLibrary || isInLibrary(artist, album)) && (() => {
-              const selectedEdition = mbEditions?.find(e => e.selected);
-              const editionTrackCount = selectedEdition?.trackCount || mbTracks.length;
-              const libraryCount = activeTracks.length;
-              const showPartial = editionTrackCount > 0 && libraryCount > 0 && libraryCount < editionTrackCount;
               return (
                 <div style={{ fontSize: 12, color: COLORS.success, fontWeight: 600, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: COLORS.success, display: 'inline-block' }} />
-                  {showPartial ? `${libraryCount} of ${editionTrackCount} tracks in library` : 'In Your Library'}
+                  In Your Library
                 </div>
               );
             })()}
