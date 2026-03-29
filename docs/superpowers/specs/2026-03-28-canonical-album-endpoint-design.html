@@ -1,0 +1,192 @@
+<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Canonical Album Endpoint</title><style>body{background:#0e0e0e;color:#d4d4d4;font-family:Inter,system-ui,sans-serif;max-width:800px;margin:40px auto;padding:0 24px;line-height:1.7}h1{color:#ff4466;font-size:28px;border-bottom:2px solid #333;padding-bottom:12px}h2{color:#e0e0e0;font-size:20px;margin-top:36px;border-bottom:1px solid #2a2a2a;padding-bottom:8px}h3{color:#ccc;font-size:16px;margin-top:24px}code{background:#1e1e2e;padding:2px 6px;border-radius:4px;font-size:13px;color:#f8c555}pre{background:#1e1e2e;padding:16px;border-radius:8px;overflow-x:auto;border:1px solid #333}pre code{padding:0;background:none}table{width:100%;border-collapse:collapse;margin:16px 0}th{background:#1e1e2e;color:#aaa;text-align:left;padding:8px 12px;font-size:12px;text-transform:uppercase;letter-spacing:1px}td{padding:8px 12px;border-bottom:1px solid #222;font-size:14px}tr:hover td{background:#1a1a1a}ul,ol{padding-left:24px}li{margin:4px 0}strong{color:#e0e0e0}a{color:#ff4466}blockquote{border-left:3px solid #ff4466;padding-left:16px;color:#999;margin:16px 0}</style></head><body><h1>Canonical Album Detail Endpoint</h1>
+<h2>Problem</h2>
+<p>6 different entry points (search, library, recently played, now playing, session restore, edition switch) each construct their own ad-hoc <code>selectedAlbum</code> object with different fields. Result: same album shows different data depending on how you navigated to it — wrong duration, missing year, no edition picker, inconsistent cover art.</p>
+<h2>Design Principle</h2>
+<p>Every major music server (Navidrome, Jellyfin, Plex, Spotify, Funkwhale) uses the same pattern: <strong>one canonical album detail endpoint, all entry points resolve to an album ID, same component fetches by ID every time.</strong> No client-side assembly from heterogeneous caches.</p>
+<h2>Solution</h2>
+<h3><code>GET /api/album/:id</code></h3>
+<p>Single endpoint that returns the definitive album object. Accepts multiple ID formats with fallback resolution:</p>
+<pre><code>1. Direct album PK lookup
+2. rgid (MusicBrainz release group UUID)
+3. mbid (MusicBrainz release UUID)
+</code></pre>
+<p>Returns album metadata + tracks with file status inline (SQLite JOIN is trivial at &lt;10K albums). MB enrichment (editions) stays lazy/async on the client via existing <code>useMbTracks</code>.</p>
+<h3>Response Shape</h3>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;76203bd0-466b-4802-a7ca-9b0097a3f862&quot;,
+  &quot;artist&quot;: &quot;Tool&quot;,
+  &quot;album&quot;: &quot;Fear Inoculum&quot;,
+  &quot;year&quot;: 2019,
+  &quot;rgid&quot;: &quot;76203bd0-466b-4802-a7ca-9b0097a3f862&quot;,
+  &quot;mbid&quot;: &quot;464e0ca7-1055-4028-b5e3-ab83cbcbfd62&quot;,
+  &quot;coverArt&quot;: &quot;/api/cover/rg/76203bd0-466b-4802-a7ca-9b0097a3f862&quot;,
+  &quot;trackCount&quot;: 10,
+  &quot;duration&quot;: 5200,
+  &quot;inLibrary&quot;: true,
+  &quot;tracks&quot;: [
+    {
+      &quot;id&quot;: &quot;abc123&quot;,
+      &quot;title&quot;: &quot;Fear Inoculum&quot;,
+      &quot;artist&quot;: &quot;Tool&quot;,
+      &quot;trackNumber&quot;: 1,
+      &quot;discNumber&quot;: 1,
+      &quot;duration&quot;: 622,
+      &quot;mbid&quot;: null,
+      &quot;file&quot;: {
+        &quot;format&quot;: &quot;flac&quot;,
+        &quot;bitrate&quot;: 1411,
+        &quot;fileSize&quot;: 45000000,
+        &quot;filepath&quot;: &quot;/app/music/Tool/Fear Inoculum/01 Fear Inoculum.flac&quot;
+      }
+    }
+  ]
+}
+</code></pre>
+<p>When <code>file</code> is <code>null</code>, the track exists in MB metadata but has no local file (not downloaded).</p>
+<h3>404 Response</h3>
+<pre><code class="language-json">{ &quot;error&quot;: &quot;not_found&quot; }
+</code></pre>
+<p>Client falls back to MB-only flow for search results not yet in the database.</p>
+<h2>ID Strategy</h2>
+<p>Already correct — <code>generateAlbumId(artist, album, rgid)</code> returns rgid when available, otherwise a 16-char hash. No change needed.</p>
+<h2>Performance</h2>
+<ul>
+<li>Single indexed JOIN: albums → album_tracks → track_files. Sub-millisecond at this scale.</li>
+<li>No application-level caching needed for single-album lookups.</li>
+<li>No filesystem checks on read — trust the database, validate on write (existing <code>syncAlbum</code> pattern).</li>
+<li>MB enrichment (editions) stays client-side and async — doesn&#39;t block the album detail response.</li>
+</ul>
+<h2>Data Accuracy</h2>
+<ul>
+<li><strong>Trust DB, validate on write.</strong> <code>syncAlbum()</code> runs after every download. <code>scanAndSync()</code> on startup.</li>
+<li><strong>No re-scan on read.</strong> Same as Navidrome and Jellyfin.</li>
+<li><strong>Format upgrades:</strong> Download pipeline already calls <code>syncAlbum</code> + cache invalidation after completion.</li>
+<li><strong>MB metadata:</strong> Cached with TTLs in <code>mb_cache</code> table. Editions fetched lazily by client.</li>
+</ul>
+<h2>Migration: 3 Phases</h2>
+<h3>Phase 1: Add endpoint, migrate library entry point</h3>
+<ul>
+<li>Add <code>GET /api/album/:id</code> using existing <code>getAlbumWithTracks</code> DB function</li>
+<li>Add <code>getAlbumByAnyId(id)</code> helper to db.js (chains 3 existing lookups)</li>
+<li>Change <code>openAlbumFromLibrary</code> to call the endpoint by album ID</li>
+<li>Other 5 entry points unchanged — zero risk</li>
+</ul>
+<h3>Phase 2: Migrate remaining entry points</h3>
+<ul>
+<li><code>openRecentlyPlayed</code> → resolve by rgid through the endpoint</li>
+<li><code>openAlbumFromSearch</code> → check endpoint first (by rgid), fall back to MB flow if 404</li>
+<li><code>goToCurrentAlbum</code> → use album ID from current track</li>
+<li>Session restore → validate stored album against endpoint</li>
+</ul>
+<h3>Phase 3: Remove ad-hoc construction</h3>
+<ul>
+<li>Replace 6 different <code>setSelectedAlbum({...})</code> calls with one <code>openAlbum(id)</code> function</li>
+<li>Remove <code>fromSearch</code> flag — replace with <code>inLibrary</code> boolean from endpoint</li>
+<li>Remove <code>sources</code> from album object — attach separately when needed for download UI</li>
+<li>AlbumView renders based on data presence, not navigation context</li>
+</ul>
+<h2>Edition Picker: Guaranteed Visible</h2>
+<p>The edition picker currently doesn&#39;t show because the condition requires <code>fromSearch || mbid || rgid</code>, and library/recently-played albums lack these fields.</p>
+<p><strong>Fix in Phase 3:</strong> Remove <code>fromSearch</code> from AlbumView entirely. The edition picker condition simplifies to:</p>
+<pre><code class="language-javascript">mbEditions?.length &gt; 1
+</code></pre>
+<p>Since <code>mbEditions</code> only populates when <code>useMbTracks</code> loads MB data (which requires <code>rgid</code> on the album object), and the canonical endpoint always returns <code>rgid</code> when available, the picker will show from every entry point.</p>
+<p><strong>Quick fix in Phase 1 (to ship immediately):</strong> Change the condition from:</p>
+<pre><code class="language-javascript">mbEditions?.length &gt; 1 &amp;&amp; (fromSearch || selectedAlbum.mbid || rgid)
+</code></pre>
+<p>to:</p>
+<pre><code class="language-javascript">mbEditions?.length &gt; 1
+</code></pre>
+<p>This is safe right now because <code>mbEditions</code> is only populated when MB data loads.</p>
+<h2>File Organization: End-to-End Confirmation</h2>
+<p><strong>All editions land in the same folder.</strong> Verified:</p>
+<ol>
+<li><code>resolveAlbumDir(rgid, artist, album)</code> finds existing folder by rgid DB lookup (indexed, O(1))</li>
+<li>Standard CD downloads to <code>/app/music/Tool/Fear Inoculum/</code></li>
+<li>Later Digital Media download → same rgid → same folder → adds 3 missing interludes</li>
+<li>Later Deluxe download → same rgid → same folder → <code>replaceTracksIfBetter()</code> handles conflicts:<ul>
+<li>Same track, higher quality → replaces</li>
+<li>New track → adds</li>
+<li>Same track, lower quality → skips</li>
+</ul>
+</li>
+</ol>
+<p><strong>Multi-disc duplicate track names</strong> handled by <code>replaceTracksIfBetter()</code>:</p>
+<ul>
+<li>Matches by track number first, then title, then duration (5-sec tolerance)</li>
+<li>Disc 1 &quot;Fear Inoculum&quot; (track 1) and Disc 2 &quot;Fear Inoculum&quot; (track 1) disambiguated by title context when track numbers collide</li>
+<li>Both stored in <code>album_tracks</code> with <code>disc_number: 1</code> and <code>disc_number: 2</code></li>
+</ul>
+<p><strong>Library scanner picks up new files</strong> via <code>syncAlbum(artist, album)</code> called after every download completion. The scanner reads <code>.metadata.json</code> for MB track data, enriches scanned tracks, and upserts into <code>album_tracks</code> + <code>track_files</code>.</p>
+<h2>What Does NOT Change</h2>
+<ul>
+<li><code>resolveAlbumDir</code> — still rgid-based folder resolution</li>
+<li><code>useMbTracks</code> — still fetches editions and MB track data</li>
+<li>Cover art — still rgid-based with per-release fallback</li>
+<li>Download pipeline — still uses the same folder resolution</li>
+<li><code>.metadata.json</code> — unchanged</li>
+<li><code>replaceTracksIfBetter</code> — still handles quality comparison and dedup</li>
+</ul>
+<h2>Files to Modify</h2>
+<table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>File</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td><code>packages/server/src/services/db.js</code></td>
+<td>Add <code>getAlbumByAnyId()</code></td>
+</tr>
+<tr>
+<td>1</td>
+<td><code>packages/server/src/api/library.js</code></td>
+<td>Add <code>GET /api/album/:id</code> endpoint</td>
+</tr>
+<tr>
+<td>1</td>
+<td><code>packages/client/src/App.jsx</code></td>
+<td>Change <code>openAlbumFromLibrary</code> to fetch by ID</td>
+</tr>
+<tr>
+<td>1</td>
+<td><code>packages/shared/src/api-client.js</code></td>
+<td>Add <code>getAlbum(id)</code> function</td>
+</tr>
+<tr>
+<td>1</td>
+<td><code>packages/client/src/components/AlbumView.jsx</code></td>
+<td>Fix edition picker condition (quick fix)</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>packages/client/src/App.jsx</code></td>
+<td>Migrate remaining entry points to <code>openAlbum(id)</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>packages/client/src/App.jsx</code></td>
+<td>Remove ad-hoc construction, single <code>openAlbum(id)</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>packages/client/src/components/AlbumView.jsx</code></td>
+<td>Remove all <code>fromSearch</code> conditionals</td>
+</tr>
+</tbody></table>
+<h2>Verification</h2>
+<ol>
+<li><code>cd packages/server &amp;&amp; npx jest --no-cache</code> — all tests pass</li>
+<li><code>curl /api/album/{rgid}</code> returns complete album with tracks and file status</li>
+<li>Click album from library sidebar → same data as from search → same as recently played</li>
+<li>Edition picker visible from ALL entry points (library, search, recently played, now playing)</li>
+<li>Year, duration, cover art consistent everywhere</li>
+<li>Switch edition → correct tracklist with disc headers</li>
+<li>Download from different editions → all files land in same folder</li>
+<li>Upgrade (MP3 → FLAC) → same folder, files replaced by quality comparison</li>
+</ol>
+
+</body></html>
